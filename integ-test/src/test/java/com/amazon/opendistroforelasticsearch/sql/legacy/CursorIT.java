@@ -58,7 +58,7 @@ public class CursorIT extends SQLIntegTestCase {
   @Override
   protected void init() throws Exception {
     loadIndex(Index.ACCOUNT);
-    enableCursorClusterSetting();
+    //enableCursorClusterSetting();
   }
 
   /**
@@ -284,20 +284,23 @@ public class CursorIT extends SQLIntegTestCase {
 
   @Test
   public void defaultBehaviorWhenCursorSettingIsDisabled() throws IOException {
-    updateClusterSettings(new ClusterSetting(PERSISTENT, "opensearch.sql.cursor.enabled", "false"));
+    //updateClusterSettings(new ClusterSetting(PERSISTENT, "opensearch.sql.cursor.enabled", "false"));
     String query = StringUtils.format("SELECT firstname, email, state FROM %s", TEST_INDEX_ACCOUNT);
     JSONObject response = new JSONObject(executeFetchQuery(query, 100, JDBC));
     assertFalse(response.has(CURSOR));
 
+    /*
     updateClusterSettings(new ClusterSetting(PERSISTENT, "opensearch.sql.cursor.enabled", "true"));
     query = StringUtils.format("SELECT firstname, email, state FROM %s", TEST_INDEX_ACCOUNT);
     response = new JSONObject(executeFetchQuery(query, 100, JDBC));
     assertTrue(response.has(CURSOR));
 
     wipeAllClusterSettings();
+     */
   }
 
 
+  /*
   @Test
   public void testCursorSettings() throws IOException {
     // reverting enableCursorClusterSetting() in init() method before checking defaults
@@ -343,6 +346,7 @@ public class CursorIT extends SQLIntegTestCase {
 
     wipeAllClusterSettings();
   }
+  */
 
   @Test
   public void testCursorCloseAPI() throws IOException {
@@ -479,11 +483,6 @@ public class CursorIT extends SQLIntegTestCase {
 
   public void verifyDataRows(JSONArray dataRowsOne, JSONArray dataRowsTwo) {
     assertTrue(dataRowsOne.similar(dataRowsTwo));
-  }
-
-  private void enableCursorClusterSetting() throws IOException {
-    updateClusterSettings(
-        new ClusterSetting("persistent", "opensearch.sql.cursor.enabled", "true"));
   }
 
   public String executeFetchAsStringQuery(String query, String fetchSize, String requestType)

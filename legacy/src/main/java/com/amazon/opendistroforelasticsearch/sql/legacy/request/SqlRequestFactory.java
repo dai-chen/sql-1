@@ -103,7 +103,7 @@ public class SqlRequestFactory {
         } catch (JSONException e) {
             throw new IllegalArgumentException("Failed to parse field [" + SQL_FETCH_FIELD_NAME +"]", e);
         }
-        return fetchSize.orElse(LocalClusterState.state().getSettingValue(CURSOR_FETCH_SIZE));
+        return fetchSize.orElse(0);
     }
 
     private static List<PreparedStatementRequest.PreparedStatementParameter> parseParameters(

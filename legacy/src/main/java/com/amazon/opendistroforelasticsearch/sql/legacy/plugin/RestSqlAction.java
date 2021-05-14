@@ -26,7 +26,6 @@
 
 package com.amazon.opendistroforelasticsearch.sql.legacy.plugin;
 
-import static com.amazon.opendistroforelasticsearch.sql.legacy.plugin.SqlSettings.CURSOR_ENABLED;
 import static com.amazon.opendistroforelasticsearch.sql.legacy.plugin.SqlSettings.QUERY_ANALYSIS_ENABLED;
 import static com.amazon.opendistroforelasticsearch.sql.legacy.plugin.SqlSettings.QUERY_ANALYSIS_SEMANTIC_SUGGESTION;
 import static com.amazon.opendistroforelasticsearch.sql.legacy.plugin.SqlSettings.QUERY_ANALYSIS_SEMANTIC_THRESHOLD;
@@ -165,7 +164,7 @@ public class RestSqlAction extends BaseRestHandler {
 
             Format format = SqlRequestParam.getFormat(request.params());
 
-            if (isNewEngineEnabled() && isCursorDisabled()) {
+            if (isNewEngineEnabled()) {
                 // Route request to new query engine if it's supported already
                 SQLQueryRequest newSqlRequest = new SQLQueryRequest(sqlRequest.getJsonContent(),
                     sqlRequest.getSql(), request.path(), request.params());
@@ -283,11 +282,6 @@ public class RestSqlAction extends BaseRestHandler {
 
     private boolean isNewEngineEnabled() {
         return LocalClusterState.state().getSettingValue(SQL_NEW_ENGINE_ENABLED);
-    }
-
-    private boolean isCursorDisabled() {
-        Boolean isEnabled = LocalClusterState.state().getSettingValue(CURSOR_ENABLED);
-        return Boolean.FALSE.equals(isEnabled);
     }
 
     private static ColumnTypeProvider performAnalysis(String sql) {
