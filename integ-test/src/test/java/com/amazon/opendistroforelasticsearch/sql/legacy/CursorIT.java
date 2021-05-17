@@ -132,7 +132,7 @@ public class CursorIT extends SQLIntegTestCase {
     String selectQuery = StringUtils.format("SELECT firstname, state FROM %s", TEST_INDEX_ACCOUNT);
     JSONObject response = new JSONObject(executeFetchQuery(selectQuery, 0, JDBC));
     assertFalse(response.has(CURSOR));
-    assertThat(response.getJSONArray(DATAROWS).length(), equalTo(200));
+    assertThat(response.getJSONArray(DATAROWS).length(), equalTo(1000)); // Default limit in new engine is 1000
   }
 
   /**
@@ -284,19 +284,19 @@ public class CursorIT extends SQLIntegTestCase {
 
   @Test
   public void defaultBehaviorWhenCursorSettingIsDisabled() throws IOException {
-    //updateClusterSettings(new ClusterSetting(PERSISTENT, "opensearch.sql.cursor.enabled", "false"));
+    /*
+    updateClusterSettings(new ClusterSetting(PERSISTENT, "opensearch.sql.cursor.enabled", "false"));
     String query = StringUtils.format("SELECT firstname, email, state FROM %s", TEST_INDEX_ACCOUNT);
     JSONObject response = new JSONObject(executeFetchQuery(query, 100, JDBC));
     assertFalse(response.has(CURSOR));
+    */
 
-    /*
-    updateClusterSettings(new ClusterSetting(PERSISTENT, "opensearch.sql.cursor.enabled", "true"));
-    query = StringUtils.format("SELECT firstname, email, state FROM %s", TEST_INDEX_ACCOUNT);
-    response = new JSONObject(executeFetchQuery(query, 100, JDBC));
+    //updateClusterSettings(new ClusterSetting(PERSISTENT, "opensearch.sql.cursor.enabled", "true"));
+    String query = StringUtils.format("SELECT firstname, email, state FROM %s", TEST_INDEX_ACCOUNT);
+    JSONObject response = new JSONObject(executeFetchQuery(query, 100, JDBC));
     assertTrue(response.has(CURSOR));
 
-    wipeAllClusterSettings();
-     */
+    //wipeAllClusterSettings();
   }
 
 
