@@ -42,6 +42,7 @@ import java.util.Arrays;
 import java.util.List;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.junit.Assume;
 import org.junit.Test;
 import org.opensearch.client.Request;
 import org.opensearch.client.Response;
@@ -132,7 +133,7 @@ public class CursorIT extends SQLIntegTestCase {
     String selectQuery = StringUtils.format("SELECT firstname, state FROM %s", TEST_INDEX_ACCOUNT);
     JSONObject response = new JSONObject(executeFetchQuery(selectQuery, 0, JDBC));
     assertFalse(response.has(CURSOR));
-    assertThat(response.getJSONArray(DATAROWS).length(), equalTo(1000)); // Default limit in new engine is 1000
+    assertThat(response.getJSONArray(DATAROWS).length(), equalTo(isNewQueryEngineEabled() ? 1000 : 200)); // Default limit in new engine is 1000
   }
 
   /**
