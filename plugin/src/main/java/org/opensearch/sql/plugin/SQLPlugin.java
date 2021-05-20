@@ -59,6 +59,7 @@ import org.opensearch.script.ScriptService;
 import org.opensearch.sql.legacy.esdomain.LocalClusterState;
 import org.opensearch.sql.legacy.executor.AsyncRestExecutor;
 import org.opensearch.sql.legacy.metrics.Metrics;
+import org.opensearch.sql.legacy.plugin.LegacyOpenDistroSqlSettings;
 import org.opensearch.sql.legacy.plugin.RestSqlAction;
 import org.opensearch.sql.legacy.plugin.RestSqlSettingsAction;
 import org.opensearch.sql.legacy.plugin.RestSqlStatsAction;
@@ -78,7 +79,8 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin {
   /**
    * Sql plugin specific settings in OpenSearch cluster settings.
    */
-  private final SqlSettings sqlSettings = new SqlSettings();
+  private final LegacyOpenDistroSqlSettings legacySqlSettings = new LegacyOpenDistroSqlSettings();
+  private final SqlSettings sqlSettings = new SqlSettings(legacySqlSettings);
 
   private ClusterService clusterService;
 
@@ -157,8 +159,11 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin {
   @Override
   public List<Setting<?>> getSettings() {
     ImmutableList<Setting<?>> settings =
-        new ImmutableList.Builder<Setting<?>>().addAll(sqlSettings.getSettings())
-            .addAll(OpenSearchSettings.pluginSettings()).build();
+        new ImmutableList.Builder<Setting<?>>()
+            .addAll(sqlSettings.getSettings())
+            .addAll(legacySqlSettings.getSettings())
+            .addAll(OpenSearchSettings.pluginSettings())
+            .build();
     return settings;
   }
 

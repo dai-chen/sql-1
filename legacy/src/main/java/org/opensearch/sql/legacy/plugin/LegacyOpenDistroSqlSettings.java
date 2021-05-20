@@ -29,6 +29,7 @@ package org.opensearch.sql.legacy.plugin;
 import static java.util.Collections.unmodifiableMap;
 import static org.opensearch.common.settings.Setting.Property.Dynamic;
 import static org.opensearch.common.settings.Setting.Property.NodeScope;
+import static org.opensearch.common.settings.Setting.Property.Deprecated;
 import static org.opensearch.common.unit.TimeValue.timeValueMinutes;
 
 import java.util.ArrayList;
@@ -36,36 +37,35 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.opensearch.common.settings.Setting;
+import org.opensearch.common.settings.Setting.Property;
 import org.opensearch.sql.legacy.executor.Format;
 
 /**
  * SQL plugin settings
  */
-public class SqlSettings {
+public class LegacyOpenDistroSqlSettings {
 
     /**
      * Get plugin settings stored in cluster setting. Why not use OpenSearch slow log settings consistently?
      * 1) It's per-index setting.
      * 2) It has separate setting for Query and Fetch phase which are all OpenSearch internal concepts.
      */
-    public static final String SQL_ENABLED = "plugins.sql.enabled";
-    public static final String QUERY_SLOWLOG = "plugins.sql.query.slowlog";
-    public static final String METRICS_ROLLING_WINDOW = "plugins.sql.metrics.rollingwindow";
-    public static final String METRICS_ROLLING_INTERVAL = "plugins.sql.metrics.rollinginterval";
+    public static final String SQL_ENABLED = "opendistro.sql.enabled";
+    public static final String QUERY_SLOWLOG = "opendistro.sql.query.slowlog";
+    public static final String METRICS_ROLLING_WINDOW = "opendistro.sql.metrics.rollingwindow";
+    public static final String METRICS_ROLLING_INTERVAL = "opendistro.sql.metrics.rollinginterval";
 
-    public static final String CURSOR_ENABLED= "plugins.sql.cursor.enabled";
-    public static final String CURSOR_FETCH_SIZE = "plugins.sql.cursor.fetch_size";
-    public static final String CURSOR_KEEPALIVE= "plugins.sql.cursor.keep_alive";
-
-    public static final String DEFAULT_RESPONSE_FORMAT = Format.JDBC.getFormatName();
+    public static final String CURSOR_ENABLED= "opendistro.sql.cursor.enabled";
+    public static final String CURSOR_FETCH_SIZE = "opendistro.sql.cursor.fetch_size";
+    public static final String CURSOR_KEEPALIVE= "opendistro.sql.cursor.keep_alive";
 
     private final Map<String, Setting<?>> settings;
 
-    @SuppressWarnings("unchecked")
-    public SqlSettings(LegacyOpenDistroSqlSettings legacySettings) {
+    public LegacyOpenDistroSqlSettings() {
         Map<String, Setting<?>> settings = new HashMap<>();
-        settings.put(SQL_ENABLED, Setting.boolSetting(SQL_ENABLED,
-            (Setting<Boolean>) legacySettings.getSetting(LegacyOpenDistroSqlSettings.SQL_ENABLED), NodeScope, Dynamic));
+        settings.put(SQL_ENABLED, Setting.boolSetting(SQL_ENABLED, true, NodeScope, Dynamic, Deprecated));
+
+        /*
         settings.put(QUERY_SLOWLOG, Setting.intSetting(QUERY_SLOWLOG, 2, NodeScope, Dynamic));
 
         settings.put(METRICS_ROLLING_WINDOW, Setting.longSetting(METRICS_ROLLING_WINDOW, 3600L, 2L,
@@ -79,11 +79,12 @@ public class SqlSettings {
                 1, NodeScope, Dynamic));
         settings.put(CURSOR_KEEPALIVE, Setting.positiveTimeSetting(CURSOR_KEEPALIVE, timeValueMinutes(1),
                 NodeScope, Dynamic));
+         */
 
         this.settings = unmodifiableMap(settings);
     }
 
-    public SqlSettings(Map<String, Setting<?>> settings) {
+    public LegacyOpenDistroSqlSettings(Map<String, Setting<?>> settings) {
         this.settings = unmodifiableMap(settings);
     }
 
