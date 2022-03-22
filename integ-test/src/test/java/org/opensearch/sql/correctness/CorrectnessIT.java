@@ -10,10 +10,7 @@ import static org.opensearch.sql.util.TestUtils.getResourceFilePath;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
 import com.google.common.collect.Maps;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.URL;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -27,18 +24,13 @@ import org.apache.logging.log4j.Logger;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.opensearch.client.RestClient;
-import org.opensearch.common.Strings;
-import org.opensearch.common.transport.TransportAddress;
 import org.opensearch.sql.correctness.report.TestReport;
 import org.opensearch.sql.correctness.runner.ComparisonTest;
 import org.opensearch.sql.correctness.runner.connection.DBConnection;
 import org.opensearch.sql.correctness.runner.connection.JDBCConnection;
 import org.opensearch.sql.correctness.runner.connection.OpenSearchConnection;
 import org.opensearch.sql.correctness.testset.TestDataSet;
-import org.opensearch.sql.legacy.CustomExternalTestCluster;
-import org.opensearch.test.ExternalTestCluster;
 import org.opensearch.test.OpenSearchIntegTestCase;
-import org.opensearch.test.TestCluster;
 
 /**
  * Correctness integration test by performing comparison test with other databases.
@@ -141,31 +133,4 @@ public class CorrectnessIT extends OpenSearchIntegTestCase {
     String dateTime = df.format(new Date());
     return "report_" + dateTime + ".json";
   }
-
-  @Override
-  protected TestCluster buildTestCluster(Scope scope, long seed) throws IOException {
-
-    String clusterAddresses = System.getProperty(TESTS_CLUSTER);
-
-//    if (Strings.hasLength(clusterAddresses)) {
-//      String[] stringAddresses = clusterAddresses.split(",");
-//      TransportAddress[] transportAddresses = new TransportAddress[stringAddresses.length];
-//      int i = 0;
-//      for (String stringAddress : stringAddresses) {
-//        URL url = new URL("http://" + stringAddress);
-//        InetAddress inetAddress = InetAddress.getByName(url.getHost());
-//        transportAddresses[i++] =
-//            new TransportAddress(new InetSocketAddress(inetAddress, url.getPort()));
-//      }
-//      return new ExternalTestCluster(createTempDir(),
-//              externalClusterClientSettings(),
-//              getClientWrapper(),
-//              clusterName,
-//              nodePlugins(),
-//              transportAddresses);
-//
-//    }
-    return super.buildTestCluster(scope, seed);
-  }
-
 }
