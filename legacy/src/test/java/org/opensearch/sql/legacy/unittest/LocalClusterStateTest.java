@@ -125,10 +125,7 @@ public class LocalClusterStateTest {
         IndexMappings indexMappings = LocalClusterState.state().getFieldMappings(new String[]{INDEX_NAME});
         Assert.assertNotNull(indexMappings);
 
-        TypeMappings typeMappings = indexMappings.mapping(INDEX_NAME);
-        Assert.assertNotNull(typeMappings);
-
-        FieldMappings fieldMappings = typeMappings.mapping(TYPE_NAME);
+        FieldMappings fieldMappings = indexMappings.mapping(INDEX_NAME);
         Assert.assertNotNull(fieldMappings);
 
         Assert.assertEquals("text", fieldMappings.mapping("address").get("type"));
@@ -143,8 +140,7 @@ public class LocalClusterStateTest {
     @Test
     public void getMappingForInvalidField() {
         IndexMappings indexMappings = LocalClusterState.state().getFieldMappings(new String[]{INDEX_NAME});
-        TypeMappings typeMappings = indexMappings.mapping(INDEX_NAME);
-        FieldMappings fieldMappings = typeMappings.mapping(TYPE_NAME);
+        FieldMappings fieldMappings = indexMappings.mapping(INDEX_NAME);
 
         Assert.assertNull(fieldMappings.mapping("work-email"));
         Assert.assertNull(fieldMappings.mapping("manager.home-address"));
@@ -167,7 +163,7 @@ public class LocalClusterStateTest {
         for (int i = 0; i < 10; i++) {
             LocalClusterState.state().getFieldMappings(new String[]{INDEX_NAME});
         }
-        verify(mockService.state().metadata(), times(1)).findMappings(eq(new String[]{INDEX_NAME}), any(), any());
+        verify(mockService.state().metadata(), times(1)).findMappings(eq(new String[]{INDEX_NAME}), any());
 
         // 2.Fire cluster state change event
         Assert.assertNotNull(listener[0]);
@@ -179,7 +175,7 @@ public class LocalClusterStateTest {
         for (int i = 0; i < 5; i++) {
             LocalClusterState.state().getFieldMappings(new String[]{INDEX_NAME});
         }
-        verify(mockService.state().metadata(), times(2)).findMappings(eq(new String[]{INDEX_NAME}), any(), any());
+        verify(mockService.state().metadata(), times(2)).findMappings(eq(new String[]{INDEX_NAME}), any());
     }
 
     @Test

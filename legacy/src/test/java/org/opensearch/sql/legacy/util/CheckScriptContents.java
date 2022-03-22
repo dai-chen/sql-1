@@ -204,11 +204,12 @@ public class CheckScriptContents {
             ActionFuture<GetFieldMappingsResponse> mockActionResp = mock(ActionFuture.class);
             when(mockIndexClient.getFieldMappings(any(GetFieldMappingsRequest.class))).thenReturn(mockActionResp);
 
-            when(mockActionResp.actionGet()).thenReturn(GetFieldMappingsResponse.fromXContent(createParser(mappings)));
+            //TODO below throwable as well
+            //when(mockActionResp.actionGet()).thenReturn(GetFieldMappingsResponse.FieldMappingMetadata.fromXContent(createParser(mappings)));
 
             mockLocalClusterState(mappings);
 
-        } catch (IOException e) {
+        } catch (Throwable e) {
             throw new ParserException(e.getMessage());
         }
 
@@ -237,7 +238,7 @@ public class CheckScriptContents {
         when(mockState.metadata()).thenReturn(mockMetaData);
         try {
             ImmutableOpenMap.Builder<String, MappingMetadata> builder = ImmutableOpenMap.builder();
-            builder.put(TestsConstants.TEST_INDEX_BANK, IndexMetadata.fromXContent(createParser(mappings)).getMappings());
+            builder.put(TestsConstants.TEST_INDEX_BANK, IndexMetadata.fromXContent(createParser(mappings)).mapping());
             when(mockMetaData.findMappings(any(),  any())).thenReturn(builder.build());
         }
         catch (IOException e) {
