@@ -11,6 +11,7 @@ import static org.opensearch.sql.doctest.core.request.SqlRequestFormat.OPENSEARC
 import static org.opensearch.sql.doctest.core.response.SqlResponseFormat.IGNORE_RESPONSE;
 import static org.opensearch.sql.doctest.core.response.SqlResponseFormat.TABLE_RESPONSE;
 
+import org.opensearch.sql.doctest.core.DocTest;
 import org.opensearch.sql.doctest.core.annotation.DocTestConfig;
 import org.opensearch.sql.doctest.core.annotation.Section;
 import org.opensearch.sql.doctest.core.builder.Example;

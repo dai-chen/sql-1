@@ -36,6 +36,7 @@ import org.opensearch.sql.correctness.runner.connection.JDBCConnection;
 import org.opensearch.sql.correctness.runner.connection.OpenSearchConnection;
 import org.opensearch.sql.correctness.testset.TestDataSet;
 import org.opensearch.sql.legacy.CustomExternalTestCluster;
+import org.opensearch.test.ExternalTestCluster;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.test.TestCluster;
 
@@ -43,7 +44,7 @@ import org.opensearch.test.TestCluster;
  * Correctness integration test by performing comparison test with other databases.
  */
 @OpenSearchIntegTestCase.SuiteScopeTestCase
-@OpenSearchIntegTestCase.ClusterScope(scope = OpenSearchIntegTestCase.Scope.SUITE, numDataNodes = 3, supportsDedicatedMasters = false, transportClientRatio = 1)
+@OpenSearchIntegTestCase.ClusterScope(scope = OpenSearchIntegTestCase.Scope.SUITE, numDataNodes = 3, supportsDedicatedMasters = false)
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public class CorrectnessIT extends OpenSearchIntegTestCase {
 
@@ -146,19 +147,24 @@ public class CorrectnessIT extends OpenSearchIntegTestCase {
 
     String clusterAddresses = System.getProperty(TESTS_CLUSTER);
 
-    if (Strings.hasLength(clusterAddresses)) {
-      String[] stringAddresses = clusterAddresses.split(",");
-      TransportAddress[] transportAddresses = new TransportAddress[stringAddresses.length];
-      int i = 0;
-      for (String stringAddress : stringAddresses) {
-        URL url = new URL("http://" + stringAddress);
-        InetAddress inetAddress = InetAddress.getByName(url.getHost());
-        transportAddresses[i++] =
-            new TransportAddress(new InetSocketAddress(inetAddress, url.getPort()));
-      }
-      return new CustomExternalTestCluster(createTempDir(), externalClusterClientSettings(),
-          transportClientPlugins(), transportAddresses);
-    }
+//    if (Strings.hasLength(clusterAddresses)) {
+//      String[] stringAddresses = clusterAddresses.split(",");
+//      TransportAddress[] transportAddresses = new TransportAddress[stringAddresses.length];
+//      int i = 0;
+//      for (String stringAddress : stringAddresses) {
+//        URL url = new URL("http://" + stringAddress);
+//        InetAddress inetAddress = InetAddress.getByName(url.getHost());
+//        transportAddresses[i++] =
+//            new TransportAddress(new InetSocketAddress(inetAddress, url.getPort()));
+//      }
+//      return new ExternalTestCluster(createTempDir(),
+//              externalClusterClientSettings(),
+//              getClientWrapper(),
+//              clusterName,
+//              nodePlugins(),
+//              transportAddresses);
+//
+//    }
     return super.buildTestCluster(scope, seed);
   }
 

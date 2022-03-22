@@ -44,7 +44,7 @@ import org.opensearch.test.TestCluster;
 @TestMethodProviders({DocTest.SectionMethod.class})
 @TestCaseOrdering(DocTest.SectionOrder.class)
 @OpenSearchIntegTestCase.SuiteScopeTestCase
-@ClusterScope(scope = SUITE, numDataNodes = 1, supportsDedicatedMasters = false, transportClientRatio = 1)
+@ClusterScope(scope = SUITE, numDataNodes = 1, supportsDedicatedMasters = false)
 @ThreadLeakScope(Scope.NONE)
 public abstract class DocTest extends OpenSearchIntegTestCase implements DocBuilder {
 
@@ -115,21 +115,21 @@ public abstract class DocTest extends OpenSearchIntegTestCase implements DocBuil
   @Override
   protected TestCluster buildTestCluster(Scope scope, long seed) throws IOException {
 
-    String clusterAddresses = System.getProperty(TESTS_CLUSTER);
-
-    if (Strings.hasLength(clusterAddresses)) {
-      String[] stringAddresses = clusterAddresses.split(",");
-      TransportAddress[] transportAddresses = new TransportAddress[stringAddresses.length];
-      int i = 0;
-      for (String stringAddress : stringAddresses) {
-        URL url = new URL("http://" + stringAddress);
-        InetAddress inetAddress = InetAddress.getByName(url.getHost());
-        transportAddresses[i++] =
-            new TransportAddress(new InetSocketAddress(inetAddress, url.getPort()));
-      }
-      return new CustomExternalTestCluster(createTempDir(), externalClusterClientSettings(),
-          transportClientPlugins(), transportAddresses);
-    }
+//    String clusterAddresses = System.getProperty(TESTS_CLUSTER);
+//
+//    if (Strings.hasLength(clusterAddresses)) {
+//      String[] stringAddresses = clusterAddresses.split(",");
+//      TransportAddress[] transportAddresses = new TransportAddress[stringAddresses.length];
+//      int i = 0;
+//      for (String stringAddress : stringAddresses) {
+//        URL url = new URL("http://" + stringAddress);
+//        InetAddress inetAddress = InetAddress.getByName(url.getHost());
+//        transportAddresses[i++] =
+//            new TransportAddress(new InetSocketAddress(inetAddress, url.getPort()));
+//      }
+//      return new CustomExternalTestCluster(createTempDir(), externalClusterClientSettings(),
+//          transportClientPlugins(), transportAddresses);
+//    }
     return super.buildTestCluster(scope, seed);
   }
 
