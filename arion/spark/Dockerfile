@@ -40,9 +40,9 @@ EXPOSE 4040 8080 7077 6066 10000
 # CMD ["/usr/bin/supervisord"]
 RUN mkdir -p $SPARK_LOG_DIR && \
 touch $SPARK_MASTER_LOG && \
-touch $SPARK_WORKER_LOG && \
-ln -sf /dev/stdout $SPARK_MASTER_LOG && \
-ln -sf /dev/stdout $SPARK_WORKER_LOG
+touch $SPARK_WORKER_LOG
+# ln -sf /dev/stdout $SPARK_MASTER_LOG && \
+# ln -sf /dev/stdout $SPARK_WORKER_LOG
 
 COPY start-spark.sh /
 
