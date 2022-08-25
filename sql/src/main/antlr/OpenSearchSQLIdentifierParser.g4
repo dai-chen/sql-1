@@ -62,5 +62,5 @@ keywordsCanBeId
     | FIELD | D | T | TS // OD SQL and ODBC special
     | COUNT | SUM | AVG | MAX | MIN
     | TIMESTAMP | DATE | TIME | DAYOFWEEK
-    | FIRST | LAST
+    | FIRST | LAST | SCORE | TYPE
     ;

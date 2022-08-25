@@ -60,6 +60,12 @@ class SQLSyntaxParserTest {
   }
 
   @Test
+  public void canParseFieldNameWithReservedKeyword() {
+    assertNotNull(parser.parse("SELECT type FROM account"));
+    assertNotNull(parser.parse("SELECT score FROM account"));
+  }
+
+  @Test
   public void canParseIndexNameWithDate() {
     assertNotNull(parser.parse("SELECT * FROM logs_2020_01"));
     assertNotNull(parser.parse("SELECT * FROM logs-2020-01"));
