@@ -1,2 +1,2 @@
-SELECT FlightDelay FROM opensearch_dashboards_sample_data_flights ORDER BY FlightDelay IS NULL
-SELECT FlightDelay FROM opensearch_dashboards_sample_data_flights ORDER BY FlightDelay IS NOT NULL
+SELECT FlightDelay AS delay FROM opensearch_dashboards_sample_data_flights ORDER BY delay IS NULL
+SELECT FlightDelay AS delay FROM opensearch_dashboards_sample_data_flights ORDER BY delay IS NOT NULL

@@ -14,11 +14,15 @@ import static org.mockito.Mockito.when;
 import static org.opensearch.sql.ast.dsl.AstDSL.argument;
 import static org.opensearch.sql.ast.dsl.AstDSL.booleanLiteral;
 import static org.opensearch.sql.ast.dsl.AstDSL.field;
+import static org.opensearch.sql.ast.dsl.AstDSL.function;
 import static org.opensearch.sql.ast.dsl.AstDSL.qualifiedName;
+import static org.opensearch.sql.ast.dsl.AstDSL.sort;
 import static org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_FIRST;
 import static org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_LAST;
 import static org.opensearch.sql.ast.tree.Sort.SortOrder.ASC;
 import static org.opensearch.sql.ast.tree.Sort.SortOrder.DESC;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.IS_NOT_NULL;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.IS_NULL;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -82,6 +86,36 @@ class AstSortBuilderTest {
               ImmutableList.of(field("name", expect))),
           sortBuilder.visitOrderByClause(orderByClause).attach(child));
     });
+  }
+
+  @Test
+  void can_build_sort_node_with_alias_in_is_null_clause_replaced() {
+    when(querySpec.getOrderByItems()).thenReturn(ImmutableList.of(
+        function(IS_NULL.getName().getFunctionName(), qualifiedName("name"))));
+    when(querySpec.getOrderByOptions()).thenReturn(ImmutableList.of(SortOption.DEFAULT_ASC));
+    when(querySpec.replaceIfAliasOrOrdinal(qualifiedName("n"))).thenReturn(qualifiedName("name"));
+
+    AstSortBuilder sortBuilder = new AstSortBuilder(querySpec);
+    assertEquals(
+        sort(child, field(
+            function(IS_NULL.getName().getFunctionName(), qualifiedName("name")),
+            new Argument("asc", booleanLiteral(true)))),
+        sortBuilder.visitOrderByClause(orderByClause).attach(child));
+  }
+
+  @Test
+  void can_build_sort_node_with_alias_in_is_not_null_clause_replaced() {
+    when(querySpec.getOrderByItems()).thenReturn(ImmutableList.of(
+        function(IS_NOT_NULL.getName().getFunctionName(), qualifiedName("name"))));
+    when(querySpec.getOrderByOptions()).thenReturn(ImmutableList.of(SortOption.DEFAULT_ASC));
+    when(querySpec.replaceIfAliasOrOrdinal(qualifiedName("n"))).thenReturn(qualifiedName("name"));
+
+    AstSortBuilder sortBuilder = new AstSortBuilder(querySpec);
+    assertEquals(
+        sort(child, field(
+            function(IS_NOT_NULL.getName().getFunctionName(), qualifiedName("name")),
+            new Argument("asc", booleanLiteral(true)))),
+        sortBuilder.visitOrderByClause(orderByClause).attach(child));
   }
 
 }
