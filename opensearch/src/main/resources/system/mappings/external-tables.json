@@ -1,0 +1,33 @@
+{
+  "mappings": {
+    "_meta": {
+      "version": 1
+    },
+    "properties": {
+      "catalog": {
+        "type": "keyword"
+      },
+      "schema": {
+        "type": "keyword"
+      },
+      "table": {
+        "type": "keyword"
+      },
+      "created_at": {
+        "type": "date"
+      },
+      "last_altered": {
+        "type": "date"
+      },
+      "location": {
+        "type": "keyword"
+      },
+      "file_format": {
+        "type": "keyword"
+      },
+      "row_serde_format": {
+        "type": "keyword"
+      }
+    }
+  }
+}
