@@ -192,6 +192,14 @@ class SQLSyntaxParserTest {
   }
 
   @Test
+  public void can_parse_join_queries() {
+    assertNotNull(parser.parse("SELECT t1.name, t2.name FROM table t1 JOIN table t2 "
+        + "ON t1.age = t2.age WHERE t2.account IS NOT NULL"));
+    assertNotNull(parser.parse("SELECT t1.name, t2.name FROM table t1 JOIN table t2 JOIN table t3" +
+        "ON t1.age = t2.age AND t2.account = t3.account"));
+  }
+
+  @Test
   public void can_parse_multi_match_relevance_function() {
     assertNotNull(parser.parse(
         "SELECT id FROM test WHERE multi_match(['address'], 'query')"));

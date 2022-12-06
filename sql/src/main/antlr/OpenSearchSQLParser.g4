@@ -114,16 +114,24 @@ selectElement
     ;
 
 fromClause
-    : FROM relation
+    : FROM relations
       (whereClause)?
       (groupByClause)?
       (havingClause)?
       (orderByClause)? // Place it under FROM for now but actually not necessary ex. A UNION B ORDER BY
     ;
 
+relations
+    : relation joinClause*
+    ;
+
 relation
     : tableName (AS? alias)?                                                #tableAsRelation
     | LR_BRACKET subquery=querySpecification RR_BRACKET AS? alias           #subqueryAsRelation
+    ;
+
+joinClause
+    : JOIN relation (ON expression)?
     ;
 
 whereClause

@@ -8,10 +8,15 @@ package org.opensearch.sql.sql.parser;
 
 import static java.util.Collections.emptyList;
 import static org.opensearch.sql.ast.dsl.AstDSL.qualifiedName;
+import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.DescribeStatementContext;
 import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.FromClauseContext;
 import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.HavingClauseContext;
+import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.JoinClauseContext;
+import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.LimitClauseContext;
+import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.RelationsContext;
 import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.SelectClauseContext;
 import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.SelectElementContext;
+import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.ShowStatementContext;
 import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.SubqueryAsRelationContext;
 import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.TableAsRelationContext;
 import static org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.WhereClauseContext;
@@ -29,6 +34,7 @@ import org.opensearch.sql.ast.expression.AllFields;
 import org.opensearch.sql.ast.expression.Function;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.Filter;
+import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Limit;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.Relation;
@@ -37,7 +43,6 @@ import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Values;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.common.utils.StringUtils;
-import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.QuerySpecificationContext;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParserBaseVisitor;
 import org.opensearch.sql.sql.parser.context.ParsingContext;
@@ -62,14 +67,14 @@ public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
   private final String query;
 
   @Override
-  public UnresolvedPlan visitShowStatement(OpenSearchSQLParser.ShowStatementContext ctx) {
+  public UnresolvedPlan visitShowStatement(ShowStatementContext ctx) {
     final UnresolvedExpression tableFilter = visitAstExpression(ctx.tableFilter());
     return new Project(Collections.singletonList(AllFields.of()))
         .attach(new Filter(tableFilter).attach(new Relation(qualifiedName(TABLE_INFO))));
   }
 
   @Override
-  public UnresolvedPlan visitDescribeStatement(OpenSearchSQLParser.DescribeStatementContext ctx) {
+  public UnresolvedPlan visitDescribeStatement(DescribeStatementContext ctx) {
     final Function tableFilter = (Function) visitAstExpression(ctx.tableFilter());
     final String tableName = tableFilter.getFuncArgs().get(1).toString();
     final Relation table = new Relation(qualifiedName(mappingTable(tableName.toString())));
@@ -128,7 +133,7 @@ public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
   }
 
   @Override
-  public UnresolvedPlan visitLimitClause(OpenSearchSQLParser.LimitClauseContext ctx) {
+  public UnresolvedPlan visitLimitClause(LimitClauseContext ctx) {
     return new Limit(
         Integer.parseInt(ctx.limit.getText()),
         ctx.offset == null ? 0 : Integer.parseInt(ctx.offset.getText())
@@ -137,7 +142,7 @@ public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
 
   @Override
   public UnresolvedPlan visitFromClause(FromClauseContext ctx) {
-    UnresolvedPlan result = visit(ctx.relation());
+    UnresolvedPlan result = visit(ctx.relations());
 
     if (ctx.whereClause() != null) {
       result = visit(ctx.whereClause()).attach(result);
@@ -159,6 +164,28 @@ public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
       result = sortBuilder.visit(ctx.orderByClause()).attach(result);
     }
     return result;
+  }
+
+  @Override
+  public UnresolvedPlan visitRelations(RelationsContext ctx) {
+    UnresolvedPlan result = visit(ctx.relation());
+    if (ctx.joinClause() != null) {
+      for (JoinClauseContext joinClause : ctx.joinClause()) {
+        result = visit(joinClause).attach(result);
+      }
+    }
+    return result;
+  }
+
+  @Override
+  public UnresolvedPlan visitJoinClause(JoinClauseContext ctx) {
+    Join join = new Join("inner");
+    join.setRight(visit(ctx.relation()));
+
+    if (ctx.expression() != null) {
+      join.setJoinCondition(visitAstExpression(ctx.expression()));
+    }
+    return join;
   }
 
   @Override
