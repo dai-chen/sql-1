@@ -14,6 +14,8 @@ import org.opensearch.sql.analysis.symbol.Symbol;
 import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.exception.SemanticCheckException;
+import org.opensearch.sql.expression.DSL;
+import org.opensearch.sql.expression.Expression;
 
 /**
  * Analyzer that analyzes qualifier(s) in a full field name.
@@ -22,6 +24,31 @@ import org.opensearch.sql.exception.SemanticCheckException;
 public class QualifierAnalyzer {
 
   private final AnalysisContext context;
+
+  /**
+   * For a full name "t.field", first find env with index symbol "t"
+   * then look up "field" name inside it.
+   */
+  public Expression resolve(QualifiedName fullName) {
+    TypeEnvironment env = context.peek();
+    while (env != null) {
+      try {
+        env.resolve(new Symbol(Namespace.INDEX_NAME, fullName.first().get()));
+      } catch (SemanticCheckException e) {
+        // Not the right environment to look up, continue
+        env = env.getParent();
+        continue;
+      }
+
+      try {
+        return DSL.ref(fullName.toString(),
+            env.resolve(new Symbol(Namespace.FIELD_NAME, fullName.getSuffix())));
+      } catch (SemanticCheckException e) {
+        break;
+      }
+    }
+    throw new SemanticCheckException("Cannot resolve full name: " + fullName);
+  }
 
   public String unqualified(String... parts) {
     return unqualified(QualifiedName.of(Arrays.asList(parts)));

@@ -83,6 +83,7 @@ import org.opensearch.sql.planner.logical.LogicalAggregation;
 import org.opensearch.sql.planner.logical.LogicalDedupe;
 import org.opensearch.sql.planner.logical.LogicalEval;
 import org.opensearch.sql.planner.logical.LogicalFilter;
+import org.opensearch.sql.planner.logical.LogicalJoin;
 import org.opensearch.sql.planner.logical.LogicalLimit;
 import org.opensearch.sql.planner.logical.LogicalML;
 import org.opensearch.sql.planner.logical.LogicalMLCommons;
@@ -169,7 +170,11 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
 
   @Override
   public LogicalPlan visitJoin(Join node, AnalysisContext context) {
-    return super.visitJoin(node, context);
+    return new LogicalJoin(
+        node.getLeft().accept(this, context),
+        node.getRight().accept(this, context),
+        node.getJoinType(),
+        expressionAnalyzer.analyze(node.getJoinCondition(), context)); // TODO: split join condition for multi-join?
   }
 
   @Override

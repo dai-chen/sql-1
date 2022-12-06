@@ -294,7 +294,9 @@ public class ExpressionAnalyzer extends AbstractNodeVisitor<Expression, Analysis
   @Override
   public Expression visitQualifiedName(QualifiedName node, AnalysisContext context) {
     QualifierAnalyzer qualifierAnalyzer = new QualifierAnalyzer(context);
-    return visitIdentifier(qualifierAnalyzer.unqualified(node), context);
+    //return visitIdentifier(qualifierAnalyzer.unqualified(node), context);
+    // TODO: cannot unqualify for join query?
+    return qualifierAnalyzer.resolve(node);
   }
 
   @Override
