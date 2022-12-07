@@ -24,6 +24,7 @@ import org.opensearch.sql.planner.physical.RenameOperator;
 import org.opensearch.sql.planner.physical.SortOperator;
 import org.opensearch.sql.planner.physical.ValuesOperator;
 import org.opensearch.sql.planner.physical.WindowOperator;
+import org.opensearch.sql.planner.physical.join.legacy.LegacyToV2OperatorAdaptor;
 import org.opensearch.sql.storage.TableScanOperator;
 
 /**
@@ -39,6 +40,11 @@ public class OpenSearchExecutionProtector extends ExecutionProtector {
 
   public PhysicalPlan protect(PhysicalPlan physicalPlan) {
     return physicalPlan.accept(this, null);
+  }
+
+  @Override
+  public PhysicalPlan visitLegacy(LegacyToV2OperatorAdaptor node, Object context) {
+    return node; //TODO: add protection
   }
 
   @Override

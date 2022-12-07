@@ -10,6 +10,7 @@ import org.opensearch.sql.planner.logical.LogicalAggregation;
 import org.opensearch.sql.planner.logical.LogicalDedupe;
 import org.opensearch.sql.planner.logical.LogicalEval;
 import org.opensearch.sql.planner.logical.LogicalFilter;
+import org.opensearch.sql.planner.logical.LogicalJoin;
 import org.opensearch.sql.planner.logical.LogicalLimit;
 import org.opensearch.sql.planner.logical.LogicalPlan;
 import org.opensearch.sql.planner.logical.LogicalPlanNodeVisitor;
@@ -34,6 +35,12 @@ import org.opensearch.sql.planner.physical.RenameOperator;
 import org.opensearch.sql.planner.physical.SortOperator;
 import org.opensearch.sql.planner.physical.ValuesOperator;
 import org.opensearch.sql.planner.physical.WindowOperator;
+import org.opensearch.sql.planner.physical.join.legacy.BlockHashJoin;
+import org.opensearch.sql.planner.physical.join.legacy.BlockSize;
+import org.opensearch.sql.planner.physical.join.legacy.JoinCondition;
+import org.opensearch.sql.planner.physical.join.legacy.JoinType;
+import org.opensearch.sql.planner.physical.join.legacy.LegacyToV2OperatorAdaptor;
+import org.opensearch.sql.planner.physical.join.legacy.V2ToLegacyOperatorAdaptor;
 import org.opensearch.sql.storage.read.TableScanBuilder;
 
 /**
@@ -127,6 +134,34 @@ public class DefaultImplementor<C> extends LogicalPlanNodeVisitor<PhysicalPlan, 
   @Override
   public PhysicalPlan visitTableScanBuilder(TableScanBuilder plan, C context) {
     return plan.build();
+  }
+
+  public PhysicalPlan visitJoin(LogicalJoin node, C context) {
+    LogicalPlan left = node.getChild().get(0);
+    LogicalPlan right = node.getChild().get(1);
+
+    // TODO: assume 2 table join and only 1 join condition
+    String leftAlias = "t1"; //getAlias(left); Failed because LogicalRelation is replaced by TableScanBuilder
+    String rightAlias = "t2"; //getAlias(right);
+    JoinCondition joinCondition = new JoinCondition(leftAlias, rightAlias, 1);
+    if (node.getJoinCondition() != null) {
+      joinCondition.addLeftColumnNames(0, new String[]{"name"});
+      joinCondition.addRightColumnNames(0, new String[]{"name"});
+    }
+    return new LegacyToV2OperatorAdaptor(
+        new BlockHashJoin(
+            new V2ToLegacyOperatorAdaptor(left.accept(this, context), leftAlias),
+            new V2ToLegacyOperatorAdaptor(right.accept(this, context), rightAlias),
+            JoinType.INNER_JOIN,
+            joinCondition,
+            new BlockSize.FixedBlockSize(10),
+            false));
+  }
+
+  private String getAlias(LogicalPlan node) {
+    return (node instanceof LogicalRelation)
+        ? ((LogicalRelation) node).getAlias()
+        : null;
   }
 
   @Override

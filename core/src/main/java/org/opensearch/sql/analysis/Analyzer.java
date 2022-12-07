@@ -165,7 +165,11 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
     curEnv.define(new Symbol(Namespace.INDEX_NAME,
         (node.getAlias() == null) ? tableName : node.getAlias()), STRUCT);
 
-    return new LogicalRelation(tableName, table);
+    LogicalRelation relation = new LogicalRelation(tableName, table);
+    if (node.getAlias() != null) {
+      relation.setAlias(node.getAlias());
+    }
+    return relation;
   }
 
   @Override

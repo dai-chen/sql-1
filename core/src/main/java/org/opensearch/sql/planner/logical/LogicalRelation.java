@@ -9,6 +9,7 @@ package org.opensearch.sql.planner.logical;
 import com.google.common.collect.ImmutableList;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.ToString;
 import org.opensearch.sql.storage.Table;
 
@@ -24,6 +25,10 @@ public class LogicalRelation extends LogicalPlan {
 
   @Getter
   private final Table table;
+
+  @Getter
+  @Setter
+  private String alias;
 
   /**
    * Constructor of LogicalRelation.

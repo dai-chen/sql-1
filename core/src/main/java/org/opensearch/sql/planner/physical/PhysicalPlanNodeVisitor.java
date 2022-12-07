@@ -6,6 +6,7 @@
 
 package org.opensearch.sql.planner.physical;
 
+import org.opensearch.sql.planner.physical.join.legacy.LegacyToV2OperatorAdaptor;
 import org.opensearch.sql.storage.TableScanOperator;
 
 /**
@@ -18,6 +19,10 @@ public abstract class PhysicalPlanNodeVisitor<R, C> {
 
   protected R visitNode(PhysicalPlan node, C context) {
     return null;
+  }
+
+  public R visitLegacy(LegacyToV2OperatorAdaptor node, C context) {
+    return visitNode(node, context);
   }
 
   public R visitFilter(FilterOperator node, C context) {
