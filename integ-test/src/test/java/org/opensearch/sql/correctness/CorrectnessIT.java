@@ -10,7 +10,6 @@ import static org.opensearch.sql.util.TestUtils.getResourceFilePath;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
 import com.google.common.collect.Maps;
-
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,12 +17,14 @@ import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimeZone;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.JSONObject;
 import org.junit.Test;
+import org.opensearch.client.Node;
 import org.opensearch.client.RestClient;
 import org.opensearch.sql.correctness.report.TestReport;
 import org.opensearch.sql.correctness.runner.ComparisonTest;
@@ -90,7 +91,16 @@ public class CorrectnessIT extends OpenSearchIntegTestCase {
     String openSearchHost = config.getOpenSearchHostUrl();
     if (openSearchHost.isEmpty()) {
       client = getRestClient();
-      openSearchHost = client.getNodes().get(0).getHost().toString();
+
+      // The node list maybe mixed with a node with address 0.0.0.0 and port 0
+      Optional<Node> node = client.getNodes().stream()
+          .filter(n -> n.getHost().getPort() != 0)
+          .findFirst();
+
+      if (node.isEmpty()) {
+        throw new IllegalStateException("No available node to connect: " + client.getNodes());
+      }
+      openSearchHost = node.get().getHost().toString();
     } else {
       client = RestClient.builder(HttpHost.create(openSearchHost)).build();
     }

@@ -115,6 +115,7 @@ compileTestJava {
 
 testClusters.all {
     testDistribution = 'archive'
+    plugin ":opensearch-sql-plugin"
 }
 
 testClusters.integTest {
@@ -200,7 +201,6 @@ integTest {
     exclude 'org/opensearch/sql/legacy/OrderIT.class'
 }
 
-
 task comparisonTest(type: RestIntegTestTask) {
     dependsOn ':opensearch-sql-plugin:bundlePlugin'
 
@@ -217,6 +217,8 @@ task comparisonTest(type: RestIntegTestTask) {
 
     include 'org/opensearch/sql/correctness/**/*IT.class'
     exclude 'org/opensearch/sql/doctest/**/*IT.class'
+    exclude 'org/opensearch/sql/bwc/**/*IT.class'
+    exclude 'org/opensearch/sql/sql/**/*IT.class'
     exclude 'org/opensearch/sql/ppl/**/*IT.class'
     exclude 'org/opensearch/sql/legacy/**/*IT.class'
 
