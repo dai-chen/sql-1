@@ -23,6 +23,7 @@
  */
 
 plugins {
+    id 'java'
     id 'java-library'
     id "io.freefair.lombok"
     id 'jacoco'
@@ -58,6 +59,12 @@ test {
         events "passed", "skipped", "failed"
         exceptionFormat "full"
     }
+}
+
+javadoc {
+    source sourceSets.main.allJava
+    include 'org/opensearch/sql/ast/dsl/AstDSL.java'
+    destinationDir file('../docs/dev/sdk/javadoc')
 }
 
 jacocoTestReport {
