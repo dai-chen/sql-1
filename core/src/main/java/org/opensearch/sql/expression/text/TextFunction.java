@@ -6,20 +6,30 @@
 
 package org.opensearch.sql.expression.text;
 
+import static org.opensearch.sql.data.type.ExprCoreType.ARRAY;
 import static org.opensearch.sql.data.type.ExprCoreType.INTEGER;
 import static org.opensearch.sql.data.type.ExprCoreType.STRING;
 import static org.opensearch.sql.expression.function.FunctionDSL.define;
 import static org.opensearch.sql.expression.function.FunctionDSL.impl;
 import static org.opensearch.sql.expression.function.FunctionDSL.nullMissingHandling;
 
+import java.util.Collections;
+import java.util.stream.Collectors;
 import lombok.experimental.UtilityClass;
+import org.apache.commons.lang3.tuple.Pair;
+import org.opensearch.sql.data.model.ExprCollectionValue;
 import org.opensearch.sql.data.model.ExprIntegerValue;
 import org.opensearch.sql.data.model.ExprStringValue;
 import org.opensearch.sql.data.model.ExprValue;
+import org.opensearch.sql.data.type.ExprType;
+import org.opensearch.sql.expression.Expression;
+import org.opensearch.sql.expression.FunctionExpression;
+import org.opensearch.sql.expression.env.Environment;
 import org.opensearch.sql.expression.function.BuiltinFunctionName;
 import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
 import org.opensearch.sql.expression.function.DefaultFunctionResolver;
 import org.opensearch.sql.expression.function.FunctionName;
+import org.opensearch.sql.expression.function.FunctionSignature;
 import org.opensearch.sql.expression.function.SerializableBiFunction;
 import org.opensearch.sql.expression.function.SerializableTriFunction;
 
@@ -148,9 +158,26 @@ public class TextFunction {
    * (STRING, STRING) -> STRING
    */
   private DefaultFunctionResolver concat() {
-    return define(BuiltinFunctionName.CONCAT.getName(),
-        impl(nullMissingHandling((str1, str2) ->
-            new ExprStringValue(str1.stringValue() + str2.stringValue())), STRING, STRING, STRING));
+    FunctionName concatFuncName = BuiltinFunctionName.CONCAT.getName();
+    return define(concatFuncName, funcName ->
+      Pair.of(
+          new FunctionSignature(concatFuncName, Collections.singletonList(ARRAY)),
+          (funcProp, args) -> new FunctionExpression(funcName, args) {
+            @Override
+            public ExprValue valueOf(Environment<Expression, ExprValue> valueEnv) {
+                  return new ExprStringValue(
+                      args.stream()
+                          .map(arg -> arg.valueOf(valueEnv))
+                          .map(argVal -> String.valueOf(argVal.value()))
+                          .collect(Collectors.joining()));
+            }
+
+            @Override
+            public ExprType type() {
+              return STRING;
+            }
+          }
+      ));
   }
 
   /**
