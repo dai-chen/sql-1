@@ -393,10 +393,10 @@ class ExpressionAnalyzerTest extends AnalyzerTestBase {
   void visit_in() {
     assertAnalyzeEqual(
         DSL.or(
-            DSL.equal(DSL.ref("integer_value", INTEGER), DSL.literal(1)),
             DSL.or(
-                DSL.equal(DSL.ref("integer_value", INTEGER), DSL.literal(2)),
-                DSL.equal(DSL.ref("integer_value", INTEGER), DSL.literal(3)))),
+                DSL.equal(DSL.ref("integer_value", INTEGER), DSL.literal(1)),
+                DSL.equal(DSL.ref("integer_value", INTEGER), DSL.literal(2))),
+            DSL.equal(DSL.ref("integer_value", INTEGER), DSL.literal(3))),
         AstDSL.in(field("integer_value"), intLiteral(1), intLiteral(2), intLiteral(3)));
 
     assertThrows(

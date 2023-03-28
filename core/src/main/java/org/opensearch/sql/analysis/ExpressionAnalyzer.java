@@ -8,8 +8,6 @@ package org.opensearch.sql.analysis;
 
 import static org.opensearch.sql.ast.dsl.AstDSL.and;
 import static org.opensearch.sql.ast.dsl.AstDSL.compare;
-import static org.opensearch.sql.expression.function.BuiltinFunctionName.GTE;
-import static org.opensearch.sql.expression.function.BuiltinFunctionName.LTE;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -209,20 +207,12 @@ public class ExpressionAnalyzer extends AbstractNodeVisitor<Expression, Analysis
 
   @Override
   public Expression visitIn(In node, AnalysisContext context) {
-    return visitIn(node.getField(), node.getValueList(), context);
-  }
-
-  private Expression visitIn(
-      UnresolvedExpression field, List<UnresolvedExpression> valueList, AnalysisContext context) {
-    if (valueList.size() == 1) {
-      return visitCompare(new Compare("=", field, valueList.get(0)), context);
-    } else if (valueList.size() > 1) {
-      return DSL.or(
-          visitCompare(new Compare("=", field, valueList.get(0)), context),
-          visitIn(field, valueList.subList(1, valueList.size()), context));
-    } else {
-      throw new SemanticCheckException("Values in In clause should not be empty");
-    }
+    Expression fieldExpr = analyze(node.getField(), context);
+    return node.getValueList()
+        .stream()
+        .map(val -> DSL.equal(fieldExpr, analyze(val, context)))
+        .reduce(DSL::or)
+        .orElseThrow(() -> new SemanticCheckException("Values in In clause should not be empty"));
   }
 
   @Override
