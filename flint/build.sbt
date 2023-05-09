@@ -37,14 +37,25 @@ lazy val root = (project in file("."))
   .settings(name := "flint")
 
 lazy val flintCore = (project in file("flint-core"))
-  .settings(name := "flint-core", scalaVersion := scala212)
+  .settings(
+    name := "flint-core",
+    scalaVersion := scala212,
+    libraryDependencies ++= Seq(
+      "org.apache.lucene" % "lucene-codecs" % "9.5.0",
+      "org.apache.httpcomponents" % "httpasyncclient" % "4.1.4",
+      "org.apache.logging.log4j" % "log4j-api" % "2.17.1",
+      "com.carrotsearch" % "hppc" % "0.8.1",
+      "org.opensearch.client" % "opensearch-rest-high-level-client" % "2.6.0"))
 
 lazy val flintSparkIntegration = (project in file("flint-spark-integration"))
   .dependsOn(flintCore)
   .settings(
-    commonSettings,
+    // commonSettings,
     name := "flint-spark-integration",
     scalaVersion := scala212,
     libraryDependencies ++= Seq(
       "org.apache.spark" %% "spark-core" % sparkVersion,
-      "org.apache.spark" %% "spark-sql" % sparkVersion))
+      "org.apache.spark" %% "spark-core" % sparkVersion % "test" classifier "tests",
+      "org.apache.spark" %% "spark-sql" % sparkVersion,
+      "org.apache.spark" %% "spark-sql" % sparkVersion % "test" classifier "tests",
+      "org.scalatest" %% "scalatest" % "3.2.3" % "test"))
