@@ -6,7 +6,8 @@
 package org.opensearch.flint.spark.skipping.valuelist
 
 import org.apache.spark.sql.Column
-import org.apache.spark.sql.catalyst.expressions.{ArrayContains, Attribute, EqualTo, Expression, Literal, SubqueryExpression}
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.catalyst.expressions.{ArrayContains, Attribute, AttributeReference, EqualTo, Expression, Literal, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, CollectSet}
 import org.opensearch.flint.spark.skipping.FlintSparkSkippingIndexProvider
 
@@ -21,7 +22,14 @@ case class ValueListSketch(colName: String) extends FlintSparkSkippingIndexProvi
   override def rewritePredicate(predicate: Expression): Option[Expression] = {
     Option(predicate).collect {
       case EqualTo(column: Attribute, value: Literal) =>
-        ArrayContains(column, value)
+        // Assume column name in skipping index for value list
+        // is the same as original
+        /*
+        ArrayContains(
+          AttributeReference(colName, ArrayType(IntegerType, containsNull = false))(),
+          value)
+        */
+        EqualTo(UnresolvedAttribute(colName), value)
     }
   }
 

@@ -24,24 +24,23 @@ class FlintSpark(spark: SparkSession) {
     val indexName = index.indexName()
     flintClient.createIndex(indexName, index.metadata())
 
-    /*
     index.refreshJob(spark)
       .writeStream
-      .outputMode("append")
+      .outputMode("update")
       // .format("flint") //TODO
+      //.format("console")
       .format("opensearch")
       .option("checkpointLocation", s"/tmp/$indexName") // Hardcoding for now
       .option("opensearch.resource", indexName)
       .option("opensearch.spark.sql.streaming.sink.log.enabled", false)
       .start()
-     */
   }
 
   def describeIndex(indexName: String): Option[FlintMetadata] = {
     if (flintClient.exists(indexName)) {
-      Option.empty
-    } else {
       Some(flintClient.getIndexMetadata(indexName))
+    } else {
+      Option.empty
     }
   }
 

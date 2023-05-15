@@ -6,10 +6,8 @@
 package org.opensearch.flint.core.opensearch
 
 import org.apache.http.HttpHost
-import org.opensearch.action.get.GetRequest
 import org.opensearch.client.indices.{CreateIndexRequest, GetIndexRequest}
 import org.opensearch.client.{RequestOptions, RestClient, RestHighLevelClient}
-import org.opensearch.common.settings.Settings
 import org.opensearch.flint.core.{FlintClient, FlintMetadata}
 
 import scala.collection.JavaConverters._
@@ -49,8 +47,8 @@ class FlintOpenSearchClient extends FlintClient {
 
   override def exists(indexName: String): Boolean = {
     withClient { client =>
-      val request = new GetRequest(indexName)
-      client.exists(request, RequestOptions.DEFAULT)
+      val request = new GetIndexRequest(indexName)
+      client.indices.exists(request, RequestOptions.DEFAULT)
     }
   }
 
