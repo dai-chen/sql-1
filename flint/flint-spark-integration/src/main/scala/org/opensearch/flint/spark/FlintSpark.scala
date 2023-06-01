@@ -14,7 +14,9 @@ import org.opensearch.flint.spark.FlintSpark._
 import org.opensearch.flint.spark.FlintSpark.RefreshMode.{FULL, INCREMENTAL, RefreshMode}
 import org.opensearch.flint.spark.skipping.{FlintSparkSkippingIndex, FlintSparkSkippingStrategy}
 import org.opensearch.flint.spark.skipping.FlintSparkSkippingIndex.SKIPPING_INDEX_TYPE
+import org.opensearch.flint.spark.skipping.minmax.MinMaxSkippingStrategy
 import org.opensearch.flint.spark.skipping.partition.PartitionSkippingStrategy
+import org.opensearch.flint.spark.skipping.valuelist.ValueListSkippingStrategy
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.SaveMode._
@@ -170,6 +172,10 @@ class FlintSpark(val spark: SparkSession) {
           skippingType match {
             case "partition" =>
               new PartitionSkippingStrategy(columnName = columnName, columnType = columnType)
+            case "minmax" =>
+              new MinMaxSkippingStrategy(columnName = columnName, columnType = columnType)
+            case "value_list" =>
+              new ValueListSkippingStrategy(columnName = columnName, columnType = columnType)
             case other =>
               throw new IllegalStateException(s"Unknown skipping strategy: $other")
           }
@@ -229,13 +235,26 @@ object FlintSpark {
      */
     def addPartitionIndex(colNames: String*): IndexBuilder = {
       colNames
-        .map(colName =>
-          allColumns.getOrElse(
-            colName,
-            throw new IllegalArgumentException(s"Column $colName does not exist")))
+        .map(findColumn)
         .map(col =>
           new PartitionSkippingStrategy(columnName = col.name, columnType = col.dataType))
         .foreach(indexedCol => indexedColumns = indexedColumns :+ indexedCol)
+      this
+    }
+
+    def addMinMaxIndex(colName: String): IndexBuilder = {
+      val col = findColumn(colName)
+      indexedColumns = indexedColumns :+ new MinMaxSkippingStrategy(
+        columnName = col.name,
+        columnType = col.dataType)
+      this
+    }
+
+    def addValueListIndex(colName: String): IndexBuilder = {
+      val col = findColumn(colName)
+      indexedColumns = indexedColumns :+ new ValueListSkippingStrategy(
+        columnName = col.name,
+        columnType = col.dataType)
       this
     }
 
@@ -247,5 +266,10 @@ object FlintSpark {
 
       flint.createIndex(new FlintSparkSkippingIndex(tableName, indexedColumns))
     }
+
+    private def findColumn(colName: String): Column =
+      allColumns.getOrElse(
+        colName,
+        throw new IllegalArgumentException(s"Column $colName does not exist"))
   }
 }

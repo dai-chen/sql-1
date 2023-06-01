@@ -86,6 +86,7 @@ class FlintSparkSkippingIndex(
     colType match {
       case "string" => "keyword"
       case "int" => "integer"
+      case "double" => "double"
     }
   }
 }
