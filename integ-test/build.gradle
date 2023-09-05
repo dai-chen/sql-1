@@ -75,6 +75,9 @@ configurations.all {
     resolutionStrategy.force "org.apache.httpcomponents:httpcore:4.4.13"
     resolutionStrategy.force "joda-time:joda-time:2.10.12"
     resolutionStrategy.force "org.slf4j:slf4j-api:1.7.36"
+
+    // aws-core introduced by sql-jdbc conflicts with others
+    resolutionStrategy.force "com.amazonaws:aws-java-sdk-core:1.12.230"
 }
 
 dependencies {

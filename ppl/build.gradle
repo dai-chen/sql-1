@@ -35,6 +35,24 @@ generateGrammarSource {
     outputDirectory = file("build/generated-src/antlr/main/org/opensearch/sql/ppl/antlr/parser")
 }
 
+task downloadG4Files(type: Exec) {
+    description = 'Download remote .g4 files from GitHub'
+
+    executable 'curl'
+
+    // Use my branch for complete grammar test
+    args '-o', 'src/main/antlr/FlintSparkSqlExtensions.g4', 'https://raw.githubusercontent.com/dai-chen/opensearch-spark/ppl-parse-grammar-test/flint-spark-integration/src/main/antlr4/FlintSparkSqlExtensions.g4'
+    args '-o', 'src/main/antlr/SparkSqlBase.g4', 'https://raw.githubusercontent.com/dai-chen/opensearch-spark/ppl-parse-grammar-test/flint-spark-integration/src/main/antlr4/SparkSqlBase.g4'
+
+    /* Tracking main branch
+    args '-o', 'src/main/antlr/FlintSparkSqlExtensions.g4', 'https://raw.githubusercontent.com/opensearch-project/opensearch-spark/main/flint-spark-integration/src/main/antlr4/FlintSparkSqlExtensions.g4'
+    args '-o', 'src/main/antlr/SparkSqlBase.g4', 'https://raw.githubusercontent.com/opensearch-project/opensearch-spark/main/flint-spark-integration/src/main/antlr4/SparkSqlBase.g4'
+    */
+}
+
+// Make sure the downloadG4File task runs before the generateGrammarSource task
+generateGrammarSource.dependsOn downloadG4Files
+
 configurations {
     compile {
         extendsFrom = extendsFrom.findAll { it != configurations.antlr }
@@ -50,6 +68,10 @@ dependencies {
     implementation group: 'com.google.guava', name: 'guava', version: '31.0.1-jre'
     api group: 'org.json', name: 'json', version: '20230227'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version:'2.17.1'
+
+    // This seems the first version of EMR Serverless Java SDK
+    implementation group: 'com.amazonaws', name: 'aws-java-sdk-emrserverless', version: '1.12.230'
+
     api project(':common')
     api project(':core')
     api project(':protocol')
