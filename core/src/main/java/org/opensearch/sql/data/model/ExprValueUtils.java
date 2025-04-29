@@ -164,15 +164,14 @@ public class ExprValueUtils {
 
   /** Construct ExprValue from Object with ExprCoreType. */
   public static ExprValue fromObjectValue(Object o, ExprType type) {
-    switch (type) {
-      case TIMESTAMP:
-        return new ExprTimestampValue((String) o);
-      case DATE:
-        return new ExprDateValue((String) o);
-      case TIME:
-        return new ExprTimeValue((String) o);
-      default:
-        return fromObjectValue(o);
+    if (type == TIMESTAMP) {
+      return new ExprTimestampValue((String) o);
+    } else if (type == DATE) {
+      return new ExprDateValue((String) o);
+    } else if (type == TIME) {
+      return new ExprTimeValue((String) o);
+    } else {
+      return fromObjectValue(o);
     }
   }
 

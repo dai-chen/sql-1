@@ -30,6 +30,10 @@ plugins {
     id 'com.diffplug.spotless' version '6.22.0'
 }
 
+plugins.withId('java') {
+    sourceCompatibility = targetCompatibility = JavaVersion.VERSION_17
+}
+
 dependencies {
     api project(':core')
     api group: 'org.opensearch', name: 'opensearch', version: "${opensearch_version}"
