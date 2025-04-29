@@ -153,7 +153,7 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     visitChildren(node, context);
     List<RexNode> projectList;
     if (node.getProjectList().size() == 1
-        && node.getProjectList().getFirst() instanceof AllFields allFields) {
+        && node.getProjectList().get(0) instanceof AllFields allFields) {
       tryToRemoveNestedFields(context);
       tryToRemoveMetaFields(context, allFields instanceof AllFieldsExcludeMeta);
       return context.relBuilder.peek();

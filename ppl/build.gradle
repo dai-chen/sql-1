@@ -129,7 +129,15 @@ task customFatJar(type: Jar) {
 
     archiveBaseName = 'all-in-one-jar'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    from {
+        configurations.runtimeClasspath
+        // remove any jar whose name contains “jackson-databind” or “jackson-core”
+        .findAll { file ->
+            !file.name.toLowerCase().contains("jackson")
+        }
+        // unzip directories vs jars
+        .collect { it.isDirectory() ? it : zipTree(it) }
+    }
     with jar
 
     // Avoid signature issues in META-INF
