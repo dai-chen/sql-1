@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.Getter;
@@ -48,6 +49,8 @@ import org.opensearch.sql.planner.logical.LogicalMLCommons;
 import org.opensearch.sql.planner.logical.LogicalPlan;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.sql.storage.read.TableScanBuilder;
+
+import static org.opensearch.common.settings.WriteableSetting.SettingType.TimeValue;
 
 /** OpenSearch table (index) implementation. */
 public class OpenSearchIndex extends OpenSearchTable {
@@ -203,9 +206,9 @@ public class OpenSearchIndex extends OpenSearchTable {
 
   @Override
   public TableScanBuilder createScanBuilder() {
-    final int querySizeLimit = settings.getSettingValue(Settings.Key.QUERY_SIZE_LIMIT);
+    final int querySizeLimit = 10000; // settings.getSettingValue(Settings.Key.QUERY_SIZE_LIMIT);
 
-    final TimeValue cursorKeepAlive = settings.getSettingValue(Settings.Key.SQL_CURSOR_KEEP_ALIVE);
+    final TimeValue cursorKeepAlive = new org.opensearch.common.unit.TimeValue(1, TimeUnit.MINUTES); // settings.getSettingValue(Settings.Key.SQL_CURSOR_KEEP_ALIVE);
     var builder = new OpenSearchRequestBuilder(querySizeLimit, createExprValueFactory(), settings);
     Function<OpenSearchRequestBuilder, OpenSearchIndexScan> createScanOperator =
         requestBuilder ->
@@ -221,11 +224,11 @@ public class OpenSearchIndex extends OpenSearchTable {
     getReservedFieldTypes().forEach((k, v) -> allFields.put(k, OpenSearchDataType.of(v)));
     allFields.putAll(getFieldOpenSearchTypes());
     return new OpenSearchExprValueFactory(
-        allFields, settings.getSettingValue(Settings.Key.FIELD_TYPE_TOLERANCE));
+        allFields, true /* settings.getSettingValue(Settings.Key.FIELD_TYPE_TOLERANCE) */);
   }
 
   public boolean isFieldTypeTolerance() {
-    return settings.getSettingValue(Settings.Key.FIELD_TYPE_TOLERANCE);
+    return true; // settings.getSettingValue(Settings.Key.FIELD_TYPE_TOLERANCE);
   }
 
   @VisibleForTesting
@@ -282,13 +285,13 @@ public class OpenSearchIndex extends OpenSearchTable {
 
   public OpenSearchRequestBuilder createRequestBuilder() {
     return new OpenSearchRequestBuilder(
-        settings.getSettingValue(Settings.Key.QUERY_SIZE_LIMIT),
+        10000, // settings.getSettingValue(Settings.Key.QUERY_SIZE_LIMIT),
         this.createExprValueFactory(),
         settings);
   }
 
   public OpenSearchRequest buildRequest(OpenSearchRequestBuilder requestBuilder) {
-    final TimeValue cursorKeepAlive = settings.getSettingValue(Settings.Key.SQL_CURSOR_KEEP_ALIVE);
+    final TimeValue cursorKeepAlive = new org.opensearch.common.unit.TimeValue(1, TimeUnit.MINUTES); // settings.getSettingValue(Settings.Key.SQL_CURSOR_KEEP_ALIVE);
     return requestBuilder.build(indexName, getMaxResultWindow(), cursorKeepAlive, client);
   }
 }

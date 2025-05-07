@@ -75,11 +75,11 @@ public class CalciteLogicalIndexScan extends CalciteIndexScan {
   public void register(RelOptPlanner planner) {
     super.register(planner);
     planner.addRule(EnumerableIndexScanRule.DEFAULT_CONFIG.toRule());
-    if (osIndex.getSettings().getSettingValue(Settings.Key.CALCITE_PUSHDOWN_ENABLED)) {
+    // if (osIndex.getSettings().getSettingValue(Settings.Key.CALCITE_PUSHDOWN_ENABLED)) {
       for (RelOptRule rule : OpenSearchIndexRules.OPEN_SEARCH_INDEX_SCAN_RULES) {
         planner.addRule(rule);
       }
-    }
+    // }
   }
 
   public CalciteLogicalIndexScan pushDownFilter(Filter filter) {
