@@ -36,15 +36,15 @@ plugins.withId('java') {
 
 dependencies {
     api project(':core')
-    api group: 'org.opensearch', name: 'opensearch', version: "${opensearch_version}"
+    api group: 'org.opensearch', name: 'opensearch', version: "2.10.0"
     implementation "io.github.resilience4j:resilience4j-retry:${resilience4j_version}"
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core', version: "${versions.jackson}"
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: "${versions.jackson_databind}"
     implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-cbor', version: "${versions.jackson}"
     implementation group: 'org.json', name: 'json', version:'20231013'
-    compileOnly group: 'org.opensearch.client', name: 'opensearch-rest-high-level-client', version: "${opensearch_version}"
-    implementation group: 'org.opensearch', name:'opensearch-ml-client', version: "${opensearch_build}"
-    implementation group: 'org.opensearch', name:'geospatial-client', version: "${opensearch_build}"
+    compileOnly group: 'org.opensearch.client', name: 'opensearch-rest-high-level-client', version: "2.10.0"
+    implementation group: 'org.opensearch', name:'opensearch-ml-client', version: "2.10.0.0"
+    implementation group: 'org.opensearch', name:'geospatial-client', version: "2.19.0.0-SNAPSHOT"
 
     annotationProcessor 'org.immutables:value:2.8.8'
     compileOnly 'org.immutables:value-annotations:2.8.8'
@@ -136,3 +136,30 @@ jacocoTestCoverageVerification {
 }
 check.dependsOn jacocoTestCoverageVerification
 jacocoTestCoverageVerification.dependsOn jacocoTestReport
+
+task customFatJar(type: Jar) {
+    archiveBaseName = 'all-in-one-opensearch-jar'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath
+                // remove any jar whose name contains “jackson-databind” or “jackson-core”
+                .findAll { file ->
+                    !file.name.toLowerCase().contains("jackson") &&
+                    !file.name.toLowerCase().contains("opensearch") &&
+                    !file.name.toLowerCase().contains("geospatial-client")
+                }
+                // unzip directories vs jars
+                .collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+
+    // Avoid signature issues in META-INF
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+
+    // Do NOT include a Main-Class (because you're using it as a library)
+    manifest {
+        attributes.clear() // make sure to clear any inherited attributes
+    }
+}

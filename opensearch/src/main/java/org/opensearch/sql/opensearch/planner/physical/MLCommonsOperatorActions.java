@@ -45,7 +45,7 @@ import org.opensearch.sql.data.model.ExprTupleValue;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.opensearch.client.MLClient;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
-import org.opensearch.transport.client.node.NodeClient;
+import org.opensearch.client.node.NodeClient;
 
 /** Common method actions for ml-commons related operators. */
 public abstract class MLCommonsOperatorActions extends PhysicalPlan {

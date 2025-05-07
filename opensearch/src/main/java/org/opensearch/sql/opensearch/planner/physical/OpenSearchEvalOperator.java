@@ -21,7 +21,7 @@ import org.opensearch.sql.expression.env.Environment;
 import org.opensearch.sql.expression.function.OpenSearchFunctions;
 import org.opensearch.sql.planner.physical.EvalOperator;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
-import org.opensearch.transport.client.node.NodeClient;
+import org.opensearch.client.node.NodeClient;
 
 /**
  * OpenSearch version of eval operator, which contains nodeClient, in order to perform OpenSearch

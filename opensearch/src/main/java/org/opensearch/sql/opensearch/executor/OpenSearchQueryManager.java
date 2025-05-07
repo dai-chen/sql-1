@@ -16,7 +16,7 @@ import org.opensearch.sql.executor.QueryId;
 import org.opensearch.sql.executor.QueryManager;
 import org.opensearch.sql.executor.execution.AbstractPlan;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.transport.client.node.NodeClient;
+import org.opensearch.client.node.NodeClient;
 
 /** QueryManager implemented in OpenSearch cluster. */
 @RequiredArgsConstructor

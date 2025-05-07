@@ -22,7 +22,7 @@ import org.opensearch.sql.expression.Expression;
 import org.opensearch.sql.expression.env.Environment;
 import org.opensearch.sql.expression.function.BuiltinFunctionName;
 import org.opensearch.sql.expression.function.OpenSearchFunctions;
-import org.opensearch.transport.client.node.NodeClient;
+import org.opensearch.client.node.NodeClient;
 
 /** Class to centralise all OpenSearch specific eval operations. */
 public class OpenSearchEvalProcessor {

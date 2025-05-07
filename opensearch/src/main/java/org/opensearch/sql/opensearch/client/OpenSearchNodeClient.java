@@ -32,7 +32,7 @@ import org.opensearch.sql.opensearch.mapping.IndexMapping;
 import org.opensearch.sql.opensearch.request.OpenSearchRequest;
 import org.opensearch.sql.opensearch.request.OpenSearchScrollRequest;
 import org.opensearch.sql.opensearch.response.OpenSearchResponse;
-import org.opensearch.transport.client.node.NodeClient;
+import org.opensearch.client.node.NodeClient;
 
 /** OpenSearch connection by node client. */
 public class OpenSearchNodeClient implements OpenSearchClient {

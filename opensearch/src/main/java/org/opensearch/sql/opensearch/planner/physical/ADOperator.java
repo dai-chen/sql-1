@@ -38,7 +38,7 @@ import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.sql.planner.physical.PhysicalPlanNodeVisitor;
-import org.opensearch.transport.client.node.NodeClient;
+import org.opensearch.client.node.NodeClient;
 
 /** AD Physical operator to call AD interface to get results for algorithm execution. */
 @RequiredArgsConstructor

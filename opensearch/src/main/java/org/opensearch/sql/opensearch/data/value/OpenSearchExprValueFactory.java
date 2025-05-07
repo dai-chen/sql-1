@@ -242,8 +242,9 @@ public class OpenSearchExprValueFactory {
           case DATE:
             return new ExprDateValue(zonedDateTime.withZoneSameLocal(ZoneOffset.UTC).toLocalDate());
           default:
-            return new ExprTimestampValue(
-                zonedDateTime.withZoneSameLocal(ZoneOffset.UTC).toInstant());
+            // return new ExprTimestampValue(
+            //    zonedDateTime.withZoneSameLocal(ZoneOffset.UTC).toInstant());
+            throw new UnsupportedOperationException("Backport Calcite");
         }
       } catch (IllegalArgumentException ignored) {
         // nothing to do, try another format
@@ -260,9 +261,10 @@ public class OpenSearchExprValueFactory {
           return new ExprDateValue(
               DateFormatters.from(STRICT_YEAR_MONTH_DAY_FORMATTER.parse(value)).toLocalDate());
         default:
-          return new ExprTimestampValue(
-              DateFormatters.from(DateFieldMapper.getDefaultDateTimeFormatter().parse(value))
-                  .toInstant());
+          // return new ExprTimestampValue(
+          //    DateFormatters.from(DateFieldMapper.getDefaultDateTimeFormatter().parse(value))
+          //        .toInstant());
+          throw new UnsupportedOperationException("Backport Calcite");
       }
     } catch (DateTimeParseException | IllegalArgumentException ignored) {
       // ignored
