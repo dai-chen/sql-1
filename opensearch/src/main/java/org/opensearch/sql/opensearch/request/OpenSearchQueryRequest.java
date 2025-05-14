@@ -73,6 +73,10 @@ public class OpenSearchQueryRequest implements OpenSearchRequest {
 
   private SearchResponse searchResponse = null;
 
+  public SearchSourceBuilder source() {
+    return sourceBuilder;
+  }
+
   /** Constructor of OpenSearchQueryRequest. */
   public OpenSearchQueryRequest(
       String indexName, int size, OpenSearchExprValueFactory factory, List<String> includes) {

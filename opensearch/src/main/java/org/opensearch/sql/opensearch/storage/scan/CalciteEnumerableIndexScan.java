@@ -101,6 +101,12 @@ public class CalciteEnumerableIndexScan extends CalciteIndexScan implements Enum
     };
   }
 
+  public String getDslQuery() {
+    OpenSearchRequestBuilder requestBuilder = osIndex.createRequestBuilder();
+    pushDownContext.forEach(action -> action.apply(requestBuilder));
+    return osIndex.buildRequest(requestBuilder).source().toString();
+  }
+
   private List<String> getFieldPath() {
     return getRowType().getFieldNames().stream()
         .map(f -> osIndex.getAliasMapping().getOrDefault(f, f))

@@ -64,6 +64,10 @@ public class OpenSearchScrollRequest implements OpenSearchRequest {
 
   @Getter @EqualsAndHashCode.Exclude @ToString.Exclude private final List<String> includes;
 
+  public SearchSourceBuilder source() {
+    return null;
+  }
+
   /** Constructor. */
   public OpenSearchScrollRequest(
       IndexName indexName,

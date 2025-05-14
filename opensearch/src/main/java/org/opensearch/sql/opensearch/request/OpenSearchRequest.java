@@ -16,6 +16,7 @@ import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.common.io.stream.Writeable;
+import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.sql.opensearch.data.value.OpenSearchExprValueFactory;
 import org.opensearch.sql.opensearch.response.OpenSearchResponse;
 
@@ -24,6 +25,8 @@ public interface OpenSearchRequest extends Writeable {
 
   /** Default query timeout in minutes. */
   TimeValue DEFAULT_QUERY_TIMEOUT = TimeValue.timeValueMinutes(1L);
+
+  SearchSourceBuilder source();
 
   /**
    * Apply the search action or scroll action on request based on context.

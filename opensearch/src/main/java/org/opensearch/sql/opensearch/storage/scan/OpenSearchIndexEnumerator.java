@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.opensearch.storage.scan;
 
+import java.io.Serializable;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -17,10 +18,10 @@ import org.opensearch.sql.opensearch.client.OpenSearchClient;
 import org.opensearch.sql.opensearch.request.OpenSearchRequest;
 import org.opensearch.sql.opensearch.response.OpenSearchResponse;
 
-public class OpenSearchIndexEnumerator implements Enumerator<Object> {
+public class OpenSearchIndexEnumerator implements Enumerator<Object>, Serializable {
 
   /** OpenSearch client. */
-  private final OpenSearchClient client;
+  private transient OpenSearchClient client;
 
   private final List<String> fields;
 
@@ -31,12 +32,12 @@ public class OpenSearchIndexEnumerator implements Enumerator<Object> {
   @EqualsAndHashCode.Include @ToString.Include private final int maxResponseSize;
 
   /** Number of rows returned. */
-  private Integer queryCount;
+  private transient Integer queryCount;
 
   /** Search response for current batch. */
-  private Iterator<ExprValue> iterator;
+  private transient Iterator<ExprValue> iterator;
 
-  private ExprValue current;
+  private transient ExprValue current;
 
   public OpenSearchIndexEnumerator(
       OpenSearchClient client,
@@ -102,5 +103,9 @@ public class OpenSearchIndexEnumerator implements Enumerator<Object> {
   public void close() {
     reset();
     client.cleanup(request);
+  }
+
+  public void set(OpenSearchClient client) {
+    this.client = client;
   }
 }
