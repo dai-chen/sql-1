@@ -36,9 +36,11 @@ import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.Map;
 import org.opensearch.sql.ast.expression.Not;
 import org.opensearch.sql.ast.expression.Or;
+import org.opensearch.sql.ast.expression.ParseMethod;
 import org.opensearch.sql.ast.expression.Span;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.expression.When;
+import org.opensearch.sql.ast.expression.WindowFunction;
 import org.opensearch.sql.ast.expression.Xor;
 import org.opensearch.sql.ast.expression.subquery.ExistsSubquery;
 import org.opensearch.sql.ast.expression.subquery.InSubquery;
@@ -64,6 +66,7 @@ import org.opensearch.sql.ast.tree.SubqueryAlias;
 import org.opensearch.sql.ast.tree.TableFunction;
 import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
+import org.opensearch.sql.ast.tree.Window;
 import org.opensearch.sql.common.utils.StringUtils;
 import org.opensearch.sql.planner.logical.LogicalAggregation;
 import org.opensearch.sql.planner.logical.LogicalDedupe;
@@ -222,6 +225,14 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
         child, String.join(" ", visitExpressionList(node.getAggExprList()), groupBy(group)).trim());
   }
 
+  @Override
+  public String visitWindow(Window node, String context) {
+    String child = node.getChild().get(0).accept(this, context);
+    return StringUtils.format(
+        "%s | eventstats %s",
+        child, String.join(" ", visitExpressionList(node.getWindowFunctionList())).trim());
+  }
+
   /** Build {@link LogicalRareTopN}. */
   @Override
   public String visitRareTopN(RareTopN node, String context) {
@@ -311,8 +322,22 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
   public String visitParse(Parse node, String context) {
     String child = node.getChild().get(0).accept(this, context);
     String source = visitExpression(node.getSourceField());
-    String regrex = node.getPattern().toString();
-    return StringUtils.format("%s | parse %s '%s'", child, source, regrex);
+    String regex = node.getPattern().toString();
+    String commandName;
+    switch (node.getParseMethod()) {
+      case ParseMethod.PATTERNS:
+        commandName = "patterns";
+        break;
+      case ParseMethod.GROK:
+        commandName = "grok";
+        break;
+      default:
+        commandName = "parse";
+        break;
+    }
+    return ParseMethod.PATTERNS.equals(node.getParseMethod()) && regex.isEmpty()
+        ? StringUtils.format("%s | %s %s", child, commandName, source)
+        : StringUtils.format("%s | %s %s '%s'", child, commandName, source, regex);
   }
 
   @Override
@@ -443,6 +468,20 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
               .map(unresolvedExpression -> analyze(unresolvedExpression, context))
               .collect(Collectors.joining(","));
       return StringUtils.format("%s(%s)", node.getFuncName(), arguments);
+    }
+
+    @Override
+    public String visitWindowFunction(WindowFunction node, String context) {
+      String function = analyze(node.getFunction(), context);
+      String partitions =
+          node.getPartitionByList().stream()
+              .map(p -> analyze(p, context))
+              .collect(Collectors.joining(","));
+      if (partitions.isEmpty()) {
+        return StringUtils.format("%s", function);
+      } else {
+        return StringUtils.format("%s by %s", function, partitions);
+      }
     }
 
     @Override
