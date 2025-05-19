@@ -27,20 +27,24 @@ public final class DateTimeConversionUtils {
    * @return the converted ExprTimestampValue
    */
   public static ExprTimestampValue forceConvertToTimestampValue(
-      ExprValue value, FunctionProperties properties) {
-    return switch (value) {
-      case ExprTimestampValue timestampValue -> timestampValue;
-      case ExprDateValue dateValue -> (ExprTimestampValue)
-          ExprValueUtils.timestampValue(dateValue.timestampValue());
-      case ExprTimeValue timeValue -> (ExprTimestampValue)
-          ExprValueUtils.timestampValue(timeValue.timestampValue(properties));
-      case ExprStringValue stringValue -> new ExprTimestampValue(
-          DateTimeParser.parse(stringValue.stringValue()));
-      default -> throw new SemanticCheckException(
-          String.format(
-              "Cannot convert %s to timestamp, only STRING, DATE, TIME and TIMESTAMP are supported",
-              value.type()));
-    };
+          ExprValue value, FunctionProperties properties) {
+    if (value instanceof ExprTimestampValue) {
+      return (ExprTimestampValue) value;
+    } else if (value instanceof ExprDateValue) {
+      return (ExprTimestampValue)
+              ExprValueUtils.timestampValue(((ExprDateValue) value).timestampValue());
+    } else if (value instanceof ExprTimeValue) {
+      return (ExprTimestampValue)
+              ExprValueUtils.timestampValue(((ExprTimeValue) value).timestampValue(properties));
+    } else if (value instanceof ExprStringValue) {
+      return new ExprTimestampValue(
+              DateTimeParser.parse(((ExprStringValue) value).stringValue()));
+    } else {
+      throw new SemanticCheckException(
+              String.format(
+                      "Cannot convert %s to timestamp, only STRING, DATE, TIME and TIMESTAMP are supported",
+                      value.type()));
+    }
   }
 
   /**
@@ -84,25 +88,19 @@ public final class DateTimeConversionUtils {
    * @return the converted ExprDateValue
    */
   public static ExprDateValue convertToDateValue(ExprValue value, FunctionProperties properties) {
-    switch (value) {
-      case ExprDateValue dateValue -> {
-        return dateValue;
-      }
-      case ExprTimeValue timeValue -> {
-        return new ExprDateValue(timeValue.dateValue(properties));
-      }
-      case ExprTimestampValue timestampValue -> {
-        return new ExprDateValue(timestampValue.dateValue());
-      }
-      case ExprStringValue ignored -> {
-        return new ExprDateValue(value.stringValue());
-      }
-      default -> {
-        throw new SemanticCheckException(
-            String.format(
-                "Cannot convert %s to date, only STRING, DATE, TIME and TIMESTAMP are supported",
-                value.type()));
-      }
+    if (value instanceof ExprDateValue) {
+      return (ExprDateValue) value;
+    } else if (value instanceof ExprTimeValue) {
+      return new ExprDateValue(((ExprTimeValue) value).dateValue(properties));
+    } else if (value instanceof ExprTimestampValue) {
+      return new ExprDateValue(((ExprTimestampValue) value).dateValue());
+    } else if (value instanceof ExprStringValue) {
+      return new ExprDateValue(value.stringValue());
+    } else {
+      throw new SemanticCheckException(
+              String.format(
+                      "Cannot convert %s to date, only STRING, DATE, TIME and TIMESTAMP are supported",
+                      value.type()));
     }
   }
 

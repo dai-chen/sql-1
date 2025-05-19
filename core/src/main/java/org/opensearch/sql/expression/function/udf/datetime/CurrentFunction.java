@@ -44,32 +44,39 @@ public class CurrentFunction extends ImplementorUDF {
     this.returnType = returnType;
   }
 
-  @Override
-  public SqlReturnTypeInference getReturnTypeInference() {
-    return opBinding ->
-        switch (returnType) {
-          case ExprCoreType.DATE -> UserDefinedFunctionUtils.NULLABLE_DATE_UDT;
-          case ExprCoreType.TIME -> UserDefinedFunctionUtils.NULLABLE_TIME_UDT;
-          case ExprCoreType.TIMESTAMP -> UserDefinedFunctionUtils.NULLABLE_TIMESTAMP_UDT;
-          default -> throw new IllegalArgumentException("Unsupported return type: " + returnType);
-        };
-  }
-
-  @RequiredArgsConstructor
-  public static class CurrentFunctionImplementor implements NotNullImplementor {
-    private final ExprType returnType;
-
     @Override
-    public Expression implement(
-        RexToLixTranslator translator, RexCall call, List<Expression> translatedOperands) {
+    public SqlReturnTypeInference getReturnTypeInference() {
+        return opBinding -> {
+            if (returnType == ExprCoreType.DATE) {
+                return UserDefinedFunctionUtils.NULLABLE_DATE_UDT;
+            } else if (returnType == ExprCoreType.TIME) {
+                return UserDefinedFunctionUtils.NULLABLE_TIME_UDT;
+            } else if (returnType == ExprCoreType.TIMESTAMP) {
+                return UserDefinedFunctionUtils.NULLABLE_TIMESTAMP_UDT;
+            } else {
+                throw new IllegalArgumentException("Unsupported return type: " + returnType);
+            }
+        };
+    }
 
-      String functionName =
-          switch (returnType) {
-            case ExprCoreType.DATE -> "currentDate";
-            case ExprCoreType.TIME -> "currentTime";
-            case ExprCoreType.TIMESTAMP -> "currentTimestamp";
-            default -> throw new IllegalArgumentException("Unsupported return type: " + returnType);
-          };
+    @RequiredArgsConstructor
+    public static class CurrentFunctionImplementor implements NotNullImplementor {
+        private final ExprType returnType;
+
+        @Override
+        public Expression implement(
+                RexToLixTranslator translator, RexCall call, List<Expression> translatedOperands) {
+
+            String functionName;
+            if (returnType == ExprCoreType.DATE) {
+                functionName = "currentDate";
+            } else if (returnType == ExprCoreType.TIME) {
+                functionName = "currentTime";
+            } else if (returnType == ExprCoreType.TIMESTAMP) {
+                functionName = "currentTimestamp";
+            } else {
+                throw new IllegalArgumentException("Unsupported return type: " + returnType);
+            }
 
       Expression properties =
           Expressions.call(

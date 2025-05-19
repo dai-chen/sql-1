@@ -77,8 +77,8 @@ public abstract class CalciteIndexScan extends TableScan {
      less than 1 by default to make the result always less than the row count of operator without
      push down. As a result, the optimizer will prefer the plan with push down.
     */
-    double estimateRowCountFactor =
-        osIndex.getSettings().getSettingValue(CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR);
+    double estimateRowCountFactor = 0.9;
+        // osIndex.getSettings().getSettingValue(CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR);
     return pushDownContext.stream()
         .reduce(
             osIndex.getMaxResultWindow().doubleValue(),
