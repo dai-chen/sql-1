@@ -28,19 +28,22 @@ public final class DateTimeConversionUtils {
    */
   public static ExprTimestampValue forceConvertToTimestampValue(
       ExprValue value, FunctionProperties properties) {
-    return switch (value) {
-      case ExprTimestampValue timestampValue -> timestampValue;
-      case ExprDateValue dateValue -> (ExprTimestampValue)
-          ExprValueUtils.timestampValue(dateValue.timestampValue());
-      case ExprTimeValue timeValue -> (ExprTimestampValue)
-          ExprValueUtils.timestampValue(timeValue.timestampValue(properties));
-      case ExprStringValue stringValue -> new ExprTimestampValue(
-          DateTimeParser.parse(stringValue.stringValue()));
-      default -> throw new SemanticCheckException(
+    if (value instanceof ExprTimestampValue) {
+      return (ExprTimestampValue) value;
+    } else if (value instanceof ExprDateValue) {
+      return (ExprTimestampValue)
+          ExprValueUtils.timestampValue(((ExprDateValue) value).timestampValue());
+    } else if (value instanceof ExprTimeValue) {
+      return (ExprTimestampValue)
+          ExprValueUtils.timestampValue(((ExprTimeValue) value).timestampValue(properties));
+    } else if (value instanceof ExprStringValue) {
+      return new ExprTimestampValue(DateTimeParser.parse(((ExprStringValue) value).stringValue()));
+    } else {
+      throw new SemanticCheckException(
           String.format(
               "Cannot convert %s to timestamp, only STRING, DATE, TIME and TIMESTAMP are supported",
               value.type()));
-    };
+    }
   }
 
   /**
@@ -84,25 +87,19 @@ public final class DateTimeConversionUtils {
    * @return the converted ExprDateValue
    */
   public static ExprDateValue convertToDateValue(ExprValue value, FunctionProperties properties) {
-    switch (value) {
-      case ExprDateValue dateValue -> {
-        return dateValue;
-      }
-      case ExprTimeValue timeValue -> {
-        return new ExprDateValue(timeValue.dateValue(properties));
-      }
-      case ExprTimestampValue timestampValue -> {
-        return new ExprDateValue(timestampValue.dateValue());
-      }
-      case ExprStringValue ignored -> {
-        return new ExprDateValue(value.stringValue());
-      }
-      default -> {
-        throw new SemanticCheckException(
-            String.format(
-                "Cannot convert %s to date, only STRING, DATE, TIME and TIMESTAMP are supported",
-                value.type()));
-      }
+    if (value instanceof ExprDateValue) {
+      return (ExprDateValue) value;
+    } else if (value instanceof ExprTimeValue) {
+      return new ExprDateValue(((ExprTimeValue) value).dateValue(properties));
+    } else if (value instanceof ExprTimestampValue) {
+      return new ExprDateValue(((ExprTimestampValue) value).dateValue());
+    } else if (value instanceof ExprStringValue) {
+      return new ExprDateValue(value.stringValue());
+    } else {
+      throw new SemanticCheckException(
+          String.format(
+              "Cannot convert %s to date, only STRING, DATE, TIME and TIMESTAMP are supported",
+              value.type()));
     }
   }
 
@@ -116,21 +113,31 @@ public final class DateTimeConversionUtils {
    * @return A temporal amount value, can be either a Period or a Duration
    */
   public static TemporalAmount convertToTemporalAmount(long number, TimeUnit unit) {
-    return switch (unit) {
-      case YEAR -> Period.ofYears((int) number);
-      case QUARTER -> Period.ofMonths((int) number * 3);
-      case MONTH -> Period.ofMonths((int) number);
-      case WEEK -> Period.ofWeeks((int) number);
-      case DAY -> Period.ofDays((int) number);
-      case HOUR -> Duration.ofHours(number);
-      case MINUTE -> Duration.ofMinutes(number);
-      case SECOND -> Duration.ofSeconds(number);
-      case MILLISECOND -> Duration.ofMillis(number);
-      case MICROSECOND -> Duration.ofNanos(number * 1000);
-      case NANOSECOND -> Duration.ofNanos(number);
-
-      default -> throw new UnsupportedOperationException(
-          "No mapping defined for Calcite TimeUnit: " + unit);
-    };
+    switch (unit) {
+      case YEAR:
+        return Period.ofYears((int) number);
+      case QUARTER:
+        return Period.ofMonths((int) number * 3);
+      case MONTH:
+        return Period.ofMonths((int) number);
+      case WEEK:
+        return Period.ofWeeks((int) number);
+      case DAY:
+        return Period.ofDays((int) number);
+      case HOUR:
+        return Duration.ofHours(number);
+      case MINUTE:
+        return Duration.ofMinutes(number);
+      case SECOND:
+        return Duration.ofSeconds(number);
+      case MILLISECOND:
+        return Duration.ofMillis(number);
+      case MICROSECOND:
+        return Duration.ofNanos(number * 1000);
+      case NANOSECOND:
+        return Duration.ofNanos(number);
+      default:
+        throw new UnsupportedOperationException("No mapping defined for Calcite TimeUnit: " + unit);
+    }
   }
 }

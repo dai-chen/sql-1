@@ -325,10 +325,10 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
     String regex = node.getPattern().toString();
     String commandName;
     switch (node.getParseMethod()) {
-      case ParseMethod.PATTERNS:
+      case PATTERNS:
         commandName = "patterns";
         break;
-      case ParseMethod.GROK:
+      case GROK:
         commandName = "grok";
         break;
       default:
@@ -336,8 +336,8 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
         break;
     }
     return ParseMethod.PATTERNS.equals(node.getParseMethod()) && regex.isEmpty()
-        ? StringUtils.format("%s | %s %s", child, commandName, source)
-        : StringUtils.format("%s | %s %s '%s'", child, commandName, source, regex);
+            ? StringUtils.format("%s | %s %s", child, commandName, source)
+            : StringUtils.format("%s | %s %s '%s'", child, commandName, source, regex);
   }
 
   @Override

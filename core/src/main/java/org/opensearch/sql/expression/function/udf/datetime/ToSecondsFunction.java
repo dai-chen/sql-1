@@ -23,6 +23,7 @@ import org.apache.calcite.sql.type.SqlReturnTypeInference;
 import org.opensearch.sql.data.model.ExprLongValue;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.data.type.ExprCoreType;
+import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.expression.function.FunctionProperties;
 import org.opensearch.sql.expression.function.ImplementorUDF;
 
@@ -59,12 +60,16 @@ public class ToSecondsFunction extends ImplementorUDF {
   }
 
   public static long toSeconds(FunctionProperties properties, ExprValue datetime) {
-    return switch (datetime.type()) {
-      case ExprCoreType.DATE, ExprCoreType.TIME, ExprCoreType.TIMESTAMP, ExprCoreType.STRING -> {
-        ExprValue dateTimeValue = convertToTimestampValue(datetime, properties);
-        yield exprToSeconds(dateTimeValue).longValue();
-      }
-      default -> exprToSecondsForIntType(new ExprLongValue(datetime.longValue())).longValue();
-    };
+    ExprType type = datetime.type();
+
+    if (type == ExprCoreType.DATE
+        || type == ExprCoreType.TIME
+        || type == ExprCoreType.TIMESTAMP
+        || type == ExprCoreType.STRING) {
+      ExprValue dateTimeValue = convertToTimestampValue(datetime, properties);
+      return exprToSeconds(dateTimeValue).longValue();
+    } else {
+      return exprToSecondsForIntType(new ExprLongValue(datetime.longValue())).longValue();
+    }
   }
 }

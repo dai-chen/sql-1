@@ -32,6 +32,10 @@ plugins {
 
 }
 
+plugins.withId('java') {
+    sourceCompatibility = targetCompatibility = JavaVersion.VERSION_17
+}
+
 repositories {
     mavenCentral()
 }

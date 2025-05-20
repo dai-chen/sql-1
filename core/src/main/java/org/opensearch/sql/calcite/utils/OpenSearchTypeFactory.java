@@ -270,38 +270,35 @@ public class OpenSearchTypeFactory extends JavaTypeFactoryImpl {
   }
 
   public static ExprValue getExprValueByExprType(ExprType type, Object value) {
-    switch (type) {
-      case UNDEFINED:
-        return ExprValueUtils.nullValue();
-      case BYTE:
-        return ExprValueUtils.byteValue((Byte) value);
-      case SHORT:
-        return ExprValueUtils.shortValue((Short) value);
-      case INTEGER:
-        return ExprValueUtils.integerValue((Integer) value);
-      case LONG:
-        return ExprValueUtils.longValue((Long) value);
-      case FLOAT:
-        return ExprValueUtils.floatValue((Float) value);
-      case DOUBLE:
-        return ExprValueUtils.doubleValue((Double) value);
-      case STRING:
-        return ExprValueUtils.stringValue((String) value);
-      case BOOLEAN:
-        return ExprValueUtils.booleanValue((Boolean) value);
-      case DATE:
-      case TIME:
-      case TIMESTAMP:
-        return ExprValueUtils.fromObjectValue(value);
-      case IP:
-        return ExprValueUtils.ipValue((String) value);
-      case ARRAY:
-        return ExprValueUtils.collectionValue((List<Object>) value);
-      case STRUCT:
-        return ExprValueUtils.tupleValue((Map<String, Object>) value);
-      default:
-        throw new IllegalArgumentException(
-            "Unsupported conversion for OpenSearch Data type: " + type.typeName());
+    if (type == UNDEFINED) {
+      return ExprValueUtils.nullValue();
+    } else if (type == BYTE) {
+      return ExprValueUtils.byteValue((Byte) value);
+    } else if (type == SHORT) {
+      return ExprValueUtils.shortValue((Short) value);
+    } else if (type == INTEGER) {
+      return ExprValueUtils.integerValue((Integer) value);
+    } else if (type == LONG) {
+      return ExprValueUtils.longValue((Long) value);
+    } else if (type == FLOAT) {
+      return ExprValueUtils.floatValue((Float) value);
+    } else if (type == DOUBLE) {
+      return ExprValueUtils.doubleValue((Double) value);
+    } else if (type == STRING) {
+      return ExprValueUtils.stringValue((String) value);
+    } else if (type == BOOLEAN) {
+      return ExprValueUtils.booleanValue((Boolean) value);
+    } else if (type == DATE || type == TIME || type == TIMESTAMP) {
+      return ExprValueUtils.fromObjectValue(value);
+    } else if (type == IP) {
+      return ExprValueUtils.ipValue((String) value);
+    } else if (type == ARRAY) {
+      return ExprValueUtils.collectionValue((List<Object>) value);
+    } else if (type == STRUCT) {
+      return ExprValueUtils.tupleValue((Map<String, Object>) value);
+    } else {
+      throw new IllegalArgumentException(
+          "Unsupported conversion for OpenSearch Data type: " + type.typeName());
     }
   }
 
