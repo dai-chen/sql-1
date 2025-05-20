@@ -36,7 +36,7 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-cbor', version: "${versions.jackson}"
     implementation 'com.google.code.gson:gson:2.8.9'
     implementation project(':core')
-    implementation project(':opensearch')
+    // implementation project(':opensearch')
 
     testImplementation('org.junit.jupiter:junit-jupiter:5.9.3')
     testImplementation group: 'org.hamcrest', name: 'hamcrest-library', version: "${hamcrest_version}"
