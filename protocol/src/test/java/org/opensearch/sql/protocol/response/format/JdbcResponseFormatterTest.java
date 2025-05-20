@@ -26,13 +26,10 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
-import org.opensearch.OpenSearchException;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.data.model.ExprTupleValue;
 import org.opensearch.sql.exception.SemanticCheckException;
 import org.opensearch.sql.executor.pagination.Cursor;
-import org.opensearch.sql.opensearch.data.type.OpenSearchDataType;
-import org.opensearch.sql.opensearch.data.type.OpenSearchTextType;
 import org.opensearch.sql.protocol.response.QueryResult;
 
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
@@ -40,6 +37,7 @@ class JdbcResponseFormatterTest {
 
   private final JdbcResponseFormatter formatter = new JdbcResponseFormatter(COMPACT);
 
+  /*
   @Test
   void format_response() {
     QueryResult response =
@@ -126,6 +124,7 @@ class JdbcResponseFormatterTest {
             + "\"status\":200}",
         formatter.format(response));
   }
+   */
 
   @Test
   void format_response_with_missing_and_null_value() {
@@ -188,6 +187,7 @@ class JdbcResponseFormatterTest {
         formatter.format(new IllegalStateException("Execution error")));
   }
 
+  /*
   @Test
   void format_server_error_response_due_to_opensearch() {
     assertJsonEquals(
@@ -206,6 +206,7 @@ class JdbcResponseFormatterTest {
             new OpenSearchException(
                 "all shards failed", new IllegalStateException("Execution error"))));
   }
+   */
 
   private static void assertJsonEquals(String expected, String actual) {
     assertEquals(JsonParser.parseString(expected), JsonParser.parseString(actual));

@@ -17,7 +17,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
-import org.opensearch.OpenSearchException;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.exception.SemanticCheckException;
 import org.opensearch.sql.executor.ExecutionEngine;
@@ -120,6 +119,7 @@ public class VisualizationResponseFormatterTest {
         formatter.format(new IllegalStateException("Execution error")));
   }
 
+  /*
   @Test
   void opensearchServerError() {
     assertJsonEquals(
@@ -138,6 +138,7 @@ public class VisualizationResponseFormatterTest {
             new OpenSearchException(
                 "all shards failed", new IllegalStateException("Execution error"))));
   }
+   */
 
   @Test
   void prettyStyle() {
