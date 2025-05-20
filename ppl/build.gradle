@@ -121,3 +121,30 @@ jacocoTestCoverageVerification {
     }
 }
 check.dependsOn jacocoTestCoverageVerification
+
+task customFatJar(type: Jar) {
+    dependsOn ':core:jar', ':common:jar', ':protocol:jar'
+
+    archiveBaseName = 'all-in-one-jar'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath
+        // remove any jar whose name contains “jackson-databind” or “jackson-core”
+                .findAll { file ->
+                    !file.name.toLowerCase().contains("jackson")
+                }
+        // unzip directories vs jars
+                .collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+
+    // Avoid signature issues in META-INF
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+
+    // Do NOT include a Main-Class (because you're using it as a library)
+    manifest {
+        attributes.clear() // make sure to clear any inherited attributes
+    }
+}
