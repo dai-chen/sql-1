@@ -223,13 +223,13 @@ public class ExprValueUtils {
     ExprValue wholePathValue = value.keyValue(String.join(PATH_SEP, paths));
     // For array types only first index currently supported.
     if (value.type().equals(ExprCoreType.ARRAY)) {
-      wholePathValue = value.collectionValue().getFirst().keyValue(paths.getFirst());
+      wholePathValue = value.collectionValue().get(0).keyValue(paths.get(0));
     }
 
     if (!wholePathValue.isMissing() || paths.size() == 1) {
       return wholePathValue;
     } else {
-      return resolveRefPaths(value.keyValue(paths.getFirst()), paths.subList(1, paths.size()));
+      return resolveRefPaths(value.keyValue(paths.get(0)), paths.subList(1, paths.size()));
     }
   }
 }

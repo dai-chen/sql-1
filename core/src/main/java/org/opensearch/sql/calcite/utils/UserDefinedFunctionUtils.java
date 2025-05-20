@@ -83,7 +83,7 @@ public class UserDefinedFunctionUtils {
       if (argTypes.isEmpty()) {
         throw new IllegalArgumentException("Function requires at least one argument.");
       }
-      RelDataType firstArgType = argTypes.getFirst();
+      RelDataType firstArgType = argTypes.get(0);
       return createArrayType(typeFactory, firstArgType, true);
     };
   }
@@ -177,7 +177,7 @@ public class UserDefinedFunctionUtils {
     Expression properties =
         Expressions.call(
             UserDefinedFunctionUtils.class, "restoreFunctionProperties", translator.getRoot());
-    operandsWithProperties.addFirst(properties);
+    operandsWithProperties.add(0, properties);
     return Collections.unmodifiableList(operandsWithProperties);
   }
 

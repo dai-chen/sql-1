@@ -193,7 +193,7 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
       throw new SemanticCheckException(
           StringUtils.format(
               "In expression types are incompatible: fields type %s, values type %s",
-              exprTypes.getLast(), exprTypes.subList(0, exprTypes.size() - 1)));
+              exprTypes.get(exprTypes.size() - 1), exprTypes.subList(0, exprTypes.size() - 1)));
     }
   }
 
@@ -259,9 +259,9 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
       if (parts.size() == 1) {
         // 1.1 Handle the case of `id = cid`
         try {
-          return context.relBuilder.field(2, 0, parts.getFirst());
+          return context.relBuilder.field(2, 0, parts.get(0));
         } catch (IllegalArgumentException ee) {
-          return context.relBuilder.field(2, 1, parts.getFirst());
+          return context.relBuilder.field(2, 1, parts.get(0));
         }
       } else if (parts.size() == 2) {
         // 1.2 Handle the case of `t1.id = t2.id` or `alias1.id = alias2.id`
@@ -359,7 +359,7 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
     return BuiltinFunctionName.ofWindowFunction(windowFunction.getFuncName())
         .map(
             functionName -> {
-              RexNode field = arguments.isEmpty() ? null : arguments.getFirst();
+              RexNode field = arguments.isEmpty() ? null : arguments.get(0);
               List<RexNode> args =
                   (arguments.isEmpty() || arguments.size() == 1)
                       ? Collections.emptyList()
@@ -394,7 +394,7 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
       // The {@link org.apache.calcite.tools.RelBuilder#in(RexNode,java.util.function.Function)}
       // only support one expression. Change to follow code after calcite fixed.
       //    return context.relBuilder.in(
-      //        nodes.getFirst(),
+      //        nodes.get(0),
       //        b -> {
       //          RelNode subqueryRel = subquery.accept(planVisitor, context);
       //          b.build();

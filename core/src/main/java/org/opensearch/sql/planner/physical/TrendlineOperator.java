@@ -65,7 +65,7 @@ public class TrendlineOperator extends PhysicalPlan {
 
   @Override
   public boolean hasNext() {
-    return getChild().getFirst().hasNext();
+    return getChild().get(0).hasNext();
   }
 
   @Override
