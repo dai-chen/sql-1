@@ -61,8 +61,7 @@ public class FormatFunction extends ImplementorUDF {
     public Expression implement(
         RexToLixTranslator translator, RexCall call, List<Expression> translatedOperands) {
       ExprType type =
-          OpenSearchTypeFactory.convertRelDataTypeToExprType(
-              call.getOperands().get(0).getType());
+          OpenSearchTypeFactory.convertRelDataTypeToExprType(call.getOperands().get(0).getType());
       Expression functionProperties =
           Expressions.call(
               UserDefinedFunctionUtils.class, "restoreFunctionProperties", translator.getRoot());

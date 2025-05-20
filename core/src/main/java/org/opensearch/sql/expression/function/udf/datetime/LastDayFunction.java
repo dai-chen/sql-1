@@ -55,8 +55,7 @@ public class LastDayFunction extends ImplementorUDF {
       Expression datetime = exprOperandsWithProperties.get(1);
 
       ExprType datetimeType =
-          OpenSearchTypeFactory.convertRelDataTypeToExprType(
-              call.getOperands().get(0).getType());
+          OpenSearchTypeFactory.convertRelDataTypeToExprType(call.getOperands().get(0).getType());
       if (ExprCoreType.TIME == datetimeType) {
         return Expressions.call(LastDayImplementor.class, "lastDayToday", properties);
       }

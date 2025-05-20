@@ -10,10 +10,8 @@ import static org.opensearch.sql.data.model.ExprValueUtils.LITERAL_MISSING;
 import static org.opensearch.sql.data.model.ExprValueUtils.LITERAL_NULL;
 import static org.opensearch.sql.data.model.ExprValueUtils.stringValue;
 import static org.opensearch.sql.data.model.ExprValueUtils.tupleValue;
-import static org.opensearch.sql.data.type.ExprCoreType.ARRAY;
 import static org.opensearch.sql.data.type.ExprCoreType.INTEGER;
 import static org.opensearch.sql.data.type.ExprCoreType.STRING;
-import static org.opensearch.sql.data.type.ExprCoreType.STRUCT;
 import static org.opensearch.sql.executor.ExecutionEngine.Schema;
 import static org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
 import static org.opensearch.sql.protocol.response.format.JsonResponseFormatter.Style.COMPACT;
@@ -22,14 +20,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.gson.JsonParser;
 import java.util.Arrays;
-import java.util.Map;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.data.model.ExprTupleValue;
 import org.opensearch.sql.exception.SemanticCheckException;
-import org.opensearch.sql.executor.pagination.Cursor;
 import org.opensearch.sql.protocol.response.QueryResult;
 
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)

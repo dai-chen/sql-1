@@ -59,8 +59,7 @@ public class PeriodNameFunction extends ImplementorUDF {
     public Expression implement(
         RexToLixTranslator translator, RexCall call, List<Expression> translatedOperands) {
       ExprType dateType =
-          OpenSearchTypeFactory.convertRelDataTypeToExprType(
-              call.getOperands().get(0).getType());
+          OpenSearchTypeFactory.convertRelDataTypeToExprType(call.getOperands().get(0).getType());
       return Expressions.call(
           PeriodNameFunctionImplementor.class,
           "name",
