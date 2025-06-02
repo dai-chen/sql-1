@@ -1,0 +1,49 @@
+/*
+ * Copyright OpenSearch Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    implementation project(":ppl")
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release.set(17) // ✅ This adds --release 17
+}
+
+task customFatJar(type: Jar) {
+    dependsOn ':ppl:jar', ':core:jar', ':common:jar', ':protocol:jar'
+
+    archiveBaseName = 'unified-engine-api-jar'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath
+        // remove any jar whose name contains “jackson-databind” or “jackson-core”
+                .findAll { file ->
+                    !file.name.toLowerCase().contains("jackson")
+                }
+        // unzip directories vs jars
+                .collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+
+    // Avoid signature issues in META-INF
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+
+    // Do NOT include a Main-Class (because you're using it as a library)
+    manifest {
+        attributes.clear() // make sure to clear any inherited attributes
+    }
+}
