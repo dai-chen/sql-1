@@ -31,6 +31,7 @@ import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.RangeQueryBuilder;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.index.query.TermsQueryBuilder;
+import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.opensearch.data.type.OpenSearchDataType;
 import org.opensearch.sql.opensearch.data.type.OpenSearchDataType.MappingType;
@@ -42,7 +43,7 @@ public class PredicateAnalyzerTest {
   final List<String> schema = List.of("a", "b", "c");
   final Map<String, ExprType> fieldTypes =
       Map.of(
-          "a", OpenSearchDataType.of(MappingType.Integer),
+          "a", ExprCoreType.INTEGER, // OpenSearchDataType.of(MappingType.Integer),
           "b",
               OpenSearchDataType.of(
                   MappingType.Text, Map.of("fields", Map.of("keyword", Map.of("type", "keyword")))),

@@ -38,7 +38,6 @@ import static org.opensearch.index.query.QueryBuilders.regexpQuery;
 import static org.opensearch.index.query.QueryBuilders.termQuery;
 import static org.opensearch.index.query.QueryBuilders.termsQuery;
 
-import com.google.common.base.Throwables;
 import com.google.common.collect.Range;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -65,9 +64,20 @@ import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.RangeQueryBuilder;
 import org.opensearch.sql.calcite.plan.OpenSearchConstants;
+import org.opensearch.sql.data.model.ExprValue;
+import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprType;
+import org.opensearch.sql.executor.QueryType;
+import org.opensearch.sql.expression.Expression;
+import org.opensearch.sql.expression.LiteralExpression;
+import org.opensearch.sql.expression.ReferenceExpression;
+import org.opensearch.sql.expression.function.BuiltinFunctionName;
+import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
+import org.opensearch.sql.expression.function.FunctionProperties;
 import org.opensearch.sql.opensearch.data.type.OpenSearchDataType.MappingType;
 import org.opensearch.sql.opensearch.data.type.OpenSearchTextType;
+import org.opensearch.sql.opensearch.storage.script.filter.FilterQueryBuilder;
+import org.opensearch.sql.opensearch.storage.serialization.DefaultExpressionSerializer;
 
 /**
  * Query predicate analyzer. Uses visitor pattern to traverse existing expression and convert it to
@@ -125,6 +135,52 @@ public class PredicateAnalyzer {
       RexNode expression, List<String> schema, Map<String, ExprType> filedTypes)
       throws ExpressionNotAnalyzableException {
     requireNonNull(expression, "expression");
+
+    // Convert RexCall to V2 Expression tree and reuse FilterQueryBuilder
+    RexCall call = (RexCall) expression;
+    long convertStartTime = System.currentTimeMillis();
+    org.opensearch.sql.expression.Expression v2Expression =
+        call.accept(
+            new RexVisitorImpl<>(true) {
+              @Override
+              public org.opensearch.sql.expression.Expression visitCall(RexCall call) {
+                List<org.opensearch.sql.expression.Expression> v2ArgList =
+                    call.operands.stream().map(arg -> arg.accept(this)).toList();
+                return (org.opensearch.sql.expression.Expression)
+                    BuiltinFunctionRepository.getInstance()
+                        .compile(
+                            new FunctionProperties(QueryType.PPL),
+                            BuiltinFunctionName.of(call.getOperator().getName()).get().getName(),
+                            v2ArgList);
+              }
+
+              @Override
+              public org.opensearch.sql.expression.Expression visitInputRef(RexInputRef inputRef) {
+                NamedFieldExpression v3Expr =
+                    new NamedFieldExpression(inputRef, schema, filedTypes);
+                return new ReferenceExpression(v3Expr.name, v3Expr.type);
+              }
+
+              @Override
+              public org.opensearch.sql.expression.Expression visitLiteral(RexLiteral literal) {
+                Object value = new LiteralExpression(literal).value();
+                ExprValue exprValue = ExprValueUtils.fromObjectValue(value);
+                return new org.opensearch.sql.expression.LiteralExpression(exprValue);
+              }
+            });
+    long convertElapsed = System.currentTimeMillis() - convertStartTime;
+
+    long pushdownStartTime = System.currentTimeMillis();
+    FilterQueryBuilder filterQueryBuilder =
+        new FilterQueryBuilder(new DefaultExpressionSerializer());
+    QueryBuilder dslQuery = filterQueryBuilder.build(v2Expression);
+    long pushdownElapsed = System.currentTimeMillis() - pushdownStartTime;
+
+    System.out.printf("Convert to V2 expression in [%d] ms: %s%n", convertElapsed, v2Expression);
+    System.out.printf("Push down to DSL in [%d] ms: %s%n", pushdownElapsed, dslQuery);
+    return dslQuery;
+
+    /*
     try {
       // visits expression tree
       QueryExpression queryExpression =
@@ -139,6 +195,7 @@ public class PredicateAnalyzer {
       Throwables.throwIfInstanceOf(e, UnsupportedOperationException.class);
       throw new ExpressionNotAnalyzableException("Can't convert " + expression, e);
     }
+    */
   }
 
   /** Traverses {@link RexNode} tree and builds OpenSearch query. */
