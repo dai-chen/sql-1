@@ -48,18 +48,30 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.rel2sql.RelToSqlConverter;
+import org.apache.calcite.rel.rel2sql.SqlImplementor;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexSqlStandardConvertletTable;
+import org.apache.calcite.rex.RexToSqlNodeConverter;
+import org.apache.calcite.rex.RexToSqlNodeConverterImpl;
 import org.apache.calcite.rex.RexVisitorImpl;
+import org.apache.calcite.sql.SqlDialect;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlSyntax;
+import org.apache.calcite.sql.dialect.SparkSqlDialect;
+import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.sql.util.SqlString;
 import org.apache.calcite.util.NlsString;
 import org.apache.calcite.util.Sarg;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.RangeQueryBuilder;
@@ -136,6 +148,21 @@ public class PredicateAnalyzer {
       throws ExpressionNotAnalyzableException {
     requireNonNull(expression, "expression");
 
+    // Approach 1:
+    RexSqlStandardConvertletTable convertletTable = new RexSqlStandardConvertletTable();
+    RexToSqlNodeConverter sqlNodeToRexConverter = new RexToSqlNodeConverterImpl(convertletTable) {
+      @Override
+      public @Nullable SqlNode convertInputRef(RexInputRef ref) {
+        int index = ref.getIndex();
+        String fieldName = schema.get(index);
+        return new SqlIdentifier(fieldName, SqlParserPos.ZERO);
+      }
+    };
+    SqlNode sqlNode = sqlNodeToRexConverter.convertNode(expression);
+    SqlString sqlString = sqlNode.toSqlString(SparkSqlDialect.DEFAULT);
+    System.out.println("Convert back to SQL string: " + sqlString);
+
+    // Approach 2:
     // Convert RexCall to V2 Expression tree and reuse FilterQueryBuilder
     RexCall call = (RexCall) expression;
     long convertStartTime = System.currentTimeMillis();
