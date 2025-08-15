@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -210,8 +211,28 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
   }
 
   @Override
+  public UnresolvedExpression visitPercIntFunctionCall(OpenSearchPPLParser.PercIntFunctionCallContext ctx) {
+    String percent = ctx.PERC_NUM().getText().substring(4);
+    return new AggregateFunction("percentile",
+            visit(ctx.valueExpression()),
+            List.of(new UnresolvedArgument("percent",
+                    AstDSL.intLiteral(Integer.parseInt(percent)))));
+  }
+
+  @Override
   public UnresolvedExpression visitCountAllFunctionCall(CountAllFunctionCallContext ctx) {
     return new AggregateFunction("count", AllFields.of());
+  }
+
+  @Override
+  public UnresolvedExpression visitCountEvalFunctionCall(OpenSearchPPLParser.CountEvalFunctionCallContext ctx) {
+    return new AggregateFunction("count", AstDSL.intLiteral(1))
+            .condition(ctx.evalValueExpression().accept(this)); // be cautious to avoid star expand
+  }
+
+  @Override
+  public UnresolvedExpression visitEvalValueExpression(OpenSearchPPLParser.EvalValueExpressionContext ctx) {
+    return ctx.logicalExpression().accept(this);
   }
 
   @Override

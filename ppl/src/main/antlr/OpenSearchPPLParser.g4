@@ -410,10 +410,16 @@ statsAggTerm
 statsFunction
    : statsFunctionName LT_PRTHS valueExpression RT_PRTHS        # statsFunctionCall
    | COUNT LT_PRTHS RT_PRTHS                                    # countAllFunctionCall
+   | COUNT LT_PRTHS evalValueExpression RT_PRTHS                # countEvalFunctionCall
+   | PERC_NUM LT_PRTHS valueExpression RT_PRTHS #percIntFunctionCall
    | (DISTINCT_COUNT | DC | DISTINCT_COUNT_APPROX) LT_PRTHS valueExpression RT_PRTHS    # distinctCountFunctionCall
    | takeAggFunction                                            # takeAggFunctionCall
    | percentileApproxFunction                                   # percentileApproxFunctionCall
    ;
+
+evalValueExpression
+    : EVAL LT_PRTHS logicalExpression RT_PRTHS
+    ;
 
 statsFunctionName
    : AVG

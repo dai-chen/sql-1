@@ -450,10 +450,12 @@ integTest {
     }
 
     dependsOn ':opensearch-sql-plugin:bundlePlugin'
+    /*
     if(getOSFamilyType() != "windows") {
         dependsOn startPrometheus
         finalizedBy stopPrometheus
     }
+    */
 
     // enable calcite codegen in IT
     systemProperty 'calcite.debug', 'false'

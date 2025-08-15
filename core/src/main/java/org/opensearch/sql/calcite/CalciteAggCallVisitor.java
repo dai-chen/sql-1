@@ -47,8 +47,12 @@ public class CalciteAggCallVisitor extends AbstractNodeVisitor<AggCall, CalciteP
     return BuiltinFunctionName.ofAggregation(node.getFuncName())
         .map(
             functionName -> {
-              return PlanUtils.makeAggCall(
-                  context, functionName, node.getDistinct(), field, argList);
+              AggCall aggCall = PlanUtils.makeAggCall(
+                      context, functionName, node.getDistinct(), field, argList);
+              if (node.condition() != null) {
+                return aggCall.filter(rexNodeVisitor.analyze(node.condition(), context));
+              }
+              return aggCall;
             })
         .orElseThrow(
             () ->

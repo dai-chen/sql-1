@@ -33,6 +33,18 @@ public class CalcitePPLAggregationTest extends CalcitePPLAbstractTest {
   }
 
   @Test
+  public void testEvalCount() {
+    String ppl = "source=EMP | stats count(eval(SAL > 1)) as c";
+    RelNode root = getRelNode(ppl);
+
+    String expectedResult = "c=14\n";
+    verifyResult(root, expectedResult);
+
+    String expectedSparkSql = "" + "SELECT COUNT(*) `c`\n" + "FROM `scott`.`EMP`";
+    verifyPPLToSparkSQL(root, expectedSparkSql);
+  }
+
+  @Test
   public void testTakeAgg() {
     String ppl = "source=EMP | stats take(JOB, 2) as c";
     RelNode root = getRelNode(ppl);
