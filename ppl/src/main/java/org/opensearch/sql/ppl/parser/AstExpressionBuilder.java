@@ -226,8 +226,12 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
 
   @Override
   public UnresolvedExpression visitCountEvalFunctionCall(OpenSearchPPLParser.CountEvalFunctionCallContext ctx) {
-    return new AggregateFunction("count", AstDSL.intLiteral(1))
-            .condition(ctx.evalValueExpression().accept(this)); // be cautious to avoid star expand
+    // return new AggregateFunction("count", AstDSL.intLiteral(1))
+    //        .condition(ctx.evalValueExpression().accept(this)); // be cautious to avoid star expand
+    UnresolvedExpression predicate = visit(ctx.evalValueExpression());
+    return new AggregateFunction("count",
+            AstDSL.caseWhen(null,
+                    AstDSL.when(predicate, AstDSL.intLiteral(1))));
   }
 
   @Override

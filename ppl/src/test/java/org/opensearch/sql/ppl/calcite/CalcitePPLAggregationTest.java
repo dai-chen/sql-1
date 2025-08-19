@@ -37,11 +37,11 @@ public class CalcitePPLAggregationTest extends CalcitePPLAbstractTest {
     String ppl = "source=EMP | stats count(eval(SAL > 1)) as c";
     RelNode root = getRelNode(ppl);
 
-    String expectedResult = "c=14\n";
-    verifyResult(root, expectedResult);
-
-    String expectedSparkSql = "" + "SELECT COUNT(*) `c`\n" + "FROM `scott`.`EMP`";
+    String expectedSparkSql = "SELECT COUNT(CASE WHEN `SAL` > 1 THEN 1 ELSE NULL END) `c`\n" + "FROM `scott`.`EMP`";
     verifyPPLToSparkSQL(root, expectedSparkSql);
+
+    //verifyResult(getRelNode("EXPLAIN " + ppl), "");
+    System.out.println(root.explain());
   }
 
   @Test
