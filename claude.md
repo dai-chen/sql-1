@@ -107,6 +107,20 @@ JAVA_HOME=/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home
 - **Factory Pattern**: Consistent object creation and lifecycle management
 - **Strategy Pattern**: Pluggable algorithms for query optimization
 
+## 🤖 Specialized Agents
+
+### PPL Command Development Agent
+For adding new PPL commands, use the dedicated subagent available at `.claude/agents/ppl-command-developer.md`.
+
+This specialized agent systematically follows the complete checklist from `docs/dev/ppl-commands.md` and handles:
+- Prerequisites & RFC validation
+- Grammar & parser implementation (ANTLR)
+- AST development with proper visitor patterns
+- Comprehensive testing at all levels (unit, integration, explain, etc.)
+- User documentation creation
+
+To use: Provide the command specification (syntax, purpose, examples) and the agent will implement all required components following established patterns and quality standards.
+
 ## 📖 Additional Resources
 
 - **[Complete Repository](https://github.com/ykmr1224/opensearch-sql-cline-memory-bank-rules)**: Full Cline memory bank with all documentation
