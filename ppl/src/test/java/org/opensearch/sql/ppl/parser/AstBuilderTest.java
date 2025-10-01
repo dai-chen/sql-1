@@ -1078,12 +1078,18 @@ public class AstBuilderTest {
   public void testTimechartWithPerSecondFunction() {
     assertEqual(
         "source=t | timechart per_second(a)",
-        eval(
-            new Timechart(relation("t"), aggregate("sum", field("a")))
-                .span(span(field("@timestamp"), intLiteral(1), SpanUnit.of("m")))
-                .limit(10)
-                .useOther(true),
-            let(field("per_second(a)"), function("/", field("sum(a)"), doubleLiteral(60.0)))));
+        new Timechart(
+                relation("t"),
+                alias(
+                    "per_second(a)",
+                    aggregate(
+                        "internal_per_function",
+                        field("a"),
+                        stringLiteral("s"),
+                        doubleLiteral(60.0))))
+            .span(span(field("@timestamp"), intLiteral(1), SpanUnit.of("m")))
+            .limit(10)
+            .useOther(true));
   }
 
   @Test

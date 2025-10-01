@@ -25,11 +25,14 @@ import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.ReturnTypes;
+import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeTransforms;
 import org.apache.calcite.sql.util.ReflectiveSqlOperatorTable;
 import org.apache.calcite.util.BuiltInMethod;
 import org.opensearch.sql.calcite.udf.udaf.FirstAggFunction;
+import org.opensearch.sql.calcite.udf.udaf.InternalPerFunctionAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.LastAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.ListAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.LogPatternAggFunction;
@@ -448,6 +451,14 @@ public class PPLBuiltinOperators extends ReflectiveSqlOperatorTable {
   public static final SqlAggFunction LIST =
       createUserDefinedAggFunction(
           ListAggFunction.class, "LIST", PPLReturnTypes.STRING_ARRAY, PPLOperandTypes.ANY_SCALAR);
+  public static final SqlAggFunction INTERNAL_PER_FUNCTION =
+      createUserDefinedAggFunction(
+          InternalPerFunctionAggFunction.class,
+          "internal_per_function",
+          ReturnTypes.DOUBLE_FORCE_NULLABLE,
+          UDFOperandMetadata.wrap(
+              OperandTypes.family(
+                  SqlTypeFamily.NUMERIC, SqlTypeFamily.CHARACTER, SqlTypeFamily.NUMERIC)));
 
   public static final SqlOperator ENHANCED_COALESCE =
       new EnhancedCoalesceFunction().toUDF("COALESCE");

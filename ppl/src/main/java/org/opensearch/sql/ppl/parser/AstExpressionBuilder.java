@@ -545,7 +545,114 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
       throw new SyntaxCheckException(
           "per_second function can only be used within timechart command");
     }
-    return buildAggregateFunction("per_second", Arrays.asList(ctx.perFunction().functionArg()));
+
+    // For now, only per_second is supported
+    String unit = "s";
+
+    // Extract interval from timechart span
+    TimechartCommandContext timechartCtx = (TimechartCommandContext) parent;
+    long intervalSeconds = extractIntervalSeconds(timechartCtx);
+
+    // Build internal_per_function call with field, unit, and interval_seconds
+    UnresolvedExpression fieldArg = visitFunctionArg(ctx.perFunction().functionArg());
+    UnresolvedExpression unitArg = new Literal(unit, DataType.STRING);
+    UnresolvedExpression intervalArg = new Literal((double) intervalSeconds, DataType.DOUBLE);
+
+    AggregateFunction internalFunc =
+        new AggregateFunction(
+            "internal_per_function", fieldArg, Arrays.asList(unitArg, intervalArg));
+
+    // Create an alias to preserve the original function name in the result
+    String originalFuncName = ctx.perFunction().getText();
+    return new Alias(originalFuncName, internalFunc);
+  }
+
+  /** Extracts the interval in seconds from a timechart command context. */
+  private long extractIntervalSeconds(TimechartCommandContext ctx) {
+    // Look for span information in timechart parameters
+    for (OpenSearchPPLParser.TimechartParameterContext paramCtx : ctx.timechartParameter()) {
+      if (paramCtx.spanClause() != null) {
+        return convertSpanToSeconds(paramCtx.spanClause());
+      } else if (paramCtx.spanLiteral() != null) {
+        return convertSpanLiteralToSeconds(paramCtx.spanLiteral());
+      }
+    }
+
+    // Default to 1 minute if no span specified
+    return 60L;
+  }
+
+  /** Converts a span clause to seconds. */
+  private long convertSpanToSeconds(SpanClauseContext spanCtx) {
+    // Get the numeric value
+    long value;
+    if (spanCtx.value.getChild(0) instanceof IntegerLiteralContext) {
+      IntegerLiteralContext intCtx = (IntegerLiteralContext) spanCtx.value.getChild(0);
+      value = Long.parseLong(intCtx.getText());
+    } else {
+      throw new SyntaxCheckException("Span value must be an integer");
+    }
+
+    // Get the unit and convert to seconds
+    String unit = spanCtx.unit != null ? spanCtx.unit.getText().toLowerCase() : "";
+    return convertToSeconds(value, unit);
+  }
+
+  /** Converts a span literal to seconds (e.g., "1h", "30m"). */
+  private long convertSpanLiteralToSeconds(OpenSearchPPLParser.SpanLiteralContext spanLiteral) {
+    if (spanLiteral.integerLiteral() != null && spanLiteral.timespanUnit() != null) {
+      long value = Long.parseLong(spanLiteral.integerLiteral().getText());
+      String unit = spanLiteral.timespanUnit().getText().toLowerCase();
+      return convertToSeconds(value, unit);
+    } else if (spanLiteral.integerLiteral() != null) {
+      // Default to seconds if no unit specified
+      return Long.parseLong(spanLiteral.integerLiteral().getText());
+    }
+
+    // Default to 1 minute for other cases
+    return 60L;
+  }
+
+  /** Converts a value with time unit to seconds. */
+  private long convertToSeconds(long value, String unit) {
+    switch (unit) {
+      case "s":
+      case "sec":
+      case "second":
+      case "seconds":
+        return value;
+      case "m":
+      case "min":
+      case "minute":
+      case "minutes":
+        return value * 60;
+      case "h":
+      case "hr":
+      case "hour":
+      case "hours":
+        return value * 3600;
+      case "d":
+      case "day":
+      case "days":
+        return value * 86400;
+      case "w":
+      case "week":
+      case "weeks":
+        return value * 604800; // 7 * 24 * 3600
+      case "mon":
+      case "month":
+      case "months":
+        return value * 2592000; // 30 * 24 * 3600 (approximate)
+      case "y":
+      case "year":
+      case "years":
+        return value * 31536000; // 365 * 24 * 3600 (approximate)
+      case "":
+        // Default to minutes if no unit specified (common in timechart)
+        return value * 60;
+      default:
+        throw new SyntaxCheckException("Unsupported time unit: " + unit);
+    }
   }
 
   /** Literal and value. */

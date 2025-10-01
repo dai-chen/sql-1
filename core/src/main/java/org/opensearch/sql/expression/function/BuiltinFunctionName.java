@@ -325,7 +325,8 @@ public enum BuiltinFunctionName {
   INTERNAL_REGEXP_REPLACE_3(FunctionName.of("regexp_replace_3"), true),
   INTERNAL_REGEXP_REPLACE_PG_4(FunctionName.of("regexp_replace_pg_4"), true),
   INTERNAL_REGEXP_REPLACE_5(FunctionName.of("regexp_replace_5"), true),
-  INTERNAL_TRANSLATE3(FunctionName.of("translate3"), true);
+  INTERNAL_TRANSLATE3(FunctionName.of("translate3"), true),
+  INTERNAL_PER_FUNCTION(FunctionName.of("internal_per_function"), true);
 
   private final FunctionName name;
   private boolean isInternal;
@@ -365,6 +366,7 @@ public enum BuiltinFunctionName {
           .put("pattern", BuiltinFunctionName.INTERNAL_PATTERN)
           .put("first", BuiltinFunctionName.FIRST)
           .put("last", BuiltinFunctionName.LAST)
+          .put("internal_per_function", BuiltinFunctionName.INTERNAL_PER_FUNCTION)
           .build();
 
   private static final Map<String, BuiltinFunctionName> WINDOW_FUNC_MAPPING =
