@@ -71,13 +71,13 @@ This is a step-by-step workflow for implementing PPL commands. Follow each step 
   - **VERIFY**: Compilation successful
 
 #### Step 5.3: Calcite Query Planner (CRITICAL)
-- [ ] **UPDATE**: `opensearch/src/main/java/org/opensearch/sql/opensearch/planner/CalciteRelNodeVisitor.java`
+- [ ] **UPDATE**: `core/src/main/java/org/opensearch/sql/calcite/CalciteRelNodeVisitor.java`
   - Add visitor method for query plan generation
   - Follow patterns from similar commands
   - Handle logical plan creation
 
 #### Step 5.4: Data Anonymizer (REQUIRED)
-- [ ] **UPDATE**: `core/src/main/java/org/opensearch/sql/analysis/PPLQueryDataAnonymizer.java`
+- [ ] **UPDATE**: `core/src/main/java/org/opensearch/sql/ppl/utils/PPLQueryDataAnonymizer.java`
   - Add visitor method for data anonymization
   - Follow privacy patterns from similar commands
 
@@ -131,7 +131,7 @@ This is a step-by-step workflow for implementing PPL commands. Follow each step 
 - [ ] **VERIFY**: New command doesn't break v2 engine
 
 ### Step 13: Anonymizer Tests
-- [ ] **UPDATE**: `core/src/test/java/org/opensearch/sql/analysis/PPLQueryDataAnonymizerTest.java`
+- [ ] **UPDATE**: `core/src/test/java/org/opensearch/sql/ppl/utils/PPLQueryDataAnonymizerTest.java`
 - [ ] **ADD**: Test for data privacy/anonymization
 - [ ] **VERIFY**: Sensitive data is properly handled
 
