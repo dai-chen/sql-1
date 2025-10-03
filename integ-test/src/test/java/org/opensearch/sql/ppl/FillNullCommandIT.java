@@ -212,4 +212,5 @@ public class FillNullCommandIT extends PPLIntegTestCase {
         rows("sixteen", 16.81),
         rows("unknown", 7.12));
   }
+
 }

@@ -944,6 +944,20 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
     return FillNull.ofVariousValue(replacementsBuilder.build());
   }
 
+  /** fillnull command with value= syntax. */
+  @Override
+  public UnresolvedPlan visitFillNullValue(OpenSearchPPLParser.FillNullValueContext ctx) {
+    if (ctx.fieldList() != null) {
+      return FillNull.ofSameValue(
+          internalVisitExpression(ctx.replacement),
+          ctx.fieldList().fieldExpression().stream()
+              .map(f -> (Field) internalVisitExpression(f))
+              .toList());
+    } else {
+      return FillNull.ofSameValue(internalVisitExpression(ctx.replacement), List.of());
+    }
+  }
+
   @Override
   public UnresolvedPlan visitFlattenCommand(OpenSearchPPLParser.FlattenCommandContext ctx) {
     Field field = (Field) internalVisitExpression(ctx.fieldExpression());

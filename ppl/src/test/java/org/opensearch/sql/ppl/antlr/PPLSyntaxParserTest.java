@@ -655,6 +655,15 @@ public class PPLSyntaxParserTest {
   }
 
   @Test
+  public void testCanParseFillNullValueSyntax() {
+    assertNotNull(new PPLSyntaxParser().parse("SOURCE=test | fillnull value=\"<not found>\" a"));
+    assertNotNull(new PPLSyntaxParser().parse("SOURCE=test | fillnull value=\"<not found>\" a, b"));
+    assertNotNull(new PPLSyntaxParser().parse("SOURCE=test | fillnull value='<not found>'"));
+    assertNotNull(new PPLSyntaxParser().parse("SOURCE=test | fillnull value=999 a"));
+    assertNotNull(new PPLSyntaxParser().parse("SOURCE=test | fillnull value=0.0 a, b, c"));
+  }
+
+  @Test
   public void testLineCommentShouldPass() {
     assertNotNull(new PPLSyntaxParser().parse("search source=t a=1 b=2 //this is a comment"));
     assertNotNull(new PPLSyntaxParser().parse("search source=t a=1 b=2 // this is a comment "));

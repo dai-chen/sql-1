@@ -363,6 +363,7 @@ lookupPair
 fillnullCommand
    : FILLNULL fillNullWith
    | FILLNULL fillNullUsing
+   | FILLNULL fillNullValue
    ;
 
 fillNullWith
@@ -375,6 +376,10 @@ fillNullUsing
 
 replacementPair
    : fieldExpression EQUAL replacement = valueExpression
+   ;
+
+fillNullValue
+   : VALUE EQUAL replacement = valueExpression (fieldList)?
    ;
 
 trendlineCommand
@@ -1366,6 +1371,7 @@ keywordsCanBeId
    | MAX_SAMPLE_COUNT
    | BUFFER_LIMIT
    | WITH
+   | VALUE
    | REGEX
    | PUNCT
    | USING
