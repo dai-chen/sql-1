@@ -1,6 +1,16 @@
+---
+description: "A comprehensive step-by-step workflow for implementing PPL commands in the OpenSearch SQL plugin, following established patterns and ensuring complete test coverage."
+author: "OpenSearch SQL Team"
+version: "1.0"
+tags: ["ppl", "opensearch", "sql plugin", "command implementation", "calcite", "testing", "antlr", "grammar"]
+globs: ["**/*.java", "**/*.g4", "**/*.md", "**/*.rst", "**/build.gradle"]
+---
+
+<detailed_sequence_of_steps>
+
 # PPL Command Implementation Workflow
 
-This is a step-by-step Cline Workflow for implementing PPL commands. Follow each step sequentially and verify completion before proceeding.
+This is a step-by-step workflow for implementing PPL commands. Follow each step sequentially and verify completion before proceeding.
 
 ## Prerequisites Verification
 
@@ -161,6 +171,8 @@ This is a step-by-step Cline Workflow for implementing PPL commands. Follow each
 - [ ] **VERIFY**: Documentation is complete and accurate
 - [ ] **CHECK**: Examples work as documented
 - [ ] **CONFIRM**: Consistent with existing documentation style
+
+</detailed_sequence_of_steps>
 
 ## Completion Checklist
 
