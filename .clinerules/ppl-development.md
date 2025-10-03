@@ -1,5 +1,5 @@
 ## Brief overview
-High-level principles and architectural guidelines for all PPL (Piped Processing Language) development in the OpenSearch SQL plugin. These principles apply to new commands, functions, optimizations, and any PPL-related enhancements.
+High-level principles and architectural guidelines for all PPL (Piped Processing Language) development in the OpenSearch SQL plugin. These principles apply to new commands, functions, optimizations, and any PPL-related enhancements. All the changes should be focused on latest V3 engine based on Calcite.
 
 ## Architectural principles
 - Always follow the visitor pattern for AST traversal and transformation
@@ -9,8 +9,7 @@ High-level principles and architectural guidelines for all PPL (Piped Processing
 - Design for extensibility - new commands should follow patterns that allow future enhancements
 
 ## AST design patterns
-- Prefer reusing the existing `Argument` class for command arguments over creating new expression nodes
-- Keep AST nodes under `org.opensearch.sql.ast.tree` for commands, avoid unnecessary nodes in expression package
+- Prefer reusing the existing AST node like command arguments over creating new expression nodes
 - Ensure proper parent-child relationships in all AST structures
 - Follow established naming conventions: commands use noun forms, visitors use visit* pattern
 
@@ -23,7 +22,7 @@ High-level principles and architectural guidelines for all PPL (Piped Processing
 
 ## Testing philosophy
 - Every new PPL feature requires comprehensive test coverage at multiple levels
-- Unit tests should extend `CalcitePPLAbstractTest` and verify both logical plans and SQL translation
+- Unit tests should verify both logical plans and SQL translation
 - Integration tests must include real-world query scenarios with complex data
 - Always include edge cases, error scenarios, and performance considerations in tests
 - Test with various data types and sizes to ensure robustness

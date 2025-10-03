@@ -1,95 +1,25 @@
-# Feature Investigation & Design Documentation
+# Features Documentation
 
-This directory contains investigation results and design decisions for features in the OpenSearch SQL project. Each feature gets its own dedicated file to preserve the knowledge gained during analysis and the rationale behind design choices.
+This directory contains detailed implementation guides and checklists for specific features and development tasks.
 
-## Purpose
+## Contents
 
-The goal is to capture **investigation results** and **design decisions** so that:
-- You can easily restart feature development from scratch with full context
-- Design rationale is preserved for future reference
-- Alternative approaches and trade-offs are documented
-- Technical discoveries are not lost
-
-## Structure
-
-Each feature file follows this naming convention:
-- `feature-[name].md` - For new features being investigated/designed
-- `enhancement-[name].md` - For enhancements to existing features
-- `investigation-[topic].md` - For technical investigations without specific features
-
-## Template Structure
-
-Each feature file focuses on:
-
-### 1. Investigation Summary
-- **Problem Analysis**: What problem does this solve?
-- **Requirements Discovery**: Core requirements and constraints
-- **User Impact**: Who benefits and how
-
-### 2. Technical Investigation
-- **Architecture Analysis**: How it fits into existing system
-- **Implementation Approaches**: Multiple approaches considered with pros/cons
-- **Technical Constraints**: Limitations and dependencies
-- **Integration Points**: What components are affected
-
-### 3. Design Decisions
-- **Chosen Approach**: Final decision with rationale
-- **Key Design Choices**: Important decisions and trade-offs
-- **Architecture Decisions**: High-level structural choices
-- **API Design**: Interface decisions (if applicable)
-
-### 4. Implementation Strategy
-- **High-Level Plan**: Overall implementation approach
-- **Module Impact**: How each module is affected
-- **Risk Assessment**: Main risks and mitigation strategies
-- **Performance Considerations**: Expected impact and optimizations
-
-### 5. Knowledge Gained
-- **Codebase Insights**: What was learned about existing code
-- **Technical Discoveries**: New patterns or knowledge
-- **Lessons from Similar Features**: Learning from existing implementations
+### ppl-command-checklist.md
+Comprehensive step-by-step checklist for implementing new PPL commands, including:
+- Prerequisites and RFC requirements
+- Grammar and parser implementation steps
+- AST development guidelines
+- Complete testing strategy (unit, integration, cross-cluster)
+- Documentation requirements
+- Gradle test commands reference
 
 ## Usage
 
-### Starting Feature Investigation
-1. Copy the template: `cp feature-template.md feature-[name].md`
-2. Fill in the investigation summary and problem analysis
-3. Document all approaches considered during investigation
-4. Record design decisions and rationale
-5. Update `activeContext.md` to reference the new feature file
+These documents serve as reference materials and detailed procedures for specific development tasks. They complement the high-level principles defined in `.clinerules/` by providing concrete implementation steps.
 
-### During Implementation
-1. Update design decisions if they change during development
-2. Add new insights or discoveries to the knowledge gained section
-3. Document any architectural changes or lessons learned
-4. Keep the investigation results current for future reference
+## Note on Duplication
 
-### Restarting Development
-1. Read the feature file to understand the complete investigation
-2. Review design decisions and implementation strategy
-3. Use the documented approach or revisit alternatives if needed
-4. Build on the knowledge gained rather than starting from scratch
+As of 2025-03-10, duplicate content has been removed from:
+- `memory-bank/opensearch-specific/ppl-parser-patterns.md` - Removed duplicate PPL command checklist (now only in features/ppl-command-checklist.md)
 
-## Benefits
-
-- **Knowledge Preservation**: Investigation results and design rationale preserved
-- **Easy Restart**: Can restart feature development with full context
-- **Design Continuity**: Consistent approach across development cycles
-- **Team Knowledge**: Shared understanding of technical decisions
-- **Historical Reference**: Complete record of why decisions were made
-
-## Integration with Memory Bank
-
-Feature files are automatically included in Memory Bank context when:
-- Feature name is mentioned in conversation
-- Working on related code files
-- Explicitly referenced in `activeContext.md`
-- Starting development on a previously investigated feature
-
-This ensures Cline always has access to:
-- Previous investigation results
-- Design decisions and rationale
-- Technical constraints and considerations
-- Implementation strategy and approach
-
-The Memory Bank system will automatically read relevant feature files to provide complete context for continuing or restarting feature development.
+The memory bank now focuses on project-specific implementation details, while general principles and best practices are maintained in `.clinerules/`.
