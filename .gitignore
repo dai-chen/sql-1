@@ -54,5 +54,3 @@ http-client.env.json
 
 # Coding agent files (could be symlinks)
 .claude/settings.local.json
-.clinerules
-memory-bank
