@@ -141,4 +141,53 @@ public class CalcitePPLFillnullTest extends CalcitePPLAbstractTest {
             + "FROM `scott`.`EMP`";
     verifyPPLToSparkSQL(root, expectedSparkSql);
   }
+
+  @Test
+  public void testFillnullValueSpecificFields() {
+    String ppl = "source=EMP | fillnull value=\"<not found>\" ENAME, JOB";
+    RelNode root = getRelNode(ppl);
+    String expectedLogical =
+        "LogicalProject(EMPNO=[$0], ENAME=[COALESCE($1, '<not found>':VARCHAR)], JOB=[COALESCE($2, '<not found>':VARCHAR)], MGR=[$3], HIREDATE=[$4],"
+            + " SAL=[$5], COMM=[$6], DEPTNO=[$7])\n"
+            + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    verifyLogical(root, expectedLogical);
+
+    String expectedSparkSql =
+        "SELECT `EMPNO`, COALESCE(`ENAME`, '<not found>') `ENAME`, COALESCE(`JOB`, '<not found>') `JOB`, `MGR`, `HIREDATE`, `SAL`,"
+            + " `COMM`, `DEPTNO`\n"
+            + "FROM `scott`.`EMP`";
+    verifyPPLToSparkSQL(root, expectedSparkSql);
+  }
+
+  @Test
+  public void testFillnullValueAllFields() {
+    String ppl = "source=EMP | fields ENAME, JOB | fillnull value='<not found>'";
+    RelNode root = getRelNode(ppl);
+    String expectedLogical =
+        "LogicalProject(ENAME=[COALESCE($1, '<not found>':VARCHAR)], JOB=[COALESCE($2, '<not found>':VARCHAR)])\n"
+            + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    verifyLogical(root, expectedLogical);
+
+    String expectedSparkSql =
+        "SELECT COALESCE(`ENAME`, '<not found>') `ENAME`, COALESCE(`JOB`, '<not found>') `JOB`\n"
+            + "FROM `scott`.`EMP`";
+    verifyPPLToSparkSQL(root, expectedSparkSql);
+  }
+
+  @Test
+  public void testFillnullValueNumeric() {
+    String ppl = "source=EMP | fillnull value=999 MGR";
+    RelNode root = getRelNode(ppl);
+    String expectedLogical =
+        "LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[COALESCE($3, 999)], HIREDATE=[$4],"
+            + " SAL=[$5], COMM=[$6], DEPTNO=[$7])\n"
+            + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    verifyLogical(root, expectedLogical);
+
+    String expectedSparkSql =
+        "SELECT `EMPNO`, `ENAME`, `JOB`, COALESCE(`MGR`, 999) `MGR`, `HIREDATE`, `SAL`,"
+            + " `COMM`, `DEPTNO`\n"
+            + "FROM `scott`.`EMP`";
+    verifyPPLToSparkSQL(root, expectedSparkSql);
+  }
 }

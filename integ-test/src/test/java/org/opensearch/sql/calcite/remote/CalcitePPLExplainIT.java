@@ -91,6 +91,15 @@ public class CalcitePPLExplainIT extends PPLIntegTestCase {
     assertJsonEquals(expected, result);
   }
 
+  @Test
+  public void testExplainFillNullValueSyntax() throws IOException {
+    var result = explainQueryToString("source=test | fillnull value='unknown' name | fields name, age");
+    // Verify the result contains key components indicating fillnull transformation
+    assertTrue("Result should contain COALESCE operation", result.contains("COALESCE"));
+    assertTrue("Result should contain the replacement value", result.contains("unknown"));
+    assertTrue("Result should contain field reference", result.contains("name"));
+  }
+
   /**
    * Executes the PPL query and returns the result as a string with windows-style line breaks
    * replaced with Unix-style ones.
