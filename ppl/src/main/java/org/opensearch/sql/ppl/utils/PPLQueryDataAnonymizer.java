@@ -69,6 +69,7 @@ import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.MinSpanBin;
+import org.opensearch.sql.ast.tree.Multisearch;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Patterns;
 import org.opensearch.sql.ast.tree.Project;
@@ -569,6 +570,16 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
     String child = node.getChild().get(0).accept(this, context);
     String subsearch = anonymizeData(node.getSubSearch());
     return StringUtils.format("%s | append [%s ]", child, subsearch);
+  }
+
+  @Override
+  public String visitMultisearch(Multisearch node, String context) {
+    String child = node.getChild().get(0).accept(this, context);
+    String subsearches = node.getSubSearches().stream()
+        .map(this::anonymizeData)
+        .map(subsearch -> "[" + subsearch + "]")
+        .collect(Collectors.joining(" "));
+    return StringUtils.format("%s | multisearch %s", child, subsearches);
   }
 
   @Override

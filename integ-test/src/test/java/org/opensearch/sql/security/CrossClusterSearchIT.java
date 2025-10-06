@@ -262,4 +262,18 @@ public class CrossClusterSearchIT extends PPLIntegTestCase {
 
     disableCalcite();
   }
+
+  @Test
+  public void testCrossClusterMultisearch() throws IOException {
+    enableCalcite();
+
+    JSONObject result =
+        executeQuery(
+            String.format(
+                "search source=%s | multisearch [ source=%s | where gender = 'F' ] [ source=%s | where gender = 'M' ] | fields firstname, gender",
+                TEST_INDEX_BANK_REMOTE, TEST_INDEX_BANK_REMOTE, TEST_INDEX_BANK_REMOTE));
+    verifyColumn(result, columnName("firstname"), columnName("gender"));
+
+    disableCalcite();
+  }
 }

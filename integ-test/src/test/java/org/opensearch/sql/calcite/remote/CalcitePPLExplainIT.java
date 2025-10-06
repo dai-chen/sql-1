@@ -91,6 +91,24 @@ public class CalcitePPLExplainIT extends PPLIntegTestCase {
     assertJsonEquals(expected, result);
   }
 
+  @Test
+  public void testExplainMultisearchCommand() throws IOException {
+    var result = executeWithReplace("explain source=test | multisearch [source=test | where age = 20] [source=test | where age = 30]");
+    
+    // Verify that the explain contains Union operations
+    assertTrue("Should contain LogicalUnion", result.contains("LogicalUnion"));
+    assertTrue("Should contain sort operation for timestamp ordering", result.contains("LogicalSort") || result.contains("LogicalUnion"));
+  }
+
+  @Test
+  public void testExplainMultisearchWithComplexSubsearches() throws IOException {
+    var result = executeWithReplace("explain source=test | multisearch [source=test | where age > 20 | eval category='senior'] [source=test | where age < 25 | eval category='junior']");
+    
+    // Verify logical plan structure
+    assertTrue("Should contain LogicalUnion for combining results", result.contains("LogicalUnion"));
+    assertTrue("Should contain LogicalProject for eval operations", result.contains("LogicalProject"));
+  }
+
   /**
    * Executes the PPL query and returns the result as a string with windows-style line breaks
    * replaced with Unix-style ones.

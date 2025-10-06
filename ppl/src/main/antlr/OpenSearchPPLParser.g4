@@ -72,6 +72,7 @@ commands
    | trendlineCommand
    | appendcolCommand
    | appendCommand
+   | multisearchCommand
    | expandCommand
    | flattenCommand
    | reverseCommand
@@ -114,6 +115,7 @@ commandName
    | REVERSE
    | REGEX
    | APPEND
+   | MULTISEARCH
    | REX
    ;
 
@@ -404,6 +406,10 @@ appendcolCommand
 
 appendCommand
    : APPEND LT_SQR_PRTHS searchCommand? (PIPE commands)* RT_SQR_PRTHS
+   ;
+
+multisearchCommand
+   : MULTISEARCH LT_SQR_PRTHS subSearch RT_SQR_PRTHS LT_SQR_PRTHS subSearch RT_SQR_PRTHS (LT_SQR_PRTHS subSearch RT_SQR_PRTHS)*
    ;
 
 kmeansCommand

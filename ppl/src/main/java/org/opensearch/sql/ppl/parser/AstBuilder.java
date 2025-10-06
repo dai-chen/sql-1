@@ -83,6 +83,7 @@ import org.opensearch.sql.ast.tree.Kmeans;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.ML;
 import org.opensearch.sql.ast.tree.MinSpanBin;
+import org.opensearch.sql.ast.tree.Multisearch;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Patterns;
 import org.opensearch.sql.ast.tree.Project;
@@ -1007,6 +1008,19 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
             .reduce(searchCommandInSubSearch, (r, e) -> e.attach(r));
 
     return new Append(subsearch);
+  }
+
+  /** Multisearch command. */
+  @Override
+  public UnresolvedPlan visitMultisearchCommand(OpenSearchPPLParser.MultisearchCommandContext ctx) {
+    List<UnresolvedPlan> subSearches = new ArrayList<>();
+    
+    // Process all subsearches from the grammar rule
+    for (OpenSearchPPLParser.SubSearchContext subSearchCtx : ctx.subSearch()) {
+      subSearches.add(visitSubSearch(subSearchCtx));
+    }
+    
+    return new Multisearch(subSearches);
   }
 
   @Override

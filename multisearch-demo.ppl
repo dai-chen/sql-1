@@ -1,0 +1,16 @@
+-- Demo PPL queries showing the new multisearch command functionality
+
+-- Basic multisearch: combine results from different filters
+source=accounts | multisearch 
+    [ source=accounts | where age > 35 | eval category = 'senior' ] 
+    [ source=accounts | where age < 25 | eval category = 'junior' ]
+
+-- Multisearch with stats in subsearches  
+source=accounts | multisearch
+    [ source=accounts | where gender = 'M' | stats count() by state | eval type = 'male' ]
+    [ source=accounts | where gender = 'F' | stats count() by state | eval type = 'female' ]
+
+-- Multisearch with timestamp ordering (when @timestamp field exists)
+source=logs | multisearch
+    [ source=service_logs | where level = 'ERROR' ]
+    [ source=access_logs | where status >= 400 ]

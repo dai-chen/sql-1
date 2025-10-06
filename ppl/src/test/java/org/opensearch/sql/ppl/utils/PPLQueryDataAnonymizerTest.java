@@ -620,6 +620,27 @@ public class PPLQueryDataAnonymizerTest {
         anonymize("source=t | rex field=message \"(?<word>[a-z]+)\" offset_field=pos"));
   }
 
+  @Test
+  public void testMultisearch() {
+    assertEquals(
+        "source=t | multisearch [source=t | where a = ***] [source=t | where b = ***]",
+        anonymize("source=t | multisearch [source=t | where a = 1] [source=t | where b = 2]"));
+  }
+
+  @Test
+  public void testMultisearchWithComplexSubsearches() {
+    assertEquals(
+        "source=t | multisearch [source=t | where age > *** | eval category=***] [source=t | stats count() by gender | eval type=***]",
+        anonymize("source=t | multisearch [source=t | where age > 30 | eval category='senior'] [source=t | stats count() by gender | eval type='male']"));
+  }
+
+  @Test
+  public void testMultisearchThreeSubsearches() {
+    assertEquals(
+        "source=t | multisearch [source=t | where a = ***] [source=t | where b = ***] [source=t | where c = ***]",
+        anonymize("source=t | multisearch [source=t | where a = 1] [source=t | where b = 2] [source=t | where c = 3]"));
+  }
+
   private String anonymize(String query) {
     AstBuilder astBuilder = new AstBuilder(query, settings);
     return anonymize(astBuilder.visit(parser.parse(query)));
