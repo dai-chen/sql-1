@@ -1,5 +1,15 @@
 ## Brief overview
-High-level principles and architectural guidelines for all PPL (Piped Processing Language) development in the OpenSearch SQL plugin. These principles apply to new commands, functions, optimizations, and any PPL-related enhancements. All the changes should be focused on latest V3 engine based on Calcite.
+High-level principles and architectural guidelines for all PPL (Piped Processing Language) development in the OpenSearch SQL plugin. These principles apply to new commands, functions, optimizations, and any PPL-related enhancements.
+
+## V3/Calcite-Only Development Principle
+
+**Core Rule**: All PPL development must EXCLUSIVELY target the V3 engine based on Apache Calcite. New PPL enhancements must not add or backport to V2 or legacy systems.
+
+### What NOT to Do:
+- Do not modify `BuiltinFunctionRepository`, `DefaultFunctionResolver`, or `ExpressionAnalyzer`
+- Do not work in the `legacy` module
+- Do not add functionality to V2 engine components
+- Do not create bridges between V2 and V3 systems
 
 ## Architectural principles
 - Always follow the visitor pattern for AST traversal and transformation
