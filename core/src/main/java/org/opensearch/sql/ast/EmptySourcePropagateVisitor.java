@@ -11,6 +11,7 @@ import org.opensearch.sql.ast.tree.Append;
 import org.opensearch.sql.ast.tree.AppendCol;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
+import org.opensearch.sql.ast.tree.Multisearch;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.TableFunction;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
@@ -63,6 +64,26 @@ public class EmptySourcePropagateVisitor extends AbstractNodeVisitor<UnresolvedP
     UnresolvedPlan subSearch = node.getSubSearch().accept(this, context);
     UnresolvedPlan child = node.getChild().get(0).accept(this, context);
     return new AppendCol(node.isOverride(), subSearch).attach(child);
+  }
+
+  @Override
+  public UnresolvedPlan visitMultisearch(Multisearch node, Void context) {
+    UnresolvedPlan child = node.getChild().get(0).accept(this, context);
+    List<UnresolvedPlan> processedSubSearches = node.getSubSearches().stream()
+        .map(subSearch -> subSearch.accept(this, context))
+        .collect(java.util.stream.Collectors.toList());
+    
+    // If main child is empty, return empty
+    if (isEmptySource(child)) {
+      return EMPTY_SOURCE;
+    }
+    
+    // If all subsearches are empty, return child only
+    if (processedSubSearches.stream().allMatch(this::isEmptySource)) {
+      return child;
+    }
+    
+    return new Multisearch(processedSubSearches).attach(child);
   }
 
   // TODO: Revisit lookup logic here but for now we don't see use case yet

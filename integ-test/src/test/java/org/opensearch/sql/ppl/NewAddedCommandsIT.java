@@ -166,6 +166,21 @@ public class NewAddedCommandsIT extends PPLIntegTestCase {
     verifyQuery(result);
   }
 
+  @Test
+  public void testMultisearch() throws IOException {
+    JSONObject result;
+    try {
+      result =
+          executeQuery(
+              String.format(
+                  "search source=%s | multisearch [ source=%s | where age > 35 ] [ source=%s | where age < 25 ]",
+                  TEST_INDEX_BANK, TEST_INDEX_BANK, TEST_INDEX_BANK));
+    } catch (ResponseException e) {
+      result = new JSONObject(TestUtils.getResponseBody(e.getResponse()));
+    }
+    verifyQuery(result);
+  }
+
   private void verifyQuery(JSONObject result) throws IOException {
     if (isCalciteEnabled()) {
       assertFalse(result.getJSONArray("datarows").isEmpty());

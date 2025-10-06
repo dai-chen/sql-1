@@ -746,4 +746,20 @@ public class PPLSyntaxParserTest {
                 "SOURCE=test | WHERE query_string(['field1', 'field2' ^ 3.2], 'test query',"
                     + " analyzer='keyword')"));
   }
+
+  @Test
+  public void testMultisearchCommand() {
+    assertNotEquals(
+        null,
+        new PPLSyntaxParser()
+            .parse("SOURCE=test | multisearch [ source=test | where x = 1 ] [ source=test | where y = 2 ]"));
+    assertNotEquals(
+        null,
+        new PPLSyntaxParser()
+            .parse("SOURCE=test | multisearch [ source=test | where x = 1 | eval type = 'a' ] [ source=test | where y = 2 | eval type = 'b' ]"));
+    assertNotEquals(
+        null,
+        new PPLSyntaxParser()
+            .parse("SOURCE=test | multisearch [ source=test | stats count() by x ] [ source=test | stats count() by y ] [ source=test | stats count() by z ]"));
+  }
 }

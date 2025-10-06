@@ -104,6 +104,7 @@ import org.opensearch.sql.ast.tree.Kmeans;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.Lookup.OutputStrategy;
 import org.opensearch.sql.ast.tree.ML;
+import org.opensearch.sql.ast.tree.Multisearch;
 import org.opensearch.sql.ast.tree.Paginate;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Patterns;
@@ -1522,6 +1523,108 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     context.relBuilder.push(projectedSubsearchNode);
     context.relBuilder.union(true);
     return context.relBuilder.peek();
+  }
+
+  @Override
+  public RelNode visitMultisearch(Multisearch node, CalcitePlanContext context) {
+    // 1. Resolve main plan (child)
+    visitChildren(node, context);
+    RelNode mainNode = context.relBuilder.build();
+
+    // 2. Get all subsearches and validate
+    List<UnresolvedPlan> subSearches = node.getSubSearches();
+    if (subSearches.size() < 2) {
+      throw new IllegalArgumentException("Multisearch command requires at least 2 subsearches");
+    }
+
+    // 3. Resolve each subsearch plan
+    List<RelNode> allNodes = new ArrayList<>();
+    allNodes.add(mainNode);
+    
+    for (UnresolvedPlan subSearch : subSearches) {
+      // Prune empty sources for each subsearch (similar to append)
+      UnresolvedPlan prunedSubSearch = subSearch.accept(new EmptySourcePropagateVisitor(), null);
+      prunedSubSearch.accept(this, context);
+      allNodes.add(context.relBuilder.build());
+    }
+    
+    // 4. Merge schemas across all queries using append-style logic
+    List<RelDataTypeField> mergedFields = mergeFieldsFromAllNodes(allNodes);
+    List<String> mergedFieldNames = mergedFields.stream()
+        .map(RelDataTypeField::getName)
+        .collect(Collectors.toList());
+
+    // 5. Create projected nodes with compatible schemas
+    List<RelNode> projectedNodes = new ArrayList<>();
+    for (RelNode relNode : allNodes) {
+      List<RelDataTypeField> nodeFields = relNode.getRowType().getFieldList();
+      Map<String, RelDataTypeField> nodeFieldMap = nodeFields.stream()
+          .map(typeField -> Pair.of(typeField.getName(), typeField))
+          .collect(Collectors.toMap(Pair::getKey, Pair::getValue));
+      
+      List<RexNode> unionProjects = new ArrayList<>();
+      for (RelDataTypeField mergedField : mergedFields) {
+        RelDataTypeField nodeField = nodeFieldMap.get(mergedField.getName());
+        if (nodeField != null && nodeField.getType().equals(mergedField.getType())) {
+          unionProjects.add(context.rexBuilder.makeInputRef(relNode, nodeField.getIndex()));
+        } else {
+          unionProjects.add(context.rexBuilder.makeNullLiteral(mergedField.getType()));
+        }
+      }
+      projectedNodes.add(context.relBuilder.push(relNode).project(unionProjects, mergedFieldNames).build());
+    }
+
+    // 6. Push all nodes and create single union operation (avoid nested unions)
+    for (RelNode projectedNode : projectedNodes) {
+      context.relBuilder.push(projectedNode);
+    }
+    // Use union with count parameter to create flat union
+    if (projectedNodes.size() == 2) {
+      context.relBuilder.union(true);
+    } else {
+      // For more than 2 nodes, use multiple union operations but avoid nesting
+      context.relBuilder.union(true); // Union first two
+      for (int i = 2; i < projectedNodes.size(); i++) {
+        context.relBuilder.union(true); // Union with remaining
+      }
+    }
+
+    // 7. Apply ORDER BY @timestamp DESC if @timestamp field exists
+    List<String> finalFieldNames = context.relBuilder.peek().getRowType().getFieldNames();
+    if (finalFieldNames.contains("@timestamp")) {
+      context.relBuilder.sort(context.relBuilder.desc(context.relBuilder.field("@timestamp")));
+    }
+
+    return context.relBuilder.peek();
+  }
+
+  /**
+   * Helper method to merge fields from multiple RelNodes for union operations.
+   * This ensures all nodes have compatible schemas for UNION ALL.
+   */
+  private List<RelDataTypeField> mergeFieldsFromAllNodes(List<RelNode> nodes) {
+    if (nodes.isEmpty()) {
+      return Collections.emptyList();
+    }
+
+    // Start with the first node's fields as the base
+    List<RelDataTypeField> mergedFields = new ArrayList<>(nodes.get(0).getRowType().getFieldList());
+    Set<String> seenFieldNames = mergedFields.stream()
+        .map(RelDataTypeField::getName)
+        .collect(Collectors.toSet());
+
+    // Add any additional fields from other nodes
+    for (int i = 1; i < nodes.size(); i++) {
+      RelNode node = nodes.get(i);
+      for (RelDataTypeField field : node.getRowType().getFieldList()) {
+        if (!seenFieldNames.contains(field.getName())) {
+          mergedFields.add(field);
+          seenFieldNames.add(field.getName());
+        }
+      }
+    }
+
+    return mergedFields;
   }
 
   /*
