@@ -1,5 +1,5 @@
 ## Brief overview
-Universal Java development principles derived from classic software engineering literature. These guidelines apply to all Java coding tasks, emphasizing clean code, solid architecture, and maintainable design.
+Universal Java development principles derived from classic software engineering literature. These guidelines MUST apply to ALL Java coding tasks, emphasizing clean code, solid architecture, and maintainable design.
 
 ## Code quality fundamentals
 - Use intention-revealing names that express purpose, not implementation details

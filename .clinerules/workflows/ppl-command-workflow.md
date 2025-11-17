@@ -12,32 +12,68 @@ globs: ["**/*.java", "**/*.g4", "**/*.md", "**/*.rst", "**/build.gradle"]
 
 This is a step-by-step workflow for implementing PPL commands. Follow each step sequentially and verify completion before proceeding.
 
-## Prerequisites Verification
+## Phase 1 - External Baseline & Spec Handshake (REQUIRED)
 
-### Step 1: RFC & Requirements Analysis
-- [ ] **VERIFY**: RFC document exists and is approved
-- [ ] **READ**: Complete syntax specification from RFC
-- [ ] **DOCUMENT**: Parameter definitions and validation rules
-- [ ] **EXTRACT**: Usage examples and acceptance criteria
-- [ ] **NOTE**: Technical implementation approach from RFC
+> **Rule:** Do **not** write production code in Phase 1. The outcome is a locked spec and mini acceptance pack.
+> **External baseline:** Read Splunk's Search Reference for the **same command**:
+> https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference
+> Extract syntax/semantics and note any differences from our PPL.
 
-### Step 2: Pattern Analysis (CRITICAL - Don't Skip!)
-- [ ] **IDENTIFY**: Find 2-3 most similar existing PPL commands
-- [ ] **STUDY**: Examine their complete implementation patterns:
-  - Grammar structure in lexer/parser files
-  - AST node design and relationships
-  - All visitor implementations (count them!)
-  - Test file locations and patterns
-  - Documentation structure
-- [ ] **DOCUMENT**: File paths and patterns to follow
-- [ ] **COPY**: Test structure templates from similar commands
+### 1.0 Baseline study (Cline action)
+- Open the Splunk page for this command and read end-to-end.
+- Capture:
+  - Syntax forms, parameters, defaults, and notable constraints
+  - Behavioral semantics (null/missing handling, type coercion, ordering, determinism)
+  - 1–2 canonical examples
+- Produce a short **Baseline Summary**:
+  - **What Splunk supports**
+  - **Potential drift** vs our PPL (NULL vs MISSING, type coercion, timezone/locale)
+  - **Initial v1 scope proposal**: what we will support **now** vs **out-of-scope**
 
-**Similar Command Examples to Study:**
-- For data manipulation: `fillnull`, `eval`, `fields`
-- For filtering: `where`, `search`
-- For aggregation: `stats`, `rare`, `top`
+### 1.1 Requirements confirmation with the maintainer (interactive)
+Ask the user and then propose a **minimal, shippable v1**:
 
-## Implementation Phase
+1) **Syntax (scope-limited)**
+   - Present a concise grammar (EBNF/ANTLR-style) for the **narrowed** v1 surface.
+   - List parameters with types, allowed ranges, defaults, and whether optional/required.
+   - Call out explicitly what we are **not** supporting in v1.
+
+2) **Use cases (at most 3)**
+   - Provide **three** high-frequency PPL examples (copy-pastable).
+   - For each, show a tiny input sketch and the **expected result** (table/JSON).
+   - Each example must map directly to the v1 syntax above.
+
+3) **High-level idea (translation + UDFs)**
+   - Show the **equivalent SQL** (ANSI/Spark-ish) the engine would run.
+   - List **new custom UDFs** (if any) with:
+     - Name and signature (types, varargs?)
+     - Null/missing behavior and determinism
+     - Notes for codegen/pushdown feasibility
+
+> If any ambiguity or conflict with existing PPL commands arises, **stop and ask**. Do not guess.
+
+### 1.2 Canonical docs stub (author before coding)
+Create `docs/ppl/commands/<command>.md` with:
+- Overview and **Supported Syntax (v1 scope)**.
+- The **same 3 examples** with expected results.
+- **SQL translation** section (from §1.1(3)).
+- **UDFs required** (signatures + null/missing rules).
+- Short **Gotchas** (null vs missing, coercion, time/locale).
+- Link added to the PPL command index.
+
+### 1.3 Mini acceptance spec (author before coding)
+Create `spec/acceptance/ppl/<command>.md` containing:
+- The **3 canonical “happy path”** cases from §1.1(2) with exact expected outputs.
+- **1 negative** case (bad arity or wrong type) with the **exact** error text.
+- (Optional if relevant) A quick note on expected ordering/stability.
+
+### 1.4 Exit gate (hard stop)
+Post in chat:
+**“Requirements: LOCKED ✅”**
+Proceed to Phase 2 **only after** the user explicitly confirms.
+If the user revises syntax/use cases/UDFs later, **return to Phase 1** and re-lock.
+
+## Phase 2 - Implementation
 
 ### Step 3: Grammar & Parser Implementation
 - [ ] **BACKUP**: Create git branch for changes
@@ -107,7 +143,7 @@ This is a step-by-step workflow for implementing PPL commands. Follow each step 
 - [ ] **RUN**: `./gradlew :ppl:test --tests "PPLSyntaxParserTest"`
 - [ ] **VERIFY**: Parser correctly handles new syntax
 
-### Step 9: Integration Tests - Pushdown
+### Step 9: Integration Tests - Pushdown (MUST PASS)
 - [ ] **CREATE**: Test class extending `PPLIntegTestCase`
   - Location: `integ-test/src/test/java/org/opensearch/sql/ppl/`
 - [ ] **IMPLEMENT**: Complex, realistic query scenarios
@@ -141,7 +177,7 @@ This is a step-by-step workflow for implementing PPL commands. Follow each step 
 
 ## Documentation Phase
 
-### Step 15: User Documentation
+### Step 15: User Documentation (MUST PASS)
 - [ ] **CREATE**: `.rst` file under `docs/user/ppl/cmd/`
   - Follow naming: `[commandname].rst`
   - Copy structure from similar command docs
@@ -152,14 +188,16 @@ This is a step-by-step workflow for implementing PPL commands. Follow each step 
   - Performance considerations
   - Limitations and constraints
 - [ ] **UPDATE**: `docs/user/ppl/index.rst` to link new documentation
+- [ ] **RUN**: `./gradlew :doctest:doctest -DignorePrometheus -Pdocs=[commandname].rst`
 
 ## Final Verification
 
-### Step 16: Complete Test Suite
-- [ ] **RUN**: `./gradlew :ppl:test` (all PPL tests)
+### Step 16: Complete Test Suite (MUST PASS ALL)
+- [ ] **RUN**: `./gradlew test` (all unit tests)
 - [ ] **RUN**: `./gradlew :integ-test:integTest` (all integration tests)
-- [ ] **VERIFY**: No regressions in existing functionality
-- [ ] **VERIFY**: All new tests pass
+- [ ] **RUN**: `./gradlew :doctest:doctest -DignorePrometheus` (all doctest)
+- [ ] **RUN**: `./gradlew :integ-test:integTest -Dtests.class="YourTestClass"`
+- [ ] **RUN**: `./gradlew :doctest:doctest -DignorePrometheus -Pdocs=[commandname].rst`
 
 ### Step 17: Code Quality Check
 - [ ] **REVIEW**: Code follows existing PPL command patterns
