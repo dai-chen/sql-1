@@ -72,6 +72,7 @@ import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.MinSpanBin;
 import org.opensearch.sql.ast.tree.Multisearch;
+import org.opensearch.sql.ast.tree.Mvcombine;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Patterns;
 import org.opensearch.sql.ast.tree.Project;
@@ -485,6 +486,21 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
     return StringUtils.format(
         "%s | dedup %s %d keepempty=%b consecutive=%b",
         child, fields, allowedDuplication, keepEmpty, consecutive);
+  }
+
+  @Override
+  public String visitMvcombine(Mvcombine node, String context) {
+    String child = node.getChild().get(0).accept(this, context);
+    String field = visitExpression(node.getField());
+    
+    // Check if delimiter parameter is present
+    if (!node.getOptions().isEmpty()) {
+      // Delimiter parameter is present, mask it
+      return StringUtils.format("%s | mvcombine delim=%s %s", child, MASK_LITERAL, field);
+    } else {
+      // No delimiter parameter
+      return StringUtils.format("%s | mvcombine %s", child, field);
+    }
   }
 
   @Override
