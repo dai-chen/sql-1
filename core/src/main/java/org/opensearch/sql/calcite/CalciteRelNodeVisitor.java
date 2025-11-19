@@ -31,6 +31,7 @@ import com.google.common.collect.Streams;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -122,6 +123,7 @@ import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.Lookup.OutputStrategy;
 import org.opensearch.sql.ast.tree.ML;
 import org.opensearch.sql.ast.tree.Multisearch;
+import org.opensearch.sql.ast.tree.Mvcombine;
 import org.opensearch.sql.ast.tree.Paginate;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Patterns;
@@ -1539,6 +1541,39 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     } else {
       buildDedupNotNull(context, dedupeFields, allowedDuplication);
     }
+    return context.relBuilder.peek();
+  }
+
+  @Override
+  public RelNode visitMvcombine(Mvcombine node, CalcitePlanContext context) {
+    visitChildren(node, context);
+    
+    // Get the target field to combine
+    String targetFieldName = node.getField().getField().toString();
+    
+    // Get all current fields
+    List<String> allFieldNames = context.relBuilder.peek().getRowType().getFieldNames();
+    
+    // Create group by list: all fields except the target field
+    List<UnresolvedExpression> groupExprList = new ArrayList<>();
+    for (String fieldName : allFieldNames) {
+      if (!fieldName.equals(targetFieldName)) {
+        groupExprList.add(new Alias(fieldName, AstDSL.field(fieldName)));
+      }
+    }
+    
+    // Create ARRAY_AGG aggregation for the target field
+    UnresolvedExpression arrayAggExpr = 
+        new Alias(targetFieldName, 
+                  new AggregateFunction("array_agg", AstDSL.field(targetFieldName)));
+    List<UnresolvedExpression> aggExprList = List.of(arrayAggExpr);
+    
+    // Use the standard aggregation pattern
+    BitSet nonNullGroupMask = new BitSet(groupExprList.size());
+    Aggregation aggregation = 
+        new Aggregation(aggExprList, Collections.emptyList(), groupExprList, null, node.getOptions());
+    visitAggregation(aggregation, context, nonNullGroupMask, false, false);
+    
     return context.relBuilder.peek();
   }
 
