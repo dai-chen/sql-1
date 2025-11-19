@@ -220,6 +220,7 @@ public enum BuiltinFunctionName {
   // Multivalue aggregation function
   LIST(FunctionName.of("list")),
   VALUES(FunctionName.of("values")),
+  ARRAY_AGG(FunctionName.of("array_agg")),
   // Not always an aggregation query
   NESTED(FunctionName.of("nested")),
   // Document order aggregation functions
@@ -378,6 +379,7 @@ public enum BuiltinFunctionName {
           .put("distinct_count_approx", BuiltinFunctionName.DISTINCT_COUNT_APPROX)
           .put("list", BuiltinFunctionName.LIST)
           .put("values", BuiltinFunctionName.VALUES)
+          .put("array_agg", BuiltinFunctionName.ARRAY_AGG)
           .put("pattern", BuiltinFunctionName.INTERNAL_PATTERN)
           .put("first", BuiltinFunctionName.FIRST)
           .put("last", BuiltinFunctionName.LAST)

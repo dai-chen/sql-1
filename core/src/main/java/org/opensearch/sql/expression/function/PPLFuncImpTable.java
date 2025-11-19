@@ -16,6 +16,7 @@ import static org.opensearch.sql.expression.function.BuiltinFunctionName.ADDFUNC
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.ADDTIME;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.AND;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.ARRAY;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.ARRAY_AGG;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.ARRAY_LENGTH;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.ARRAY_SLICE;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.ASCII;
@@ -1283,6 +1284,12 @@ public class PPLFuncImpTable {
       registerOperator(INTERNAL_PATTERN, PPLBuiltinOperators.INTERNAL_PATTERN);
       registerOperator(LIST, PPLBuiltinOperators.LIST);
       registerOperator(VALUES, PPLBuiltinOperators.VALUES);
+
+      register(
+          ARRAY_AGG,
+          (distinct, field, argList, ctx) -> ctx.relBuilder.aggregateCall(SqlStdOperatorTable.COLLECT, field),
+          wrapSqlOperandTypeChecker(
+              SqlStdOperatorTable.COLLECT.getOperandTypeChecker(), ARRAY_AGG.name(), false));
 
       register(
           AVG,
