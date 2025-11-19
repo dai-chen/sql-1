@@ -91,6 +91,7 @@ import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.ML;
 import org.opensearch.sql.ast.tree.MinSpanBin;
 import org.opensearch.sql.ast.tree.Multisearch;
+import org.opensearch.sql.ast.tree.Mvcombine;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Patterns;
 import org.opensearch.sql.ast.tree.Project;
@@ -591,6 +592,17 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
   @Override
   public UnresolvedPlan visitDedupCommand(DedupCommandContext ctx) {
     return new Dedupe(ArgumentFactory.getArgumentList(ctx), getFieldList(ctx.fieldList()));
+  }
+
+  /** Mvcombine command. */
+  @Override
+  public UnresolvedPlan visitMvcombineCommand(OpenSearchPPLParser.MvcombineCommandContext ctx) {
+    List<Argument> options = new ArrayList<>();
+    if (ctx.delim != null) {
+      options.add(new Argument("delim", (Literal) internalVisitExpression(ctx.delim)));
+    }
+    Field field = (Field) internalVisitExpression(ctx.field);
+    return new Mvcombine(options, field);
   }
 
   /** Head command visitor. */
