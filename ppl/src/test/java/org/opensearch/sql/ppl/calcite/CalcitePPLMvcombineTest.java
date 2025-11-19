@@ -5,7 +5,7 @@
 
 package org.opensearch.sql.ppl.calcite;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertTrue;
 
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.test.CalciteAssert;
@@ -39,7 +39,7 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     
     // Verify plan contains ARRAY_AGG aggregation
     String logical = root.explain();
-    assertTrue(logical.contains("ARRAY_AGG"), "Plan should use ARRAY_AGG aggregation");
+    assertTrue("Plan should use ARRAY_AGG aggregation", logical.contains("ARRAY_AGG"));
   }
 
   @Test
@@ -50,7 +50,7 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     
     // Verify ARRAY_AGG is used
     String logical = root.explain();
-    assertTrue(logical.contains("ARRAY_AGG"), "Plan should use ARRAY_AGG for field b");
+    assertTrue("Plan should use ARRAY_AGG for field b", logical.contains("ARRAY_AGG"));
   }
 
   @Test
