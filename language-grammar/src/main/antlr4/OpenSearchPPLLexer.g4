@@ -39,6 +39,7 @@ KMEANS:                             'KMEANS';
 AD:                                 'AD';
 ML:                                 'ML';
 FILLNULL:                           'FILLNULL';
+MVCOMBINE:                          'MVCOMBINE';
 EXPAND:                             'EXPAND';
 FLATTEN:                            'FLATTEN';
 TRENDLINE:                          'TRENDLINE';

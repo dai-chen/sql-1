@@ -52,6 +52,7 @@ commands
    | lookupCommand
    | renameCommand
    | fillnullCommand
+   | mvcombineCommand
    | fieldsummaryCommand
    | flattenCommand
    | expandCommand
@@ -88,6 +89,7 @@ commandName
    | RENAME
    | EXPAND
    | FILLNULL
+   | MVCOMBINE
    | FIELDSUMMARY
    | FLATTEN
    | TRENDLINE
@@ -249,6 +251,10 @@ fillNullWithFieldVariousValues
 
 nullableReplacementExpression
    : nullableField = fieldExpression EQUAL nullableReplacement = valueExpression
+   ;
+
+mvcombineCommand
+   : MVCOMBINE (DELIM EQUAL delim = stringLiteral)? field = fieldExpression
    ;
 
 expandCommand
