@@ -457,6 +457,44 @@ public class AstBuilderTest {
   }
 
   @Test
+  public void testMvcombineCommand() {
+    assertEqual(
+        "source=t | mvcombine field",
+        AstDSL.mvcombine(relation("t"), emptyList(), field("field")));
+  }
+
+  @Test
+  public void testMvcombineCommandWithDelimiter() {
+    assertEqual(
+        "source=t | mvcombine delim=\",\" field",
+        AstDSL.mvcombine(
+            relation("t"), exprList(argument("delim", stringLiteral(","))), field("field")));
+  }
+
+  @Test
+  public void testMvcombineCommandWithSingleQuoteDelimiter() {
+    assertEqual(
+        "source=t | mvcombine delim='|' field",
+        AstDSL.mvcombine(
+            relation("t"), exprList(argument("delim", stringLiteral("|"))), field("field")));
+  }
+
+  @Test
+  public void testMvcombineCommandInPipeline() {
+    assertEqual(
+        "source=t | stats count() BY category | mvcombine category",
+        AstDSL.mvcombine(
+            agg(
+                relation("t"),
+                exprList(alias("count()", aggregate("count", AstDSL.allFields()))),
+                emptyList(),
+                exprList(alias("category", field("category"))),
+                defaultStatsArgs()),
+            emptyList(),
+            field("category")));
+  }
+
+  @Test
   public void testHeadCommand() {
     assertEqual("source=t | head", head(relation("t"), 10, 0));
   }
