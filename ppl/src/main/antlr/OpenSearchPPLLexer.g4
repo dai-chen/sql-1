@@ -44,6 +44,7 @@ KMEANS:                             'KMEANS';
 AD:                                 'AD';
 ML:                                 'ML';
 FILLNULL:                           'FILLNULL';
+MVCOMBINE:                          'MVCOMBINE';
 FLATTEN:                            'FLATTEN';
 TRENDLINE:                          'TRENDLINE';
 CHART:                              'CHART';

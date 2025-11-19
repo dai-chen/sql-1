@@ -60,6 +60,7 @@ commands
    | eventstatsCommand
    | streamstatsCommand
    | dedupCommand
+   | mvcombineCommand
    | sortCommand
    | evalCommand
    | headCommand
@@ -115,6 +116,7 @@ commandName
    | AD
    | ML
    | FILLNULL
+   | MVCOMBINE
    | EXPAND
    | FLATTEN
    | TRENDLINE
@@ -288,6 +290,10 @@ resetAfterArg
 
 dedupCommand
    : DEDUP (number = integerLiteral)? fieldList (KEEPEMPTY EQUAL keepempty = booleanLiteral)? (CONSECUTIVE EQUAL consecutive = booleanLiteral)?
+   ;
+
+mvcombineCommand
+   : MVCOMBINE (DELIM EQUAL delim = stringLiteral)? field = fieldExpression
    ;
 
 sortCommand
