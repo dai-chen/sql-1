@@ -21,55 +21,57 @@ mvcombine [delim=<string>] <field>
 * field: mandatory. The field name to combine into a multivalue field.
 
 
-Example 1: Basic Field Combining
-=================================
+Example 1: Combine by Aggregation Result
+=========================================
 
-Combine rows that have identical max/min values by aggregating the host field::
+Combine state values that have the same count::
 
-    os> source=logs | stats max(bytes) AS max, min(bytes) AS min BY host | mvcombine host;
+    os> source=accounts | stats count() by state, account_number | stats count() by state | mvcombine state;
+    fetched rows / total rows = 1/1
+    +---------+---------------+
+    | count() | state         |
+    |---------+---------------|
+    | 1       | [IL,MD,TN,VA] |
+    +---------+---------------+
+
+
+Example 2: Combine Fields with Same Value
+==========================================
+
+Group records and combine the field values. Each account_number has a unique state::
+
+    os> source=accounts | fields account_number, state | mvcombine state;
+    fetched rows / total rows = 4/4
+    +----------------+-------+
+    | account_number | state |
+    |----------------+-------|
+    | 1              | [IL]  |
+    | 18             | [MD]  |
+    | 6              | [TN]  |
+    | 13             | [VA]  |
+    +----------------+-------+
+
+
+Example 3: No Matching Rows to Combine
+=======================================
+
+When no rows match for combining, each row remains separate::
+
+    os> source=accounts | stats count() by gender | mvcombine gender;
     fetched rows / total rows = 2/2
-    +-------+-------+------------------+
-    | max   | min   | host             |
-    |-------+-------+------------------|
-    | 1000  | 100   | ["host1","host2"]|
-    | 2000  | 200   | ["host3"]        |
-    +-------+-------+------------------+
+    +---------+--------+
+    | count() | gender |
+    |---------+--------|
+    | 1       | [F]    |
+    | 3       | [M]    |
+    +---------+--------+
 
 
-Example 2: Custom Delimiter
-============================
+Example 4: Invalid Field
+=========================
 
-Use a custom delimiter to separate combined values::
+Attempting to use mvcombine on a non-existent field::
 
-    os> source=logs | stats count() BY category | mvcombine delim="," category;
-    fetched rows / total rows = 2/2
-    +-------+------------------+
-    | count | category         |
-    |-------+------------------|
-    | 5     | "cat1,cat2"      |
-    | 3     | "cat3"           |
-    +-------+------------------+
-
-
-Example 3: Non-Consecutive Matches
-===================================
-
-Combine non-consecutive rows with matching aggregation values::
-
-    os> source=security_logs | stats count() BY EventCode | mvcombine EventCode;
-    fetched rows / total rows = 2/2
-    +-------+------------------+
-    | count | EventCode        |
-    |-------+------------------|
-    | 10    | ["4624","4634"]  |
-    | 5     | ["4625"]         |
-    +-------+------------------+
-
-
-Example 4: Invalid Syntax
-===========================
-
-Attempting to use mvcombine with an invalid field throws an error::
-
-    os> source=logs | mvcombine nonexistent_field;
-    Error: Field 'nonexistent_field' not found in the input schema
+    os> source=accounts | fields gender | mvcombine nonexistent_field;
+    {'reason': 'Invalid Query', 'details': 'Field [nonexistent_field] not found.', 'type': 'IllegalArgumentException'}
+    Error: Query returned no data

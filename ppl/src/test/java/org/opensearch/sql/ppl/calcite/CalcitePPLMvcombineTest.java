@@ -23,12 +23,11 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     String ppl = "source=EMP | stats max(SAL) AS max, min(SAL) AS min BY JOB | mvcombine JOB";
     RelNode root = getRelNode(ppl);
     String expectedLogical =
-        "LogicalProject(max=[$0], min=[$1], JOB=[$2])\n"
-            + "  LogicalAggregate(group=[{0, 1}], JOB=[ARRAY_AGG($2)])\n"
-            + "    LogicalProject(max=[$0], min=[$1], JOB=[$2])\n"
-            + "      LogicalAggregate(group=[{0}], max=[MAX($1)], min=[MIN($1)])\n"
-            + "        LogicalProject(JOB=[$2], SAL=[$5])\n"
-            + "          LogicalTableScan(table=[[scott, EMP]])\n";
+        "LogicalAggregate(group=[{0, 1}], JOB=[COLLECT($2)])\n"
+            + "  LogicalProject(max=[$1], min=[$2], JOB=[$0])\n"
+            + "    LogicalAggregate(group=[{0}], max=[MAX($1)], min=[MIN($1)])\n"
+            + "      LogicalProject(JOB=[$2], SAL=[$5])\n"
+            + "        LogicalTableScan(table=[[scott, EMP]])\n";
     verifyLogical(root, expectedLogical);
   }
 
@@ -37,9 +36,9 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     String ppl = "source=EMP | stats count() BY DEPTNO | mvcombine delim=\",\" DEPTNO";
     RelNode root = getRelNode(ppl);
     
-    // Verify plan contains ARRAY_AGG aggregation
+    // Verify plan contains COLLECT aggregation
     String logical = root.explain();
-    assertTrue("Plan should use ARRAY_AGG aggregation", logical.contains("ARRAY_AGG"));
+    assertTrue("Plan should use COLLECT aggregation", logical.contains("COLLECT"));
   }
 
   @Test
@@ -48,9 +47,9 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     String ppl = "source=EMP | eval a=1, b=2, c=3 | mvcombine b";
     RelNode root = getRelNode(ppl);
     
-    // Verify ARRAY_AGG is used
+    // Verify COLLECT is used
     String logical = root.explain();
-    assertTrue("Plan should use ARRAY_AGG for field b", logical.contains("ARRAY_AGG"));
+    assertTrue("Plan should use COLLECT for field b", logical.contains("COLLECT"));
   }
 
   @Test
@@ -58,10 +57,10 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     String ppl = "source=EMP | stats max(SAL) AS max, min(SAL) AS min BY JOB | mvcombine JOB";
     RelNode root = getRelNode(ppl);
     String expectedSparkSql =
-        "SELECT `max`, `min`, ARRAY_AGG(`JOB`) `JOB`\n"
+        "SELECT `max`, `min`, COLLECT(`JOB`) `JOB`\n"
             + "FROM (SELECT MAX(`SAL`) `max`, MIN(`SAL`) `min`, `JOB`\n"
             + "FROM `scott`.`EMP`\n"
-            + "GROUP BY `JOB`) `t`\n"
+            + "GROUP BY `JOB`) `t1`\n"
             + "GROUP BY `max`, `min`";
     verifyPPLToSparkSQL(root, expectedSparkSql);
   }
