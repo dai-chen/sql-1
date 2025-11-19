@@ -66,6 +66,7 @@ import org.opensearch.sql.ast.tree.Limit;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.ML;
 import org.opensearch.sql.ast.tree.Multisearch;
+import org.opensearch.sql.ast.tree.Mvcombine;
 import org.opensearch.sql.ast.tree.Paginate;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Patterns;
@@ -297,6 +298,10 @@ public abstract class AbstractNodeVisitor<T, C> {
   }
 
   public T visitDedupe(Dedupe node, C context) {
+    return visitChildren(node, context);
+  }
+
+  public T visitMvcombine(Mvcombine node, C context) {
     return visitChildren(node, context);
   }
 
