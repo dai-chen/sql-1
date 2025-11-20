@@ -86,6 +86,7 @@ commands
    | rexCommand
    | appendPipeCommand
    | replaceCommand
+   | mvcombineCommand
    ;
 
 commandName
@@ -127,6 +128,7 @@ commandName
    | REX
    | APPENDPIPE
    | REPLACE
+   | MVCOMBINE
    ;
 
 searchCommand
@@ -220,6 +222,10 @@ replaceCommand
 
 replacePair
    : pattern=stringLiteral WITH replacement=stringLiteral
+   ;
+
+mvcombineCommand
+   : MVCOMBINE (DELIM EQUAL delimiter=stringLiteral)? fieldExpression
    ;
 
 statsCommand
