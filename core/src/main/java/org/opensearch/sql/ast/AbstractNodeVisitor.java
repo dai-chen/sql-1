@@ -451,4 +451,8 @@ public abstract class AbstractNodeVisitor<T, C> {
   public T visitMultisearch(Multisearch node, C context) {
     return visitChildren(node, context);
   }
+
+  public T visitMvcombine(org.opensearch.sql.ast.tree.Mvcombine node, C context) {
+    return visitChildren(node, context);
+  }
 }
