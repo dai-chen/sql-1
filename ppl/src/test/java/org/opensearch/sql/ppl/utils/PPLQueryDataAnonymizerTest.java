@@ -891,4 +891,32 @@ public class PPLQueryDataAnonymizerTest {
         anonymize(
             "search source=t | spath input=json_attr output=out path=foo.bar | fields id, out"));
   }
+
+  @Test
+  public void testMvcombineWithoutDelimiter() {
+    assertEquals(
+        "source=table | mvcombine identifier",
+        anonymize("source=t | mvcombine field"));
+  }
+
+  @Test
+  public void testMvcombineWithDelimiter() {
+    assertEquals(
+        "source=table | mvcombine delim=*** identifier",
+        anonymize("source=t | mvcombine delim=\",\" field"));
+  }
+
+  @Test
+  public void testMvcombineWithCustomDelimiter() {
+    assertEquals(
+        "source=table | mvcombine delim=*** identifier",
+        anonymize("source=t | mvcombine delim=\" | \" field"));
+  }
+
+  @Test
+  public void testMvcombineWithPipeline() {
+    assertEquals(
+        "source=table | stats count() by identifier | mvcombine identifier",
+        anonymize("source=t | stats count() by job | mvcombine job"));
+  }
 }

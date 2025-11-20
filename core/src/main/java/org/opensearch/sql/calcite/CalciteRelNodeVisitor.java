@@ -3220,14 +3220,15 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       org.opensearch.sql.ast.tree.Mvcombine node, CalcitePlanContext context) {
     visitChildren(node, context);
 
-    // Get the field to combine
+    // Get the field to combine from the current schema
     String combineFieldName = node.getField().toString();
+    RexNode combineFieldRef = context.relBuilder.field(combineFieldName);
     
     // Get all current fields
     List<String> allFields = context.relBuilder.peek().getRowType().getFieldNames();
     
-    // Determine fields to group by (all fields except the one to combine and system fields)
-    List<UnresolvedExpression> groupByFields = new ArrayList<>();
+    // Build list of fields to group by (all except the combine field and metadata fields)
+    List<RexNode> groupByFields = new ArrayList<>();
     for (String fieldName : allFields) {
       // Skip system/metadata fields
       if (OpenSearchConstants.METADATAFIELD_TYPE_MAP.containsKey(fieldName)) {
@@ -3237,37 +3238,49 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       if (fieldName.equals(combineFieldName)) {
         continue;
       }
-      // Add to group by list
-      groupByFields.add(AstDSL.alias(fieldName, AstDSL.field(fieldName)));
+      // Add field reference to group by list
+      groupByFields.add(context.relBuilder.field(fieldName));
     }
 
-    // Create the aggregation expression for the field to combine
-    UnresolvedExpression aggExpr;
+    // Build the aggregation call for the combine field directly using PlanUtils
+    AggCall aggCall;
     if (node.getDelimiter() == null) {
-      // Use LIST aggregation (equivalent to ARRAY_AGG) for array output
-      aggExpr = AstDSL.alias(combineFieldName, 
-          new AggregateFunction(BuiltinFunctionName.LIST.getName().getFunctionName(), 
-              AstDSL.field(combineFieldName)));
+      // Use LIST aggregation for array output
+      aggCall = PlanUtils.makeAggCall(
+          context, 
+          BuiltinFunctionName.LIST, 
+          false, 
+          combineFieldRef, 
+          List.of()).as(combineFieldName);
     } else {
-      // Use MVJOIN(LIST(field), delimiter) for delimited string output
-      aggExpr = AstDSL.alias(combineFieldName,
-          AstDSL.function(BuiltinFunctionName.MVJOIN.getName().getFunctionName(),
-              new AggregateFunction(BuiltinFunctionName.LIST.getName().getFunctionName(),
-                  AstDSL.field(combineFieldName)),
-              AstDSL.stringLiteral(node.getDelimiter())));
+      // For delimited string: Create MVJOIN(LIST(field), delimiter)
+      // First create the LIST aggregation
+      AggCall listAggCall = PlanUtils.makeAggCall(
+          context,
+          BuiltinFunctionName.LIST,
+          false,
+          combineFieldRef,
+          List.of()).as("__temp_list__");
+      
+      // 1. Aggregate with LIST first
+      context.relBuilder.aggregate(context.relBuilder.groupKey(groupByFields), listAggCall);
+      
+      // 2. Apply MVJOIN to the temp field
+      RexNode mvjoinCall = PPLFuncImpTable.INSTANCE.resolve(
+          context.rexBuilder,
+          BuiltinFunctionName.MVJOIN,
+          context.relBuilder.field("__temp_list__"),
+          context.rexBuilder.makeLiteral(node.getDelimiter()));
+      
+      // Project to replace temp field with MVJOIN result and rename
+      projectPlusOverriding(List.of(mvjoinCall), List.of(combineFieldName), context);
+      context.relBuilder.projectExcept(context.relBuilder.field("__temp_list__"));
+      
+      return context.relBuilder.peek();
     }
 
-    // Build the aggregation
-    Aggregation aggregation = new Aggregation(
-        List.of(aggExpr),
-        Collections.emptyList(),
-        groupByFields,
-        null,
-        Collections.emptyList());
-    
-    // Visit the aggregation with defaults (no special null handling)
-    BitSet nonNullGroupMask = new BitSet();
-    visitAggregation(aggregation, context, nonNullGroupMask, false, false);
+    // Perform the aggregation (only for non-delimiter case)
+    context.relBuilder.aggregate(context.relBuilder.groupKey(groupByFields), aggCall);
     
     return context.relBuilder.peek();
   }
