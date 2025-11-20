@@ -71,7 +71,7 @@ For each task listed in **Task Breakdown** of the plan:
 
 ---
 
-## 3.3 Doctest acceptance (MUST PASS – single source of truth)
+## 3.3 Doctest acceptance
 
 - Ensure all **three Phase-1 use cases** and **one negative case** are placed in **Examples** as doctest blocks in:
   ```
@@ -100,13 +100,12 @@ For each task listed in **Task Breakdown** of the plan:
 
 ---
 
-## 3.5 Optional Integration tests (only if the plan asked for them)
+## 3.5 Integration tests
 
-- If the plan **explicitly** included IT (pushdown / non-pushdown / explain / v2 compat / anonymizer), then:
+- If the plan **explicitly** included IT (pushdown / non-pushdown / explain / v2 compat / anonymizer), ensure all required IT are added and then:
   ```bash
   ./gradlew :integ-test:integTest
   ```
-- Otherwise, **skip IT**. Acceptance is driven by doctest per the plan.
 
 ---
 
@@ -130,7 +129,9 @@ Run exactly the plan’s gates (at minimum, doctest + unit):
 
 - Verify **Examples** in `docs/user/ppl/cmd/<command>.rst`:
   - Tests in Examples can use different test dataset. But it **MUST** cover all the same scenarios in **Test Mappings** in `rfcs/ppl/<command>-requirements.md`.
-  - Tests in Examples **MUST** meet the requirement in **Use Case** in `rfcs/ppl/<command>-requirements.md`. If the Examples were changed to different/easier scenarios, **STOP** → revert Examples → **fix code**.
+  - Tests in Examples **MUST** meet the requirement in **Use Case** in `rfcs/ppl/<command>-requirements.md`.
+  - Confirm Examples **MUST** match the three Phase-1 use cases (not simplified), and outputs are non-trivial. (≥2 rows & ≥2 columns unless the command inherently produces one).
+  - Otherwise, **STOP** → revert Examples → **fix code**.
 - Verify all code changes listed in the **Planned Change List** are completed (files touched and implemented) in `plans/ppl/<command>-implementation-plan.md`.
 - If anything is missing or deviates from the plan:  
   **Post:** `RECONCILE: FAIL — <short reason>` → **GO TO 3.2 Execute the Task Breakdown**, address gaps, then return here.
