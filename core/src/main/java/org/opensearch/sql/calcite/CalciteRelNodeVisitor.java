@@ -3220,8 +3220,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       org.opensearch.sql.ast.tree.Mvcombine node, CalcitePlanContext context) {
     visitChildren(node, context);
 
-    // Get the field to combine from the current schema
-    String combineFieldName = node.getField().toString();
+    // Get the field to combine - properly extract field name
+    String combineFieldName;
+    if (node.getField() instanceof Field) {
+      combineFieldName = ((Field) node.getField()).getField().toString();
+    } else {
+      combineFieldName = node.getField().toString();
+    }
     RexNode combineFieldRef = context.relBuilder.field(combineFieldName);
     
     // Get all current fields

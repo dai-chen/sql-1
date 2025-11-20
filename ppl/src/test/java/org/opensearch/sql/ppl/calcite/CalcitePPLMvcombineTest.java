@@ -22,12 +22,10 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
 
     String expectedLogical =
         "LogicalAggregate(group=[{0, 1}], JOB=[LIST($2)])\n"
-            + "  LogicalProject(max=[$2], min=[$3], JOB=[$0])\n"
-            + "    LogicalAggregate(group=[{2}], max=[MAX($5)], min=[MIN($5)])\n"
-            + "      LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4],"
-            + " SAL=[$5])\n"
-            + "        LogicalFilter(condition=[IS NOT NULL($2)])\n"
-            + "          LogicalTableScan(table=[[scott, EMP]])\n";
+            + "  LogicalProject(max=[$1], min=[$2], JOB=[$0])\n"
+            + "    LogicalAggregate(group=[{0}], max=[MAX($1)], min=[MIN($1)])\n"
+            + "      LogicalProject(JOB=[$2], SAL=[$5])\n"
+            + "        LogicalTableScan(table=[[scott, EMP]])\n";
 
     verifyLogical(root, expectedLogical);
   }
@@ -39,12 +37,11 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     RelNode root = getRelNode(ppl);
 
     String expectedLogical =
-        "LogicalAggregate(group=[{0, 1}], JOB=[MVJOIN(LIST($2), ',':VARCHAR)])\n"
-            + "  LogicalProject(max=[$2], min=[$3], JOB=[$0])\n"
-            + "    LogicalAggregate(group=[{2}], max=[MAX($5)], min=[MIN($5)])\n"
-            + "      LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4],"
-            + " SAL=[$5])\n"
-            + "        LogicalFilter(condition=[IS NOT NULL($2)])\n"
+        "LogicalProject(max=[$0], min=[$1], JOB=[ARRAY_JOIN($2, ',')])\n"
+            + "  LogicalAggregate(group=[{0, 1}], __temp_list__=[LIST($2)])\n"
+            + "    LogicalProject(max=[$1], min=[$2], JOB=[$0])\n"
+            + "      LogicalAggregate(group=[{0}], max=[MAX($1)], min=[MIN($1)])\n"
+            + "        LogicalProject(JOB=[$2], SAL=[$5])\n"
             + "          LogicalTableScan(table=[[scott, EMP]])\n";
 
     verifyLogical(root, expectedLogical);
@@ -57,11 +54,12 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     RelNode root = getRelNode(ppl);
 
     String expectedLogical =
-        "LogicalAggregate(group=[{0}], DEPTNO=[MVJOIN(LIST($1), ' | ':VARCHAR)])\n"
-            + "  LogicalProject(cnt=[$1], DEPTNO=[$0])\n"
-            + "    LogicalAggregate(group=[{7}], cnt=[COUNT()])\n"
-            + "      LogicalFilter(condition=[IS NOT NULL($7)])\n"
-            + "        LogicalTableScan(table=[[scott, EMP]])\n";
+        "LogicalProject(cnt=[$0], DEPTNO=[ARRAY_JOIN($1, ' | ')])\n"
+            + "  LogicalAggregate(group=[{0}], __temp_list__=[LIST($1)])\n"
+            + "    LogicalProject(cnt=[$1], DEPTNO=[$0])\n"
+            + "      LogicalAggregate(group=[{0}], cnt=[COUNT()])\n"
+            + "        LogicalProject(DEPTNO=[$7])\n"
+            + "          LogicalTableScan(table=[[scott, EMP]])\n";
 
     verifyLogical(root, expectedLogical);
   }
@@ -73,10 +71,10 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     RelNode root = getRelNode(ppl);
 
     String expectedLogical =
-        "LogicalAggregate(group=[{0, 1}], DEPTNO=[LIST($2)])\n"
-            + "  LogicalProject(cnt=[$2], MGR=[$1], DEPTNO=[$0])\n"
-            + "    LogicalAggregate(group=[{7, 3}], cnt=[COUNT()])\n"
-            + "      LogicalFilter(condition=[AND(IS NOT NULL($7), IS NOT NULL($3))])\n"
+        "LogicalAggregate(group=[{0, 2}], DEPTNO=[LIST($1)])\n"
+            + "  LogicalProject(cnt=[$2], DEPTNO=[$0], MGR=[$1])\n"
+            + "    LogicalAggregate(group=[{0, 1}], cnt=[COUNT()])\n"
+            + "      LogicalProject(DEPTNO=[$7], MGR=[$3])\n"
             + "        LogicalTableScan(table=[[scott, EMP]])\n";
 
     verifyLogical(root, expectedLogical);
@@ -91,10 +89,9 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     String expectedLogical =
         "LogicalAggregate(group=[{0}], JOB=[LIST($1)])\n"
             + "  LogicalProject(max=[$1], JOB=[$0])\n"
-            + "    LogicalAggregate(group=[{2}], max=[MAX($5)])\n"
-            + "      LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4],"
-            + " SAL=[$5])\n"
-            + "        LogicalFilter(condition=[AND(IS NOT NULL($2), >($5, 1000))])\n"
+            + "    LogicalAggregate(group=[{0}], max=[MAX($1)])\n"
+            + "      LogicalProject(JOB=[$2], SAL=[$5])\n"
+            + "        LogicalFilter(condition=[>($5, 1000)])\n"
             + "          LogicalTableScan(table=[[scott, EMP]])\n";
 
     verifyLogical(root, expectedLogical);
@@ -114,11 +111,9 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
     String expectedLogical =
         "LogicalAggregate(group=[{0}], DEPTNO=[LIST($1)])\n"
             + "  LogicalProject(avg=[$1], DEPTNO=[$0])\n"
-            + "    LogicalAggregate(group=[{7}], avg=[AVG($5)])\n"
-            + "      LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4],"
-            + " SAL=[$5], COMM=[$6], DEPTNO=[$7])\n"
-            + "        LogicalFilter(condition=[IS NOT NULL($7)])\n"
-            + "          LogicalTableScan(table=[[scott, EMP]])\n";
+            + "    LogicalAggregate(group=[{0}], avg=[AVG($1)])\n"
+            + "      LogicalProject(DEPTNO=[$7], SAL=[$5])\n"
+            + "        LogicalTableScan(table=[[scott, EMP]])\n";
 
     verifyLogical(root, expectedLogical);
   }
