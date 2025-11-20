@@ -436,6 +436,17 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
     return new Replace(replacePairs, fieldList);
   }
 
+  /** Mvcombine command. */
+  @Override
+  public UnresolvedPlan visitMvcombineCommand(OpenSearchPPLParser.MvcombineCommandContext ctx) {
+    UnresolvedExpression field = internalVisitExpression(ctx.fieldExpression());
+    String delimiter = null;
+    if (ctx.delimiter != null) {
+      delimiter = ((Literal) internalVisitExpression(ctx.delimiter)).getValue().toString();
+    }
+    return AstDSL.mvcombine(null, field, delimiter);
+  }
+
   /** Build a ReplacePair from parse context. */
   private ReplacePair buildReplacePair(OpenSearchPPLParser.ReplacePairContext ctx) {
     Literal pattern = (Literal) internalVisitExpression(ctx.pattern);

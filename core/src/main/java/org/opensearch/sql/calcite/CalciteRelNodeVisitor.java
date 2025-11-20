@@ -2897,6 +2897,77 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     return context.relBuilder.peek();
   }
 
+  @Override
+  public RelNode visitMvcombine(
+      org.opensearch.sql.ast.tree.Mvcombine node, CalcitePlanContext context) {
+    visitChildren(node, context);
+
+    // Get the field to combine
+    String combineFieldName = node.getField().toString();
+    
+    // Validate that the field exists
+    context.relBuilder.field(combineFieldName);
+
+    // Get all current field names
+    List<String> allFieldNames = context.relBuilder.peek().getRowType().getFieldNames();
+
+    // Build group-by list: all fields EXCEPT the combine field and system/internal fields
+    List<RexNode> groupByList = new ArrayList<>();
+    
+    for (String fieldName : allFieldNames) {
+      // Skip the field to combine and system/internal fields
+      if (!fieldName.equals(combineFieldName) 
+          && !OpenSearchConstants.METADATAFIELD_TYPE_MAP.containsKey(fieldName)) {
+        groupByList.add(context.relBuilder.field(fieldName));
+      }
+    }
+
+    // Build aggregation for the combine field
+    RexNode combineFieldRef = context.relBuilder.field(combineFieldName);
+    AggCall aggCall;
+    
+    if (node.getDelimiter() == null) {
+      // Without delimiter: use LIST (ARRAY_AGG) to preserve types
+      aggCall = PlanUtils.makeAggCall(
+          context, 
+          BuiltinFunctionName.LIST, 
+          false, 
+          combineFieldRef, 
+          List.of()).as(combineFieldName);
+    } else {
+      // With delimiter: use STRING_AGG (LISTAGG) to create delimited string
+      // STRING_AGG requires string input, so cast if needed
+      RexNode stringCombineField;
+      if (!SqlTypeUtil.isCharacter(combineFieldRef.getType())) {
+        stringCombineField =
+            context.rexBuilder.makeCast(
+                context.rexBuilder.getTypeFactory().createSqlType(SqlTypeName.VARCHAR),
+                combineFieldRef,
+                true,
+                true);
+      } else {
+        stringCombineField = combineFieldRef;
+      }
+      
+      aggCall =
+          context.relBuilder
+              .aggregateCall(
+                  SqlStdOperatorTable.LISTAGG,
+                  stringCombineField,
+                  context.rexBuilder.makeLiteral(node.getDelimiter()))
+              .as(combineFieldName);
+    }
+
+    // Perform aggregation
+    if (groupByList.isEmpty()) {
+      context.relBuilder.aggregate(context.relBuilder.groupKey(), aggCall);
+    } else {
+      context.relBuilder.aggregate(context.relBuilder.groupKey(groupByList), aggCall);
+    }
+
+    return context.relBuilder.peek();
+  }
+
   private void buildParseRelNode(Parse node, CalcitePlanContext context) {
     RexNode sourceField = rexVisitor.analyze(node.getSourceField(), context);
     ParseMethod parseMethod = node.getParseMethod();
