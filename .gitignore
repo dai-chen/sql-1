@@ -53,6 +53,6 @@ http-client.env.json
 .factorypath
 
 # Coding agent files (could be symlinks)
-.claude/
-.clinerules/
-memory-bank/
+.claude
+.clinerules
+memory-bank
