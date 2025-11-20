@@ -51,10 +51,12 @@ No production code in this phase.
 Answer **exactly** these:
 
 1) **Subset or composition?**  
-   Is this command a **subset** of an existing command’s features, or a **composition** of existing PPL commands/operators?
+   - State whether the command is a **subset** of an existing command or a **composition** of existing PPL operators.
+   - **Coverage MUST be proven:** include a 1–2 line note showing how this choice fully satisfies the **Phase-1 v1 scope** (syntax/params) and the **3 use cases**.
 
-2) **Equivalent SQL**  
-   What **SQL statement(s)** (ANSI/Spark-ish) would represent each of the **3 Phase-1 use cases**?
+2) **Equivalent SQL**
+   - **Only if (1) does not fully cover the requirements**, specify the ANSI **SQL** would represent each of the **3 Phase-1 use cases**.
+   - If (1) fully covers, write **N/A**.
 
 3) **Pushdown feasibility**  
    Can this be **pushed down** to OpenSearch **DSL**?  
@@ -152,6 +154,7 @@ Required sections (must be present verbatim):
     - Put all three Phase-1 use cases under the “Examples” section of
 `docs/user/ppl/cmd/[commandname].rst` as doctest code blocks.
     - Include one negative case with the exact expected error text as a doctest.
+    - Add the new `docs/user/ppl/cmd/[commandname].rst` to `docs/category.json`.
     - These doctests must pass and serve as the acceptance test.
 - Definition of Done
     - Doctest acceptance passes for all 3 use cases + negative case
@@ -160,19 +163,30 @@ Required sections (must be present verbatim):
     - Error messages stable with IDs
     - Pushdown behavior aligns with §2.2 decision
     - PR template sections filled (links to requirements, plan, and doctest report)
-- Mandatory Test Gates to run in Phase 3
+
+## 2.6 Mandatory Test Gates (MUST PASS)
+
+The following gates are **required** and become part of the plan’s contract for Phase 3:
 
 ```
+./gradlew :integ-test:integTest -Dtests.class="*<command>IT"
+./gradlew :doctest:doctest -DignorePrometheus -Pdocs="<command>.rst"
+
 ./gradlew test
 ./gradlew :integ-test:integTest
 ./gradlew :doctest:doctest -DignorePrometheus
 ```
 
+**Anti-skip rules**
+- Do **not** use `-x test` or extra filters; only the single `-Dtests.class="*<command>IT"` above is allowed.
+- New/changed tests for this command must not use `@Ignore`, `@Disabled`, or `Assume.*`.
+- Doctest “Examples” must include **3 use cases + 1 negative** and all must pass.
+
 *(Phase 3 will stop on the first failure and report logs.)*
 
 ---
 
-## 2.6 Deliverables
+## 2.7 Deliverables
 
 - `plans/ppl/<command>-implementation-plan.md` (the single file Phase 3 will consume)
     - Contains §2.2 decisions
@@ -181,7 +195,7 @@ Required sections (must be present verbatim):
 
 ---
 
-## 2.7 Exit gate
+## 2.8 Exit gate
 
 Present the Implementation Plan and request explicit approval:
 
