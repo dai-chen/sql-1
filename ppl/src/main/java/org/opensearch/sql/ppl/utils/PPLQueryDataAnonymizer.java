@@ -309,7 +309,7 @@ public class PPLQueryDataAnonymizer extends AbstractNodeVisitor<String, String> 
   public String visitMvcombine(org.opensearch.sql.ast.tree.Mvcombine node, String context) {
     String child = node.getChild().get(0).accept(this, context);
     String field = visitExpression(node.getField());
-    
+
     if (node.getDelimiter() != null) {
       return StringUtils.format("%s | mvcombine delim=%s %s", child, MASK_LITERAL, field);
     } else {

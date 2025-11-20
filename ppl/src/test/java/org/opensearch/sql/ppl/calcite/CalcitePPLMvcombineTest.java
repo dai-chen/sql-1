@@ -49,8 +49,7 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
 
   @Test
   public void testMvcombineWithCustomDelimiter() {
-    String ppl =
-        "source=EMP | stats count() as cnt by DEPTNO | mvcombine delim=\" | \" DEPTNO";
+    String ppl = "source=EMP | stats count() as cnt by DEPTNO | mvcombine delim=\" | \" DEPTNO";
     RelNode root = getRelNode(ppl);
 
     String expectedLogical =
@@ -66,8 +65,7 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
 
   @Test
   public void testMvcombineWithMultipleGroupByFields() {
-    String ppl =
-        "source=EMP | stats count() as cnt by DEPTNO, MGR | mvcombine DEPTNO";
+    String ppl = "source=EMP | stats count() as cnt by DEPTNO, MGR | mvcombine DEPTNO";
     RelNode root = getRelNode(ppl);
 
     String expectedLogical =
@@ -82,8 +80,7 @@ public class CalcitePPLMvcombineTest extends CalcitePPLAbstractTest {
 
   @Test
   public void testMvcombineAfterFilter() {
-    String ppl =
-        "source=EMP | where SAL > 1000 | stats max(SAL) as max by JOB | mvcombine JOB";
+    String ppl = "source=EMP | where SAL > 1000 | stats max(SAL) as max by JOB | mvcombine JOB";
     RelNode root = getRelNode(ppl);
 
     String expectedLogical =

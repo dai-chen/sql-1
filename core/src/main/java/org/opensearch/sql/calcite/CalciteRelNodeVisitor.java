@@ -31,7 +31,6 @@ import com.google.common.collect.Streams;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -3228,10 +3227,10 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       combineFieldName = node.getField().toString();
     }
     RexNode combineFieldRef = context.relBuilder.field(combineFieldName);
-    
+
     // Get all current fields
     List<String> allFields = context.relBuilder.peek().getRowType().getFieldNames();
-    
+
     // Build list of fields to group by (all except the combine field and metadata fields)
     List<RexNode> groupByFields = new ArrayList<>();
     for (String fieldName : allFields) {
@@ -3251,42 +3250,39 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     AggCall aggCall;
     if (node.getDelimiter() == null) {
       // Use LIST aggregation for array output
-      aggCall = PlanUtils.makeAggCall(
-          context, 
-          BuiltinFunctionName.LIST, 
-          false, 
-          combineFieldRef, 
-          List.of()).as(combineFieldName);
+      aggCall =
+          PlanUtils.makeAggCall(
+                  context, BuiltinFunctionName.LIST, false, combineFieldRef, List.of())
+              .as(combineFieldName);
     } else {
       // For delimited string: Create MVJOIN(LIST(field), delimiter)
       // First create the LIST aggregation
-      AggCall listAggCall = PlanUtils.makeAggCall(
-          context,
-          BuiltinFunctionName.LIST,
-          false,
-          combineFieldRef,
-          List.of()).as("__temp_list__");
-      
+      AggCall listAggCall =
+          PlanUtils.makeAggCall(
+                  context, BuiltinFunctionName.LIST, false, combineFieldRef, List.of())
+              .as("__temp_list__");
+
       // 1. Aggregate with LIST first
       context.relBuilder.aggregate(context.relBuilder.groupKey(groupByFields), listAggCall);
-      
+
       // 2. Apply MVJOIN to the temp field
-      RexNode mvjoinCall = PPLFuncImpTable.INSTANCE.resolve(
-          context.rexBuilder,
-          BuiltinFunctionName.MVJOIN,
-          context.relBuilder.field("__temp_list__"),
-          context.rexBuilder.makeLiteral(node.getDelimiter()));
-      
+      RexNode mvjoinCall =
+          PPLFuncImpTable.INSTANCE.resolve(
+              context.rexBuilder,
+              BuiltinFunctionName.MVJOIN,
+              context.relBuilder.field("__temp_list__"),
+              context.rexBuilder.makeLiteral(node.getDelimiter()));
+
       // Project to replace temp field with MVJOIN result and rename
       projectPlusOverriding(List.of(mvjoinCall), List.of(combineFieldName), context);
       context.relBuilder.projectExcept(context.relBuilder.field("__temp_list__"));
-      
+
       return context.relBuilder.peek();
     }
 
     // Perform the aggregation (only for non-delimiter case)
     context.relBuilder.aggregate(context.relBuilder.groupKey(groupByFields), aggCall);
-    
+
     return context.relBuilder.peek();
   }
 }

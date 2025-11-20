@@ -894,9 +894,7 @@ public class PPLQueryDataAnonymizerTest {
 
   @Test
   public void testMvcombineWithoutDelimiter() {
-    assertEquals(
-        "source=table | mvcombine identifier",
-        anonymize("source=t | mvcombine field"));
+    assertEquals("source=table | mvcombine identifier", anonymize("source=t | mvcombine field"));
   }
 
   @Test

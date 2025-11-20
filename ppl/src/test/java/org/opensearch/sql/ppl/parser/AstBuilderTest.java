@@ -1630,8 +1630,7 @@ public class AstBuilderTest {
   @Test
   public void testMvcombineCommandWithoutDelim() {
     assertEqual(
-        "source=t | mvcombine field",
-        AstDSL.mvcombine(relation("t"), field("field"), null));
+        "source=t | mvcombine field", AstDSL.mvcombine(relation("t"), field("field"), null));
   }
 
   @Test
