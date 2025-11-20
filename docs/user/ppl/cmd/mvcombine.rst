@@ -81,47 +81,48 @@ If only one event matches the grouping criteria, the field is still converted to
 Examples
 ============
 
-Example 1: Consolidate host values after stats
-------------------------------------------------
+Example 1: Consolidate values after stats
+-------------------------------------------
 
-Combine host values when max and min bytes are identical::
+Combine state values when max and min account numbers are identical::
 
     os> source=accounts | stats max(account_number) AS max_acc, min(account_number) AS min_acc BY state | mvcombine state;
-    fetched rows / total rows = 6/6
-    +-----------+-----------+---------------------+
-    | max_acc   | min_acc   | state               |
-    |-----------+-----------+---------------------|
-    | 25        | 6         | ["CA", "NC"]        |
-    | 49        | 13        | ["TX", "WA"]        |
-    | 44        | 1         | ["ID", "RI", "VA"]  |
-    +-----------+-----------+---------------------+
+    fetched rows / total rows = 4/4
+    +---------+---------+-------+
+    | max_acc | min_acc | state |
+    |---------+---------+-------|
+    | 1       | 1       | [IL]  |
+    | 18      | 18      | [MD]  |
+    | 6       | 6       | [TN]  |
+    | 13      | 13      | [VA]  |
+    +---------+---------+-------+
 
 Example 2: Combine with custom delimiter
 ------------------------------------------
 
 Use a comma delimiter to create a delimited string::
 
-    os> source=accounts | fields state, gender | where state = 'CA' OR state = 'WA' | mvcombine delim="," gender;
+    os> source=accounts | fields gender, state | mvcombine delim="," state;
     fetched rows / total rows = 2/2
-    +---------+--------+
-    | state   | gender |
-    |---------+--------|
-    | CA      | F,M    |
-    | WA      | M,F    |
-    +---------+--------+
+    +--------+----------+
+    | gender | state    |
+    |--------+----------|
+    | F      | VA       |
+    | M      | IL,TN,MD |
+    +--------+----------+
 
 Example 3: Combine numeric values
 -----------------------------------
 
 Preserve numeric types when combining without delimiter::
 
-    os> source=accounts | fields state, account_number | where state = 'TX' | mvcombine account_number;
+    os> source=accounts | fields gender, account_number | where gender = 'M' | mvcombine account_number;
     fetched rows / total rows = 1/1
-    +---------+---------------------+
-    | state   | account_number      |
-    |---------+---------------------|
-    | TX      | [13, 49]            |
-    +---------+---------------------+
+    +--------+----------------+
+    | gender | account_number |
+    |--------+----------------|
+    | M      | [1,6,18]       |
+    +--------+----------------+
 
 Example 4: Invalid field name (negative case)
 ----------------------------------------------
@@ -129,8 +130,8 @@ Example 4: Invalid field name (negative case)
 Attempting to combine a non-existent field results in an error::
 
     os> source=accounts | mvcombine nonexistent_field;
-    fetched rows / total rows = 0/0
-    ERROR: field [Field(field=nonexistent_field, fieldArgs=[])] not found
+    {'reason': 'Invalid Query', 'details': 'field [nonexistent_field] not found; input fields are: [account_number, firstname, address, balance, gender, city, employer, state, age, email, lastname, _id, _index, _score, _maxscore, _sort, _routing]', 'type': 'IllegalArgumentException'}
+    Error: Query returned no data
 
 
 Limitations
