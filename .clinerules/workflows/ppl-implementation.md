@@ -32,15 +32,15 @@ globs: ["**/*.java", "**/*.g4", "**/*.md", "**/*.rst", "**/build.gradle"]
 
 1. **Open** `plans/ppl/<command>-implementation-plan.md`.
 2. **Verify the required sections exist (verbatim):**
-   - Header (Command/Date/Owner/Input Requirements/Approver(s))
-   - **High-level Decisions** (subset/composition, SQL equivalents, pushdown feasibility, UDF/UDAF)
-   - **Evidence & References** (similar commands, PRs inspected)
-   - **Planned Change List (grouped)**
-   - **Task Breakdown (ordered)**
-   - **Doctest Acceptance (source of truth)**
-   - **Definition of Done**
-   - **Mandatory Test Gates**
-3. **Confirm approval present:** the plan references **“APPROVE: SOLUTION”**.  
+    - Header (Command/Date/Owner/Input Requirements/Approver(s))
+    - **High-level Decisions** (subset/composition, SQL equivalents, pushdown feasibility, UDF/UDAF)
+    - **Evidence & References** (similar commands, PRs inspected)
+    - **Planned Change List (grouped)**
+    - **Task Breakdown (ordered)**
+    - **Doctest Acceptance (source of truth)**
+    - **Definition of Done**
+    - **Mandatory Test Gates**
+3. **Confirm approval present:** the plan references **“APPROVE: SOLUTION”**.
 4. **If anything is missing/unclear/conflicts with repo reality → STOP AND ASK** the maintainer to amend Phase 2.  
    Do **not** proceed with guesses or add items that are not in the plan.
 
@@ -60,7 +60,7 @@ globs: ["**/*.java", "**/*.g4", "**/*.md", "**/*.rst", "**/build.gradle"]
 
 For each task listed in **Task Breakdown** of the plan:
 
-1. **Implement only the files implied by the plan’s “Planned Change List” groups** (Grammar/Parser, AST, Visitors, Tests, Docs).  
+1. **Implement only the files implied by the plan’s “Planned Change List” groups** (Grammar/Parser, AST, Visitors, Tests, Docs).
 2. After each **major** task completes, run a fast compile to catch regressions:
    ```bash
    ./gradlew :ppl:compileJava
@@ -71,7 +71,7 @@ For each task listed in **Task Breakdown** of the plan:
 
 ---
 
-## 3.3 Doctest acceptance (MUST PASS – single source of truth)
+## 3.3 Doctest acceptance
 
 - Ensure all **three Phase-1 use cases** and **one negative case** are placed in **Examples** as doctest blocks in:
   ```
@@ -81,7 +81,7 @@ For each task listed in **Task Breakdown** of the plan:
   ```bash
   ./gradlew :doctest:doctest -DignorePrometheus
   ```
-- Fix issues until doctests **pass**.  
+- Fix issues until doctests **pass**.
 - Commit: `Doctest acceptance green for all examples (+ negative case)`
 
 > If the expected outputs in doctest don’t match reality, **do not silently change behavior**.  
@@ -95,18 +95,17 @@ For each task listed in **Task Breakdown** of the plan:
   ```bash
   ./gradlew test
   ```
-- If the plan includes specific class targets, run those too (e.g., `--tests` filters).  
+- If the plan includes specific class targets, run those too (e.g., `--tests` filters).
 - Keep commits aligned with the plan’s test items.
 
 ---
 
-## 3.5 Optional Integration tests (only if the plan asked for them)
+## 3.5 Integration tests
 
-- If the plan **explicitly** included IT (pushdown / non-pushdown / explain / v2 compat / anonymizer), then:
+- Ensure all required IT (pushdown / non-pushdown / explain / v2 compat / anonymizer) **MUST** be added and then:
   ```bash
   ./gradlew :integ-test:integTest
   ```
-- Otherwise, **skip IT**. Acceptance is driven by doctest per the plan.
 
 ---
 
@@ -121,7 +120,7 @@ Run exactly the plan’s gates (at minimum, doctest + unit):
 # ./gradlew :integ-test:integTest
 ```
 
-- If any gate fails → **STOP**, fix within the scope of the plan.  
+- If any gate fails → **STOP**, fix within the scope of the plan.
 - If fixes require scope changes, go back to Phase-2 and update the plan first.
 
 ---
@@ -129,8 +128,10 @@ Run exactly the plan’s gates (at minimum, doctest + unit):
 ## 3.7 Final Reconciliation (MUST PASS)
 
 - Verify **Examples** in `docs/user/ppl/cmd/<command>.rst`:
-  - Tests in Examples can use different test dataset. But it **MUST** cover all the same scenarios in **Test Mappings** in `rfcs/ppl/<command>-requirements.md`.
-  - Tests in Examples **MUST** meet the requirement in **Use Case** in `rfcs/ppl/<command>-requirements.md`. If the Examples were changed to different/easier scenarios, **STOP** → revert Examples → **fix code**.
+    - Tests in Examples can use different test dataset. But it **MUST** cover all the same scenarios in **Test Mappings** in `rfcs/ppl/<command>-requirements.md`.
+    - Tests in Examples **MUST** meet the requirement in **Use Case** in `rfcs/ppl/<command>-requirements.md`.
+    - Confirm Examples **MUST** match the three Phase-1 use cases (not simplified), and outputs are non-trivial. (≥2 rows & ≥2 columns unless the command inherently produces one).
+    - Otherwise, **STOP** → revert Examples → **fix code**.
 - Verify all code changes listed in the **Planned Change List** are completed (files touched and implemented) in `plans/ppl/<command>-implementation-plan.md`.
 - If anything is missing or deviates from the plan:  
   **Post:** `RECONCILE: FAIL — <short reason>` → **GO TO 3.2 Execute the Task Breakdown**, address gaps, then return here.
@@ -146,11 +147,11 @@ Run exactly the plan’s gates (at minimum, doctest + unit):
 Prepare a PR that includes:
 
 - Links to:
-  - `rfcs/ppl/<command>-requirements.md` (Phase-1)
-  - `plans/ppl/<command>-implementation-plan.md` (Phase-2)
+    - `rfcs/ppl/<command>-requirements.md` (Phase-1)
+    - `plans/ppl/<command>-implementation-plan.md` (Phase-2)
 - A short summary of **High-level Decisions** (copied from the plan).
 - **Doctest acceptance evidence**:
-  - Attach the last 30 lines of doctest output or link to the report.
+    - Attach the last 30 lines of doctest output or link to the report.
 - Test status summary matching the plan’s **Definition of Done**.
 
 *(Do not include unplanned scope. If something changed, pause and get the plan updated/approved.)*
@@ -161,11 +162,11 @@ Prepare a PR that includes:
 
 Only mark implementation complete when **all** items in the plan’s **Definition of Done** are satisfied:
 
-- Doctest acceptance **PASSED** for 3 use cases + negative case  
-- Unit (+ any other tests the plan required) **PASSED**  
-- Docs updated and examples match doctest outputs  
-- Error messages stable (IDs if applicable)  
-- Pushdown behavior aligns with the plan’s decision  
+- Doctest acceptance **PASSED** for 3 use cases + negative case
+- Unit (+ any other tests the plan required) **PASSED**
+- Docs updated and examples match doctest outputs
+- Error messages stable (IDs if applicable)
+- Pushdown behavior aligns with the plan’s decision
 - PR includes plan/requirements links and test evidence
 
 </detailed_sequence_of_steps>
