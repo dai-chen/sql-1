@@ -725,6 +725,17 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
     return new Reverse();
   }
 
+  /** Mvcombine command. */
+  @Override
+  public UnresolvedPlan visitMvcombineCommand(OpenSearchPPLParser.MvcombineCommandContext ctx) {
+    UnresolvedExpression field = internalVisitExpression(ctx.fieldExpression());
+    String delimiter =
+        ctx.delim != null
+            ? ((Literal) internalVisitExpression(ctx.delim)).getValue().toString()
+            : null;
+    return new org.opensearch.sql.ast.tree.Mvcombine(field, delimiter);
+  }
+
   /** Chart command. */
   @Override
   public UnresolvedPlan visitChartCommand(OpenSearchPPLParser.ChartCommandContext ctx) {

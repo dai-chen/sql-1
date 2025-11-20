@@ -737,4 +737,17 @@ public class AstDSL {
   public static Field implicitTimestampField() {
     return AstDSL.field(OpenSearchConstants.IMPLICIT_FIELD_TIMESTAMP);
   }
+
+  /**
+   * Creates a Mvcombine node for combining multiple values of a field.
+   *
+   * @param input the input plan
+   * @param field the field expression to combine
+   * @param delimiter optional delimiter string for joining values
+   * @return Mvcombine node attached to the input plan
+   */
+  public static org.opensearch.sql.ast.tree.Mvcombine mvcombine(
+      UnresolvedPlan input, UnresolvedExpression field, String delimiter) {
+    return new org.opensearch.sql.ast.tree.Mvcombine(field, delimiter).attach(input);
+  }
 }

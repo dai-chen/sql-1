@@ -90,6 +90,8 @@ The query start with search command and then flowing a set of command delimited 
 
   - `multisearch command <cmd/multisearch.rst>`_
 
+  - `mvcombine command <cmd/mvcombine.rst>`_
+
   - `parse command <cmd/parse.rst>`_
 
   - `patterns command <cmd/patterns.rst>`_

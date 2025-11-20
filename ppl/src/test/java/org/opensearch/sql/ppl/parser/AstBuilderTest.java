@@ -1626,4 +1626,24 @@ public class AstBuilderTest {
             .contains(
                 "Span length [2.5y] is invalid: floating-point time intervals are not supported."));
   }
+
+  @Test
+  public void testMvcombineCommandWithoutDelim() {
+    assertEqual(
+        "source=t | mvcombine field", AstDSL.mvcombine(relation("t"), field("field"), null));
+  }
+
+  @Test
+  public void testMvcombineCommandWithDelim() {
+    assertEqual(
+        "source=t | mvcombine delim=\",\" field",
+        AstDSL.mvcombine(relation("t"), field("field"), ","));
+  }
+
+  @Test
+  public void testMvcombineCommandWithCustomDelimiter() {
+    assertEqual(
+        "source=t | mvcombine delim=\" | \" field",
+        AstDSL.mvcombine(relation("t"), field("field"), " | "));
+  }
 }
