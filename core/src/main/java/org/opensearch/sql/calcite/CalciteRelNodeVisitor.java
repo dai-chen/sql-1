@@ -2902,8 +2902,18 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       org.opensearch.sql.ast.tree.Mvcombine node, CalcitePlanContext context) {
     visitChildren(node, context);
 
-    // Get the field to combine
-    String combineFieldName = node.getField().toString();
+    // Extract the field name properly from the UnresolvedExpression
+    String combineFieldName;
+    if (node.getField() instanceof Field) {
+      combineFieldName = ((Field) node.getField()).getField().toString();
+    } else {
+      // For complex expressions, use rexVisitor to analyze
+      RexNode fieldRex = rexVisitor.analyze(node.getField(), context);
+      combineFieldName = context.relBuilder.peek().getRowType().getFieldNames().stream()
+          .filter(name -> context.relBuilder.field(name).equals(fieldRex))
+          .findFirst()
+          .orElseThrow(() -> new IllegalArgumentException("Field not found: " + node.getField()));
+    }
     
     // Validate that the field exists
     context.relBuilder.field(combineFieldName);
