@@ -256,6 +256,10 @@ public abstract class AbstractNodeVisitor<T, C> {
     return visitChildren(node, context);
   }
 
+  public T visitMvcombine(org.opensearch.sql.ast.tree.Mvcombine node, C context) {
+    return visitChildren(node, context);
+  }
+
   public T visitEval(Eval node, C context) {
     return visitChildren(node, context);
   }

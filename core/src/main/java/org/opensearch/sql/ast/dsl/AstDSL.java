@@ -733,6 +733,21 @@ public class AstDSL {
     }
   }
 
+  /**
+   * Creates a Mvcombine node that combines multiple events with identical field values
+   * (except for the specified field) into a single event with the specified field
+   * as a multivalue array or delimited string.
+   *
+   * @param child the input plan
+   * @param field the field expression to combine into multivalue field
+   * @param delimiter optional delimiter string for combining values (null means array output)
+   * @return Mvcombine node attached to the input plan
+   */
+  public static UnresolvedPlan mvcombine(
+      UnresolvedPlan child, UnresolvedExpression field, String delimiter) {
+    return new org.opensearch.sql.ast.tree.Mvcombine(field, delimiter).attach(child);
+  }
+
   /** Get a reference to the implicit timestamp field {@code @timestamp} */
   public static Field implicitTimestampField() {
     return AstDSL.field(OpenSearchConstants.IMPLICIT_FIELD_TIMESTAMP);
