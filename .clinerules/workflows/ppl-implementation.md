@@ -30,7 +30,7 @@ globs: ["**/*.java", "**/*.g4", "**/*.md", "**/*.rst", "**/build.gradle"]
 
 ## 3.0 Load & validate the Implementation Plan (hard stop if invalid)
 
-1. **Open** `plans/ppl/<command>-implementation-plan.md`.  
+1. **Open** `plans/ppl/<command>-implementation-plan.md`.
 2. **Verify the required sections exist (verbatim):**
    - Header (Command/Date/Owner/Input Requirements/Approver(s))
    - **High-level Decisions** (subset/composition, SQL equivalents, pushdown feasibility, UDF/UDAF)
@@ -48,7 +48,7 @@ globs: ["**/*.java", "**/*.g4", "**/*.md", "**/*.rst", "**/build.gradle"]
 
 ## 3.1 Branch & safety
 
-- Create a feature branch named from the plan header (e.g., `feature/ppl-<command>`).  
+- Create a feature branch named from the plan header (e.g., `feature/ppl-<command>`).
 - Commit in small, reviewable slices (one commit per Task Breakdown item).
 
 ---
@@ -126,7 +126,22 @@ Run exactly the plan’s gates (at minimum, doctest + unit):
 
 ---
 
-## 3.7 PR packaging (reference the plan & requirements)
+## 3.7 Final Reconciliation (MUST PASS)
+
+- Verify **Examples** in `docs/user/ppl/cmd/<command>.rst`:
+  - Tests in Examples can use different test dataset. But it **MUST** cover all the same scenarios in **Test Mappings** in `rfcs/ppl/<command>-requirements.md`.
+  - Tests in Examples **MUST** meet the requirement in **Use Case** in `rfcs/ppl/<command>-requirements.md`. If the Examples were changed to different/easier scenarios, **STOP** → revert Examples → **fix code**.
+- Verify all code changes listed in the **Planned Change List** are completed (files touched and implemented) in `plans/ppl/<command>-implementation-plan.md`.
+- If anything is missing or deviates from the plan:  
+  **Post:** `RECONCILE: FAIL — <short reason>` → **GO TO 3.2 Execute the Task Breakdown**, address gaps, then return here.
+- If all checks pass:  
+  **Post:** `RECONCILE: PASS ✅` → proceed to the next step.
+
+> Loop rule: **Do not claim completion** or open a PR until `RECONCILE: PASS ✅` has been posted.
+
+---
+
+## 3.8 PR packaging (reference the plan & requirements)
 
 Prepare a PR that includes:
 
@@ -142,7 +157,7 @@ Prepare a PR that includes:
 
 ---
 
-## 3.8 Exit criteria
+## 3.9 Exit criteria
 
 Only mark implementation complete when **all** items in the plan’s **Definition of Done** are satisfied:
 
