@@ -31,6 +31,7 @@ import com.google.common.collect.Streams;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -3212,5 +3213,62 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     } catch (Exception e) {
       throw new RuntimeException("Failed to optimize sed expression: " + sedExpression, e);
     }
+  }
+
+  @Override
+  public RelNode visitMvcombine(
+      org.opensearch.sql.ast.tree.Mvcombine node, CalcitePlanContext context) {
+    visitChildren(node, context);
+
+    // Get the field to combine
+    String combineFieldName = node.getField().toString();
+    
+    // Get all current fields
+    List<String> allFields = context.relBuilder.peek().getRowType().getFieldNames();
+    
+    // Determine fields to group by (all fields except the one to combine and system fields)
+    List<UnresolvedExpression> groupByFields = new ArrayList<>();
+    for (String fieldName : allFields) {
+      // Skip system/metadata fields
+      if (OpenSearchConstants.METADATAFIELD_TYPE_MAP.containsKey(fieldName)) {
+        continue;
+      }
+      // Skip the field to be combined
+      if (fieldName.equals(combineFieldName)) {
+        continue;
+      }
+      // Add to group by list
+      groupByFields.add(AstDSL.alias(fieldName, AstDSL.field(fieldName)));
+    }
+
+    // Create the aggregation expression for the field to combine
+    UnresolvedExpression aggExpr;
+    if (node.getDelimiter() == null) {
+      // Use LIST aggregation (equivalent to ARRAY_AGG) for array output
+      aggExpr = AstDSL.alias(combineFieldName, 
+          new AggregateFunction(BuiltinFunctionName.LIST.getName().getFunctionName(), 
+              AstDSL.field(combineFieldName)));
+    } else {
+      // Use MVJOIN(LIST(field), delimiter) for delimited string output
+      aggExpr = AstDSL.alias(combineFieldName,
+          AstDSL.function(BuiltinFunctionName.MVJOIN.getName().getFunctionName(),
+              new AggregateFunction(BuiltinFunctionName.LIST.getName().getFunctionName(),
+                  AstDSL.field(combineFieldName)),
+              AstDSL.stringLiteral(node.getDelimiter())));
+    }
+
+    // Build the aggregation
+    Aggregation aggregation = new Aggregation(
+        List.of(aggExpr),
+        Collections.emptyList(),
+        groupByFields,
+        null,
+        Collections.emptyList());
+    
+    // Visit the aggregation with defaults (no special null handling)
+    BitSet nonNullGroupMask = new BitSet();
+    visitAggregation(aggregation, context, nonNullGroupMask, false, false);
+    
+    return context.relBuilder.peek();
   }
 }
