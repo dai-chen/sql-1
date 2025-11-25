@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.sql.api;
+package org.opensearch.sql.api.transpile;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;

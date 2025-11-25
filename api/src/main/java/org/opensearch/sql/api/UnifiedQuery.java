@@ -8,6 +8,8 @@ package org.opensearch.sql.api;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.sql.SqlDialect;
+import org.opensearch.sql.api.transpile.TranspileOptions;
+import org.opensearch.sql.api.transpile.UnifiedQueryTranspiler;
 import org.opensearch.sql.executor.QueryType;
 
 /**

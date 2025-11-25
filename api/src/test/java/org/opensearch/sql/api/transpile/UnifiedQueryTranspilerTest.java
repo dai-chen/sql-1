@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.sql.api;
+package org.opensearch.sql.api.transpile;
 
 import static org.junit.Assert.assertEquals;
 
 import org.apache.calcite.rel.RelNode;
 import org.junit.Before;
 import org.junit.Test;
+import org.opensearch.sql.api.UnifiedQueryPlanner;
+import org.opensearch.sql.api.UnifiedQueryTestBase;
 import org.opensearch.sql.executor.QueryType;
 
 public class UnifiedQueryTranspilerTest extends UnifiedQueryTestBase {
