@@ -17,7 +17,6 @@ public class UnifiedQueryTest extends UnifiedQueryTestBase {
 
   @Test
   public void testPlanAPI() {
-    // Demonstrates using the plan() API to get a logical plan
     RelNode plan =
         UnifiedQuery.lang(QueryType.PPL)
             .catalog("catalog", testSchema)
@@ -29,12 +28,10 @@ public class UnifiedQueryTest extends UnifiedQueryTestBase {
 
   @Test
   public void testTranspileAPI() {
-    // Demonstrates using the transpile() API to convert PPL to Spark SQL
     String sparkSql =
         UnifiedQuery.lang(QueryType.PPL)
             .catalog("catalog", testSchema)
             .defaultNamespace("catalog")
-            .prettyPrint(false)
             .transpile(
                 "source = employees | where age > 30 | fields name, age",
                 SqlDialect.DatabaseProduct.SPARK);

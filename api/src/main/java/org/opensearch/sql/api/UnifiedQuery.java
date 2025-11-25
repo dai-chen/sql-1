@@ -8,38 +8,19 @@ package org.opensearch.sql.api;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.sql.SqlDialect;
-import org.opensearch.sql.api.transpile.TranspileOptions;
-import org.opensearch.sql.api.transpile.UnifiedQueryTranspiler;
+import org.opensearch.sql.api.transpiler.TranspileOptions;
+import org.opensearch.sql.api.transpiler.UnifiedQueryTranspiler;
 import org.opensearch.sql.executor.QueryType;
 
 /**
  * Unified Query API providing a fluent interface for PPL query processing. This class offers a
  * chainable API for query configuration and execution.
- *
- * <p>Example usage:
- *
- * <pre>{@code
- * // Fluent API - transpile PPL to Spark SQL
- * String sparkSql = UnifiedQuery
- *     .lang(QueryType.PPL)
- *     .catalog("spark_catalog", mySchema)
- *     .defaultNamespace("spark_catalog.default")
- *     .transpile("source = employees | where age > 30", SqlDialect.DatabaseProduct.SPARK);
- *
- * // Or get the logical plan
- * RelNode plan = UnifiedQuery
- *     .lang(QueryType.PPL)
- *     .catalog("opensearch", mySchema)
- *     .plan("source = employees | stats avg(age) by department");
- * }</pre>
  */
 public class UnifiedQuery {
   private final UnifiedQueryPlanner.Builder plannerBuilder;
-  private final TranspileOptions.Builder transpileOptionsBuilder;
 
   private UnifiedQuery() {
     this.plannerBuilder = UnifiedQueryPlanner.builder();
-    this.transpileOptionsBuilder = TranspileOptions.builder();
   }
 
   /**
@@ -89,17 +70,6 @@ public class UnifiedQuery {
   }
 
   /**
-   * Enables or disables pretty printing of generated SQL.
-   *
-   * @param prettyPrint true to enable pretty printing, false otherwise
-   * @return this UnifiedQuery instance for method chaining
-   */
-  public UnifiedQuery prettyPrint(boolean prettyPrint) {
-    transpileOptionsBuilder.prettyPrint(prettyPrint);
-    return this;
-  }
-
-  /**
    * Parses and analyzes a query string into a Calcite logical plan (RelNode).
    *
    * @param query the raw query string to plan
@@ -120,8 +90,7 @@ public class UnifiedQuery {
    * @throws IllegalStateException if transpilation fails
    */
   public String transpile(String query, SqlDialect.DatabaseProduct dialect) {
-    transpileOptionsBuilder.databaseProduct(dialect);
-    return transpile(query, transpileOptionsBuilder.build());
+    return transpile(query, TranspileOptions.builder().databaseProduct(dialect).build());
   }
 
   /**

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.sql.api.transpile;
+package org.opensearch.sql.api.transpiler;
 
 import java.util.Objects;
 import org.apache.calcite.sql.SqlDialect;
