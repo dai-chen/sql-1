@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "name": "Update Project Steering Documentation",
+  "description": "Automatically suggests steering doc updates when key project files change",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "README.md",
+      "settings.gradle",
+      "build.gradle",
+      "DEVELOPER_GUIDE.rst",
+      "gradle.properties"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "The file that changed is relevant to high-level project docs. Please:\n\n1. Inspect the recent changes in the edited file(s).\n2. Decide whether any of the steering docs need updates:\n   - .kiro/steering/product.md → product capabilities, goals, related projects\n   - .kiro/steering/tech.md → dependencies, versions, build commands, tech stack\n   - .kiro/steering/structure.md → module layout, Gradle settings, project organization\n3. If an update is needed, edit only the minimal sections in the relevant steering file(s).\n4. If no update is necessary, explain briefly why.\n\nBe conservative: do not touch steering files if the change is clearly unrelated (typos, tiny formatting, etc.)."
+  }
+}
