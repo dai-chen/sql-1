@@ -19,7 +19,6 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.opensearch.sql.api.UnifiedQueryPlanner;
 import org.opensearch.sql.calcite.CalcitePlanContext;
-import org.opensearch.sql.calcite.SysLimit;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
@@ -27,7 +26,6 @@ import org.opensearch.sql.data.model.ExprTupleValue;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.executor.ExecutionEngine;
-import org.opensearch.sql.executor.QueryType;
 
 /**
  * {@code UnifiedQueryEvaluator} provides a high-level API for evaluating PPL queries against any
@@ -84,11 +82,8 @@ public class UnifiedQueryEvaluator {
       // Step 1: Parse and plan the query to get RelNode
       RelNode relNode = planner.plan(query);
 
-      // Step 2: Create CalcitePlanContext for execution
-      // Use a large query size limit since this is a reference implementation
-      CalcitePlanContext context =
-          CalcitePlanContext.create(
-              planner.getConfig(), new SysLimit(10000, 10000, 10000), QueryType.PPL);
+      // Step 2: Get CalcitePlanContext from planner
+      CalcitePlanContext context = planner.getContext();
 
       // Step 3: Execute the RelNode using Calcite's execution engine
       try (PreparedStatement statement =
