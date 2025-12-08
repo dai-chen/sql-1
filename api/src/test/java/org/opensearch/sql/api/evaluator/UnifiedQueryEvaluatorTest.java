@@ -5,18 +5,18 @@
 
 package org.opensearch.sql.api.evaluator;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.opensearch.sql.data.type.ExprCoreType.INTEGER;
+import static org.opensearch.sql.data.type.ExprCoreType.LONG;
+import static org.opensearch.sql.data.type.ExprCoreType.STRING;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.sql.api.UnifiedQueryTestBase;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
-import org.opensearch.sql.executor.ExecutionEngine;
+import org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
 
-/** Unit tests for {@link UnifiedQueryEvaluator}. */
-public class UnifiedQueryEvaluatorTest extends UnifiedQueryTestBase {
+public class UnifiedQueryEvaluatorTest extends UnifiedQueryTestBase
+    implements QueryEvaluatorAssertion {
 
   private UnifiedQueryEvaluator evaluator;
 
@@ -26,81 +26,34 @@ public class UnifiedQueryEvaluatorTest extends UnifiedQueryTestBase {
     evaluator = UnifiedQueryEvaluator.builder().planner(planner).build();
   }
 
-  @Test
-  public void testBuilderPattern() {
-    UnifiedQueryEvaluator eval = UnifiedQueryEvaluator.builder().planner(planner).build();
-    assertNotNull("Evaluator should be created", eval);
+  private QueryEvaluatorAssertion.ResponseAssertion verifyQueryEval(String query) {
+    return verify(evaluator.evaluate(query));
   }
 
   @Test
-  public void testSourceQuery() {
-    ExecutionEngine.QueryResponse response = evaluator.evaluate("source = employees");
-
-    verifyDataRows(
-        response.getResults(),
-        new Object[] {1, "Alice", 25, "Engineering"},
-        new Object[] {2, "Bob", 35, "Sales"},
-        new Object[] {3, "Charlie", 45, "Engineering"},
-        new Object[] {4, "Diana", 28, "Marketing"});
+  public void testSimplyQuery() {
+    QueryResponse response = evaluator.evaluate("source = employees | where age > 30");
+    verify(response)
+        .expectSchema(
+            col("id", INTEGER), col("name", STRING), col("age", INTEGER), col("department", STRING))
+        .expectData(row(2, "Bob", 35, "Sales"), row(3, "Charlie", 45, "Engineering"));
   }
 
   @Test
-  public void testWhereQuery() {
-    ExecutionEngine.QueryResponse response =
-        evaluator.evaluate("source = employees | where age > 30");
-
-    verifyDataRows(
-        response.getResults(),
-        new Object[] {2, "Bob", 35, "Sales"},
-        new Object[] {3, "Charlie", 45, "Engineering"});
-  }
-
-  @Test
-  public void testStatsQuery() {
-    ExecutionEngine.QueryResponse response =
-        evaluator.evaluate("source = employees | stats count() by department");
-
-    // Verify we have 3 department groups
-    assertEquals(3, response.getResults().size());
-
-    // Verify aggregation results contain required fields
-    response
-        .getResults()
-        .forEach(
-            row -> {
-              assertTrue(row.tupleValue().containsKey("department"));
-              assertTrue(row.tupleValue().containsKey("count()"));
-            });
-  }
-
-  @Test
-  public void testResultConversion() {
-    ExecutionEngine.QueryResponse response = evaluator.evaluate("source = employees");
-
-    // Verify results are properly converted to ExprTupleValue
-    response
-        .getResults()
-        .forEach(
-            row -> {
-              assertNotNull(row.tupleValue());
-              assertTrue(row.tupleValue().containsKey("id"));
-              assertTrue(row.tupleValue().containsKey("name"));
-            });
+  public void testComplexQuery() {
+    QueryResponse response = evaluator.evaluate("source = employees | stats count() by department");
+    verify(response)
+        .expectSchema(col("count()", LONG), col("department", STRING))
+        .expectData(row(2L, "Engineering"), row(1L, "Sales"), row(1L, "Marketing"));
   }
 
   @Test(expected = SyntaxCheckException.class)
   public void testSyntaxError() {
-    evaluator.evaluate("source = employees | invalid_command");
+    verifyQueryEval("source = employees | invalid_command");
   }
 
   @Test(expected = IllegalStateException.class)
   public void testSemanticError() {
-    evaluator.evaluate("source = nonexistent_table");
-  }
-
-  @Test
-  public void testCursorIsNull() {
-    ExecutionEngine.QueryResponse response = evaluator.evaluate("source = employees");
-    assertEquals(null, response.getCursor());
+    verifyQueryEval("source = nonexistent_table");
   }
 }

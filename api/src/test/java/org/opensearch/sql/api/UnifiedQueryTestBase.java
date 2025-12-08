@@ -5,8 +5,6 @@
 
 package org.opensearch.sql.api;
 
-import static org.junit.Assert.assertEquals;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,8 +25,6 @@ import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.Before;
-import org.opensearch.sql.data.model.ExprValue;
-import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.executor.QueryType;
 
 /** Base class for unified query tests providing common test schema and utilities. */
@@ -120,37 +116,6 @@ public abstract class UnifiedQueryTestBase {
         SqlNode parent,
         org.apache.calcite.config.CalciteConnectionConfig config) {
       return false;
-    }
-  }
-
-  /**
-   * Verifies that query results match expected data rows.
-   *
-   * @param results the query results to verify
-   * @param expected expected data as varargs of Object arrays
-   */
-  protected void verifyDataRows(List<ExprValue> results, Object[]... expected) {
-    assertEquals("Result count mismatch", expected.length, results.size());
-    for (int i = 0; i < expected.length; i++) {
-      Object[] expectedRow = expected[i];
-      Map<String, ExprValue> actualRow = results.get(i).tupleValue();
-
-      // Get column names from the first row
-      List<String> columnNames = new ArrayList<>(actualRow.keySet());
-
-      for (int j = 0; j < expectedRow.length && j < columnNames.size(); j++) {
-        String columnName = columnNames.get(j);
-        Object expectedValue = expectedRow[j];
-        ExprValue actualValue = actualRow.get(columnName);
-
-        // Use ExprValueUtils to convert expected value for comparison
-        ExprValue expectedExprValue = ExprValueUtils.fromObjectValue(expectedValue);
-
-        assertEquals(
-            "Row " + i + " column " + columnName + " mismatch",
-            expectedExprValue.value(),
-            actualValue.value());
-      }
     }
   }
 }
