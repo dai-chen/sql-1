@@ -57,6 +57,15 @@ public class UnifiedQueryPlanner {
       new CalciteRelNodeVisitor(new EmptyDataSourceService());
 
   /**
+   * Gets the Calcite framework configuration.
+   *
+   * @return the FrameworkConfig used by this planner
+   */
+  public FrameworkConfig getConfig() {
+    return config;
+  }
+
+  /**
    * Constructs a UnifiedQueryPlanner for a given query type and schema root.
    *
    * @param queryType the query language type (e.g., PPL)
