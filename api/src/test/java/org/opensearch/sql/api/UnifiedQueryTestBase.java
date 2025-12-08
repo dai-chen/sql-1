@@ -10,6 +10,8 @@ import static org.junit.Assert.assertEquals;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import lombok.Builder;
+import lombok.Singular;
 import org.apache.calcite.DataContext;
 import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.linq4j.Linq4j;
@@ -64,24 +66,21 @@ public abstract class UnifiedQueryTestBase {
     schema.put("age", SqlTypeName.INTEGER);
     schema.put("department", SqlTypeName.VARCHAR);
 
-    List<Object[]> data =
-        List.of(
-            new Object[] {1, "Alice", 25, "Engineering"},
-            new Object[] {2, "Bob", 35, "Sales"},
-            new Object[] {3, "Charlie", 45, "Engineering"},
-            new Object[] {4, "Diana", 28, "Marketing"});
-    return new SimpleScannableTable(schema, data);
+    return SimpleTable.builder()
+        .schema(schema)
+        .row(new Object[] {1, "Alice", 25, "Engineering"})
+        .row(new Object[] {2, "Bob", 35, "Sales"})
+        .row(new Object[] {3, "Charlie", 45, "Engineering"})
+        .row(new Object[] {4, "Diana", 28, "Marketing"})
+        .build();
   }
 
-  /** Reusable scannable table that accepts schema and data without requiring anonymous classes */
-  protected static class SimpleScannableTable implements ScannableTable {
+  /** Reusable scannable table with builder pattern for easy table creation */
+  @Builder
+  protected static class SimpleTable implements ScannableTable {
     private final Map<String, SqlTypeName> schema;
-    private final List<Object[]> data;
 
-    public SimpleScannableTable(Map<String, SqlTypeName> schema, List<Object[]> data) {
-      this.schema = schema;
-      this.data = data;
-    }
+    @Singular private final List<Object[]> rows;
 
     @Override
     public RelDataType getRowType(RelDataTypeFactory typeFactory) {
@@ -96,7 +95,7 @@ public abstract class UnifiedQueryTestBase {
 
     @Override
     public Enumerable<Object[]> scan(DataContext root) {
-      return Linq4j.asEnumerable(data);
+      return Linq4j.asEnumerable(rows);
     }
 
     @Override
@@ -130,7 +129,7 @@ public abstract class UnifiedQueryTestBase {
    * @param results the query results to verify
    * @param expected expected data as varargs of Object arrays
    */
-  protected static void verifyDataRows(List<ExprValue> results, Object[]... expected) {
+  protected void verifyDataRows(List<ExprValue> results, Object[]... expected) {
     assertEquals("Result count mismatch", expected.length, results.size());
     for (int i = 0; i < expected.length; i++) {
       Object[] expectedRow = expected[i];
