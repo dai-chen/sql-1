@@ -4,12 +4,18 @@ This module provides a high-level integration layer for the Calcite-based query 
 
 ## Overview
 
-This module provides two primary components:
+This module provides components organized into two main areas aligned with the [Unified Query API architecture](https://github.com/opensearch-project/sql/issues/4782):
 
-- **`UnifiedQueryPlanner`**: Accepts PPL (Piped Processing Language) queries and returns Calcite `RelNode` logical plans as intermediate representation.
-- **`UnifiedQueryTranspiler`**: Converts Calcite logical plans (`RelNode`) into SQL strings for various target databases using different SQL dialects.
+### Unified Language Specification
 
-Together, these components enable a complete workflow: parse PPL queries into logical plans, then transpile those plans into target database SQL.
+- **`UnifiedQueryPlanner`** (`org.opensearch.sql.api`): Accepts PPL (Piped Processing Language) queries and returns Calcite `RelNode` logical plans as intermediate representation.
+- **`UnifiedQueryTranspiler`** (`org.opensearch.sql.api.transpiler`): Converts Calcite logical plans (`RelNode`) into SQL strings for various target databases using different SQL dialects.
+
+### Unified Execution Runtime
+
+- **`UnifiedQueryCompiler`** (`org.opensearch.sql.api.runtime`): Compiles Calcite logical plans (`RelNode`) into executable JDBC `PreparedStatement` objects, following the PartiQL compiler pattern for separation of compilation and execution.
+
+Together, these components enable complete workflows: parse PPL queries into logical plans, transpile those plans into target database SQL, or compile and execute queries directly using standard JDBC for testing and conformance validation.
 
 ### Experimental API Design
 
@@ -44,9 +50,47 @@ UnifiedQueryTranspiler transpiler = UnifiedQueryTranspiler.builder()
 String sql = transpiler.toSql(plan);
 ```
 
-### Complete Workflow Example
+### UnifiedQueryCompiler
 
-Combining both components to transpile PPL queries into target database SQL:
+Use `UnifiedQueryCompiler` to compile Calcite logical plans into executable JDBC statements. This follows the PartiQL compiler pattern, separating compilation from execution and returning standard JDBC types.
+
+```java
+UnifiedQueryPlanner planner = UnifiedQueryPlanner.builder()
+    .language(QueryType.PPL)
+    .catalog("catalog", schema)
+    .defaultNamespace("catalog")
+    .build();
+
+RelNode plan = planner.plan("source = employees | fields name, age");
+
+UnifiedQueryCompiler compiler = UnifiedQueryCompiler.builder()
+    .context(planner.getContext())
+    .build();
+
+// Compile once, execute multiple times with standard JDBC
+try (PreparedStatement statement = compiler.compile(plan)) {
+    ResultSet resultSet = statement.executeQuery();
+    
+    // Access schema
+    ResultSetMetaData metaData = resultSet.getMetaData();
+    for (int i = 1; i <= metaData.getColumnCount(); i++) {
+        System.out.println(metaData.getColumnName(i) + ": " + metaData.getColumnTypeName(i));
+    }
+    
+    // Access results
+    while (resultSet.next()) {
+        String name = resultSet.getString("name");
+        int age = resultSet.getInt("age");
+        // Process row data
+    }
+}
+```
+
+### Complete Workflow Examples
+
+#### Transpiling PPL to SQL
+
+Combining planner and transpiler to convert PPL queries into target database SQL:
 
 ```java
 // Step 1: Initialize planner
@@ -74,6 +118,82 @@ Supported SQL dialects include:
 - `PostgresqlSqlDialect.DEFAULT` - PostgreSQL
 - `MysqlSqlDialect.DEFAULT` - MySQL
 - And other Calcite-supported dialects
+
+#### Compiling and Executing PPL Queries
+
+Using the compiler for CLI tools or embedded engines with standard JDBC:
+
+```java
+// Step 1: Initialize planner with catalog
+UnifiedQueryPlanner planner = UnifiedQueryPlanner.builder()
+    .language(QueryType.PPL)
+    .catalog("catalog", schema)
+    .defaultNamespace("catalog")
+    .build();
+
+// Step 2: Parse query into logical plan
+RelNode plan = planner.plan("source = employees | where age > 30 | fields name, age");
+
+// Step 3: Initialize compiler
+UnifiedQueryCompiler compiler = UnifiedQueryCompiler.builder()
+    .context(planner.getContext())
+    .build();
+
+// Step 4: Compile and execute with standard JDBC
+try (PreparedStatement statement = compiler.compile(plan)) {
+    ResultSet resultSet = statement.executeQuery();
+    
+    // Process schema
+    ResultSetMetaData metaData = resultSet.getMetaData();
+    System.out.println("Schema:");
+    for (int i = 1; i <= metaData.getColumnCount(); i++) {
+        System.out.println("  " + metaData.getColumnName(i) + ": " + 
+                         metaData.getColumnTypeName(i));
+    }
+    
+    // Process results
+    System.out.println("\nResults:");
+    while (resultSet.next()) {
+        String name = resultSet.getString("name");
+        Integer age = resultSet.getInt("age");
+        System.out.println("  " + name + ", " + age);
+    }
+}
+```
+
+#### Conformance Testing
+
+Using the compiler as a reference implementation for conformance tests:
+
+```java
+// Create test schema with known data
+Schema testSchema = createTestSchema();
+
+UnifiedQueryPlanner planner = UnifiedQueryPlanner.builder()
+    .language(QueryType.PPL)
+    .catalog("test", testSchema)
+    .defaultNamespace("test")
+    .build();
+
+RelNode plan = planner.plan("source = test_table | stats count() by category");
+
+UnifiedQueryCompiler compiler = UnifiedQueryCompiler.builder()
+    .context(planner.getContext())
+    .build();
+
+// Compile and execute test query
+try (PreparedStatement statement = compiler.compile(plan)) {
+    ResultSet resultSet = statement.executeQuery();
+    
+    // Verify results match expected behavior
+    int rowCount = 0;
+    while (resultSet.next()) {
+        rowCount++;
+        // Additional assertions on row data...
+    }
+    assertEquals(expectedRowCount, rowCount);
+}
+```
 
 ## Development & Testing
 
@@ -123,7 +243,116 @@ public class MySchema extends AbstractSchema {
 }
 ```
 
+## Error Handling
+
+The Unified Query API provides structured error handling:
+
+### Syntax Errors
+
+When a query contains syntax errors, `SyntaxCheckException` is thrown with details about the error location:
+
+```java
+try {
+    RelNode plan = planner.plan("source = employees | invalid_command");
+} catch (SyntaxCheckException e) {
+    System.err.println("Syntax error: " + e.getMessage());
+    // Error includes line, column, and offending token
+}
+```
+
+### Semantic Errors
+
+When a query references non-existent tables or has type mismatches, `IllegalStateException` is thrown:
+
+```java
+try {
+    ExecutionEngine.QueryResponse response = 
+        evaluator.evaluate("source = nonexistent_table");
+} catch (IllegalStateException e) {
+    System.err.println("Semantic error: " + e.getMessage());
+}
+```
+
+## Use Cases
+
+### CLI Tools
+
+The compiler is ideal for command-line tools that need to execute PPL queries interactively:
+
+```java
+Scanner scanner = new Scanner(System.in);
+while (true) {
+    System.out.print("ppl> ");
+    String query = scanner.nextLine();
+    
+    try {
+        RelNode plan = planner.plan(query);
+        try (PreparedStatement stmt = compiler.compile(plan)) {
+            ResultSet rs = stmt.executeQuery();
+            printResults(rs);
+        }
+    } catch (SyntaxCheckException e) {
+        System.err.println("Syntax error: " + e.getMessage());
+    } catch (IllegalStateException | SQLException e) {
+        System.err.println("Error: " + e.getMessage());
+    }
+}
+```
+
+### Embedded Query Engines
+
+Applications can embed the compiler to provide PPL query capabilities with standard JDBC:
+
+```java
+public class EmbeddedQueryEngine {
+    private final UnifiedQueryPlanner planner;
+    private final UnifiedQueryCompiler compiler;
+    
+    public EmbeddedQueryEngine(Schema dataSchema) {
+        this.planner = UnifiedQueryPlanner.builder()
+            .language(QueryType.PPL)
+            .catalog("data", dataSchema)
+            .defaultNamespace("data")
+            .build();
+            
+        this.compiler = UnifiedQueryCompiler.builder()
+            .context(planner.getContext())
+            .build();
+    }
+    
+    public List<Map<String, Object>> query(String pplQuery) throws SQLException {
+        RelNode plan = planner.plan(pplQuery);
+        try (PreparedStatement stmt = compiler.compile(plan)) {
+            ResultSet rs = stmt.executeQuery();
+            return convertToMaps(rs);
+        }
+    }
+}
+```
+
+### Conformance Test Suites
+
+The compiler serves as a reference implementation for validating PPL semantics:
+
+```java
+@Test
+public void testPPLConformance() throws SQLException {
+    // Test that PPL commands produce correct results
+    RelNode plan = planner.plan("source = employees | stats avg(age) by department");
+    
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+        ResultSet rs = stmt.executeQuery();
+        
+        // Verify results match PPL specification
+        assertNotNull(rs.getMetaData());
+        assertEquals(expectedAggregations, countRows(rs));
+    }
+}
+```
+
 ## Future Work
 
 - Expand support to SQL language.
 - Extend planner to generate optimized physical plans using Calcite's optimization frameworks.
+- Add streaming query support to the evaluator.
+- Implement result pagination for large datasets.

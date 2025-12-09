@@ -49,12 +49,21 @@ public class UnifiedQueryPlanner {
   /** The parser instance responsible for converting query text into a parse tree. */
   private final Parser parser;
 
-  /** Calcite framework configuration used during logical plan construction. */
-  private final FrameworkConfig config;
+  /** Calcite plan context used for query planning and execution. */
+  private final CalcitePlanContext context;
 
   /** AST-to-RelNode visitor that builds logical plans from the parsed AST. */
   private final CalciteRelNodeVisitor relNodeVisitor =
       new CalciteRelNodeVisitor(new EmptyDataSourceService());
+
+  /**
+   * Gets the Calcite plan context.
+   *
+   * @return the CalcitePlanContext used by this planner
+   */
+  public CalcitePlanContext getContext() {
+    return context;
+  }
 
   /**
    * Constructs a UnifiedQueryPlanner for a given query type and schema root.
@@ -66,7 +75,9 @@ public class UnifiedQueryPlanner {
   public UnifiedQueryPlanner(QueryType queryType, SchemaPlus rootSchema, String defaultPath) {
     this.queryType = queryType;
     this.parser = buildQueryParser(queryType);
-    this.config = buildCalciteConfig(rootSchema, defaultPath);
+    FrameworkConfig config = buildCalciteConfig(rootSchema, defaultPath);
+    // TODO: Hardcoded query size limit (10000) for now as only logical plan is generated.
+    this.context = CalcitePlanContext.create(config, new SysLimit(10000, 10000, 10000), queryType);
   }
 
   /**
@@ -135,10 +146,7 @@ public class UnifiedQueryPlanner {
   }
 
   private RelNode analyze(UnresolvedPlan ast) {
-    // TODO: Hardcoded query size limit (10000) for now as only logical plan is generated.
-    CalcitePlanContext calcitePlanContext =
-        CalcitePlanContext.create(config, new SysLimit(10000, 10000, 10000), queryType);
-    return relNodeVisitor.analyze(ast, calcitePlanContext);
+    return relNodeVisitor.analyze(ast, context);
   }
 
   private RelNode preserveCollation(RelNode logical) {
