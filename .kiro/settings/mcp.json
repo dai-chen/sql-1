@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory@2025.9.25"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "search_nodes",
+        "read_graph",
+        "open_nodes"
+      ],
+      "cwd": ".",
+      "env": {
+        "MEMORY_FILE_PATH": ".team-memory/team-knowledge.jsonl"
+      }
+    }
+  }
+}
