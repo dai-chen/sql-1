@@ -2,65 +2,57 @@
 inclusion: manual
 ---
 
-# PPL Spec Format Requirements
+# PPL Command Workflow
 
-When creating or updating PPL command specs (requirements.md, design.md, tasks.md), follow these CRITICAL format requirements.
+When creating or updating PPL command specs (requirements.md, design.md, tasks.md), follow the RFC template structure with PPL-specific adaptations.
 
-## BEFORE Creating requirements.md: Splunk Baseline Study (MANDATORY)
+## requirements.md Structure
 
-Before writing any requirements, you MUST study Splunk's implementation for feature parity:
+Follow the RFC template from `.github/ISSUE_TEMPLATE/request_of_comments.md` with these PPL-specific adaptations:
 
-1. **Read Splunk Documentation:**
-   - URL: https://docs.splunk.com/Documentation/SplunkCloud/latest/SearchReference/[command]
-   - Alternative: https://docs.splunk.com/Documentation/Splunk/latest/SearchReference/[command]
-   - **Read the entire page front-to-back carefully** – not skim:
-   - Pay particular attention to:
-     - Behavior / semantics descriptions.
-     - All examples and their explanations.
-     - Notes / warnings / edge cases and limitations.
+### 1. Problem Statement
+What issue/challenge needs to be addressed by this PPL command.
 
-2. **Capture from Splunk:**
-   - Syntax forms, parameters, defaults, notable constraints
-   - Behavioral semantics: null/missing handling, type coercion, ordering, determinism
-   - 1-2 canonical examples from Splunk docs
+### 2. Current State
+- Existing setup and its shortcomings
+- What users currently have to do without this command
+- Pain points in current workflows
 
-3. **Document Baseline:**
-   - Create a "Baseline Study" section in requirements.md
-   - Note what Splunk supports
-   - Identify potential drift vs our PPL (NULL vs MISSING, coercion, timezone/locale)
-   - Propose initial v1 scope: what we support NOW vs OUT-OF-SCOPE
+### 3. Long-Term Goals
+- Ideal outcome and primary objectives
+- Sustainability/scalability considerations
+- **Out-of-Scope for v1**: Explicitly list what is NOT included in v1 but may be considered in future versions
 
-**Example Baseline Study Section:**
+**Example:**
 ```markdown
-## Baseline Study
+## Long-Term Goals
 
-### Splunk Reference
-- **URL:** https://docs.splunk.com/Documentation/Splunk/latest/SearchReference/mvcombine
-- **Splunk Syntax:** `mvcombine [delim=<string>] [sdelim=<string>] <field>`
-- **Key Behaviors:**
-  - Default delimiter: space (not comma)
-  - Supports sdelim for source delimiter
-  - Handles multi-valued fields from previous commands
-- **Potential Drift:**
-  - Our default delimiter: comma (different from Splunk's space)
-  - We don't support sdelim in v1
-  - NULL vs MISSING semantics may differ
+### Primary Objectives
+- Enable Splunk users to migrate queries without syntax changes
+- Support all common use cases for field combination
+- Maintain performance parity with native OpenSearch operations
+
+### Out-of-Scope for v1
+- `sdelim` parameter (source delimiter) - deferred to v2
+- Nested field combination - requires broader nested field support
+- Custom aggregation functions - needs UDF framework
 ```
 
-## requirements.md MUST Include
+### 4. Proposal
+Suggested solution with **Concrete PPL Query Examples** (MANDATORY).
 
-### 1. Baseline Study Section (MANDATORY - comes first)
-See "BEFORE Creating requirements.md" section above. This MUST be the first section after the header.
-
-### 2. Concrete PPL Query Examples (MANDATORY)
 Each use case MUST have:
-- **PPL Query**: Actual executable PPL query using the command
-- **Input Data**: Sample data showing what's being queried
-- **Expected Output**: Exact table/JSON showing expected results (≥2 rows, ≥2 columns)
+- **User Story**: As a [role], I want to [action] so that [benefit]
+- **Acceptance Criteria**: WHEN/THEN format
+- **PPL Query**: Actual executable PPL query
+- **Input Data**: Sample data (≥2 rows, ≥2 columns)
+- **Expected Output**: Exact table/JSON showing results
 
-**Example Format:**
+**Example:**
 ````markdown
-### Requirement 1: Basic Multi-Value Combination
+## Proposal
+
+### Use Case 1: Basic Multi-Value Combination
 
 **User Story:** As a data analyst, I want to combine multi-valued fields into a single delimited string.
 
@@ -89,101 +81,221 @@ source=employees | mvcombine field=skills delim=", "
 | 1  | Alice | Java, Python       |
 | 2  | Bob   | SQL, NoSQL         |
 ```
+
+### Use Case 2: [Next use case]
+[Repeat format]
 ````
 
-### 3. Behavioral Notes Section
-MUST explicitly cover:
-- Null vs missing semantics
-- Type coercion rules
-- Ordering/stability guarantees
-- Time/locale assumptions (if applicable)
+### 5. Approach
+High-level implementation strategy - this maps to design.md content:
 
-### 4. Out-of-Scope Section
-Explicitly list what is NOT included in v1.
+**Include:**
+- **Subset or Composition?**
+  - Is this a subset of existing command, composition of operators, or new command?
+  - Coverage proof showing this covers v1 scope
+  
+- **Equivalent SQL**: Show SQL equivalent for each requirement
+  
+- **Pushdown Feasibility**: Full/Partial/None with reasoning
 
-## design.md MUST Include
-
-### 1. High-Level Decisions Section (MANDATORY)
-
-This section MUST answer these 4 questions explicitly:
-
+**Example:**
 ````markdown
-## High-Level Decisions
+## Approach
 
-### 1. Subset or Composition?
-- [ ] **Subset** of existing command: [which command]
-- [ ] **Composition** of existing PPL operators: [which operators]
-- [ ] **New command** (neither subset nor composition)
+### Implementation Strategy
+- **Type**: Composition of existing PPL operators (stats + eval)
+- **Coverage**: Covers all v1 requirements through GROUP BY + string aggregation
+- **Pushdown**: Partial - grouping pushes to OpenSearch, string aggregation in Calcite
 
-**Coverage proof:** [1-2 line explanation showing this covers v1 scope and all requirements]
-
-### 2. Equivalent SQL for Each Requirement
-
-**Requirement 1:**
+### SQL Equivalents
+**Use Case 1:**
 ```sql
 SELECT id, name, ARRAY_JOIN(skills, ', ') as combined_skills
 FROM employees
 ```
-
-**Requirement 2:**
-```sql
-[SQL for requirement 2]
-```
-
-**Requirement 3:**
-```sql
-[SQL for requirement 3]
-```
-
-Or: **N/A** (if subset/composition fully covers)
-
-### 3. Pushdown Feasibility
-- [ ] **Full** - entire operation can push to OpenSearch DSL
-- [ ] **Partial** - some operations push, boundary: [describe]
-- [ ] **None** - must execute in Calcite
-
-**Reasoning:** [Why this pushdown decision]
-
-### 4. UDF/UDAF Required?
-- [ ] **None**
-- [ ] Required functions:
-  - `functionName(arg1: type, arg2: type): returnType` - [purpose]
 ````
 
-### 2. Evidence from Recent PRs
-MUST list 2-4 recent merged PRs that added similar PPL commands, with PR numbers and files changed.
+### 6. Alternative
+Alternative solutions or workarounds that can partially/temporarily solve the problem.
 
-### 3. Planned Change List (Grouped)
-You should be able to figure this out by studying recent similar PRs. MUST group files by category:
-- Grammar/Parser (*.g4 files)
-- AST nodes (core/.../ast/tree/*)
-- Visitors (AstBuilder, CalciteRelNodeVisitor, Anonymizer, others)
-- Tests (unit, syntax, integration: pushdown/non-pushdown/explain/v2-compat/anonymizer)
-- Docs (*.rst files, category.json)
+### 7. Implementation Discussion
+Discussion points regarding the proposed implementation:
 
-## tasks.md MUST Include
+**Include:**
+- **Behavioral Notes** (MANDATORY):
+  - Null vs missing semantics
+  - Type coercion rules
+  - Ordering/stability guarantees
+  - Time/locale assumptions (if applicable)
+- Open questions or concerns about the approach
+- Trade-offs between different implementation options
+- Compatibility considerations with existing features
 
-### 1. Task Checklist
-Ordered tasks matching the design.md plan.
+**Example:**
+```markdown
+## Implementation Discussion
 
-### 2. Final Reconciliation (MUST PASS)
+### Behavioral Notes
+- **Null handling**: NULL values are skipped in combination
+- **Missing fields**: Treated as empty array, result is empty string
+- **Type coercion**: Non-string values converted to string before combination
+- **Ordering**: Preserves array element order (stable)
 
-This is a CRITICAL gate before claiming completion. You MUST verify:
+### Open Questions
+- Should we match Splunk's default delimiter (space) or use comma for consistency with other commands?
+- How to handle extremely large arrays (memory concerns)?
 
-**Documentation Examples Check:**
-- [ ] Examples in `docs/user/ppl/cmd/<command>.rst` can use different test dataset
-- [ ] Examples MUST cover all the same scenarios as the requirements in requirements.md
-- [ ] Examples MUST meet the requirements from each requirement in requirements.md
-- [ ] Examples MUST match the requirements (not simplified versions)
-- [ ] Examples produce non-trivial outputs (≥2 rows & ≥2 columns unless command inherently produces one)
+### Trade-offs
+- **Option A (Composition)**: Reuse existing operators, simpler but less optimized
+- **Option B (Native command)**: Better performance but more code to maintain
+```
 
-**Implementation Completeness Check:**
-- [ ] All code changes listed in design.md "Planned Change List" are completed
-- [ ] All files mentioned in the plan have been touched and implemented
-- [ ] No planned changes are missing or incomplete
+## Appendix: Baseline Study (MANDATORY)
 
-**Reconciliation Status:**
-- If ANY check fails: Post `RECONCILE: FAIL — <short reason>` → Go back to implementation, fix gaps, then return here
-- If ALL checks pass: Post `RECONCILE: PASS ✅` → Proceed to PR
+**CRITICAL: This section is MANDATORY and must be completed BEFORE writing requirements.**
 
-**Loop Rule:** Do NOT claim completion or open a PR until `RECONCILE: PASS ✅` has been posted
+Before writing any requirements, you MUST study Splunk's implementation for feature parity:
+
+1. **Read Splunk Documentation (USE THE TOOL):**
+   - URL: https://docs.splunk.com/Documentation/SplunkCloud/latest/SearchReference/[command]
+   - Alternative: https://docs.splunk.com/Documentation/Splunk/latest/SearchReference/[command]
+   - **CRITICAL: Actually fetch and read the Splunk documentation**
+   - **DO NOT** proceed based on assumptions from the command name alone
+   - Read the entire page front-to-back carefully – not skim
+
+2. **Capture from Splunk:**
+   - Syntax forms, parameters, defaults, notable constraints
+   - Behavioral semantics: null/missing handling, type coercion, ordering, determinism
+   - 1-2 canonical examples from Splunk docs with their explanations
+
+**Example Baseline Study:**
+```markdown
+## Appendix: Baseline Study
+
+### Splunk Reference
+- **URL:** https://docs.splunk.com/Documentation/Splunk/latest/SearchReference/Mvcombine
+
+### Core Semantic (CRITICAL)
+**Exact quote from Splunk Documentation:**
+"Takes a group of events that are identical except for the specified field, which contains a single value, and combines those events into a single event. The specified field becomes a multivalue field."
+
+**What this means:**
+- Multiple rows with identical values in ALL fields EXCEPT the target field
+- Target field has different single values across these rows
+- Rows are collapsed into ONE row
+- Target field becomes multi-valued/delimited string
+
+### Splunk Syntax
+`mvcombine [delim=<string>] [sdelim=<string>] <field>`
+
+### Key Behaviors
+- Groups events by all fields except target field
+- Default delimiter: space (not comma)
+- Supports sdelim for source delimiter
+- Reduces number of output events
+
+### Potential Drift from Splunk
+- Our default delimiter: comma (different from Splunk's space)
+- We don't support sdelim in v1
+- NULL vs MISSING semantics may differ
+```
+
+## design.md (Usually Not Needed)
+
+**IMPORTANT:** Design decisions are already covered in requirements.md:
+- **Approach section**: Subset/Composition, SQL equivalents, Pushdown feasibility
+- **Implementation Discussion section**: Behavioral notes, trade-offs
+
+**Only create design.md if the feature requires:**
+- Complex architecture diagrams
+- Detailed algorithm pseudocode
+- Performance analysis with benchmarks
+- Security threat modeling
+
+Otherwise, skip design.md and proceed directly to tasks.md.
+
+## tasks.md Structure
+
+**NOTE:** tasks.md focuses on actionable implementation breakdown based on the design decisions in requirements.md.
+
+### 1. Evidence from Recent PRs (MANDATORY)
+Study 2-4 recent merged PRs that added similar PPL commands to understand the implementation pattern.
+
+**Example:**
+```markdown
+## Evidence from Recent PRs
+
+- **PR #4754**: Added `fillnull` command
+  - Files: OpenSearchPPLParser.g4, FillNull.java, CalciteRelNodeVisitor.java
+  - Pattern: New AST node + visitor implementation
+  
+- **PR #4123**: Added `mvcombine` command  
+  - Files: Similar pattern with additional string handling
+  - Lessons: Need careful null handling in string operations
+```
+
+### 2. Planned Change List (MANDATORY - Grouped by Category)
+Based on studying recent PRs, list all files that need to be created or modified, grouped by category:
+
+**Example:**
+```markdown
+## Planned Change List
+
+### Grammar/Parser
+- `ppl/src/main/antlr/OpenSearchPPLParser.g4` - Add mvcombine syntax rule
+
+### AST Nodes
+- `core/src/main/java/org/opensearch/sql/ast/tree/Mvcombine.java` - New AST node
+
+### Visitors
+- `ppl/src/main/java/org/opensearch/sql/ppl/parser/AstBuilder.java` - Build AST from parse tree
+- `opensearch/src/main/java/org/opensearch/sql/opensearch/visitor/CalciteRelNodeVisitor.java` - Convert to Calcite RelNode
+- `core/src/main/java/org/opensearch/sql/ast/tree/Anonymizer.java` - Add anonymization support
+
+### Tests
+- Unit: `MvcombineTest.java`
+- Syntax: `MvcombineSyntaxTest.java`  
+- Integration: `MvcombineIT.java` (pushdown/non-pushdown/explain/v2-compat/anonymizer)
+
+### Documentation
+- `docs/user/ppl/cmd/mvcombine.rst`
+- Update `docs/user/ppl/category.json`
+```
+
+### 3. Task Breakdown
+Break down the Planned Change List into concrete, testable tasks with clear acceptance criteria.
+
+**Example:**
+```markdown
+## Task Breakdown
+
+### Task 1: Grammar Definition
+**Files:** `OpenSearchPPLParser.g4`
+**Acceptance Criteria:**
+- [ ] Add mvcombine rule to parser grammar
+- [ ] Support syntax: `mvcombine [delim=<string>] <field>`
+- [ ] Grammar compiles without errors
+
+### Task 2: AST Node Implementation
+**Files:** `Mvcombine.java`
+**Acceptance Criteria:**
+- [ ] Create Mvcombine AST node extending UnresolvedPlan
+- [ ] Include field name and delimiter parameters
+- [ ] Implement equals/hashCode/toString
+
+### Task 3: AST Builder
+**Files:** `AstBuilder.java`
+**Acceptance Criteria:**
+- [ ] Add visitMvcombine method
+- [ ] Parse field and delimiter from parse tree
+- [ ] Return Mvcombine AST node
+
+[Continue for all tasks...]
+```
+
+### 4. Optional: Technical Details
+For complex implementations, include:
+- Algorithm pseudocode
+- Data structure choices
+- Performance considerations
+- Edge case handling
