@@ -15,57 +15,111 @@ Kiro is configured to understand the OpenSearch SQL codebase structure, coding s
 │   └── update-project-steerings.kiro.hook
 ├── specs/                       # Feature specifications (created as needed)
 │   └── [feature-name]/
-│       ├── requirements.md      # User stories and acceptance criteria
-│       ├── design.md           # Technical design and architecture
-│       └── tasks.md            # Implementation task list
+│       ├── requirements.md      # RFC-based requirements
+│       ├── design.md           # Technical design (if needed)
+│       └── tasks.md            # Implementation breakdown
 └── steering/                    # Context and guidelines for Kiro
-    ├── coding-standards.md     # General coding principles
-    ├── product.md              # Product overview and capabilities
+    ├── coding-standards.md     # Design principles (references CodeRabbit)
+    ├── memory-bank.md          # Memory Bank usage guide
+    ├── product.md              # Product overview
     ├── structure.md            # Project structure and modules
     ├── tech.md                 # Technology stack and commands
-    └── ppl-command-workflow.md # PPL command development workflow
+    ├── team-memory.md          # Memory MCP usage instructions
+    └── ppl-command-workflow.md # PPL command RFC workflow
 ```
+
+## Documentation Layers
+
+The project uses multiple documentation systems, each serving a distinct purpose:
+
+### 1. Steering Files (.kiro/steering/) - Always Loaded
+Lightweight guidance automatically included in every Kiro interaction:
+- Core principles and project structure
+- Essential context for all development tasks
+- Kept concise to avoid token bloat
+
+### 2. Memory Bank (memory-bank/) - On-Demand Search
+Detailed technical reference searched only when needed:
+- Deep architecture patterns and implementation examples
+- Calcite integration, parser patterns, module details
+- Project status and progress tracking
+- See `steering/memory-bank.md` for usage guide
+
+### 3. Memory MCP - Opinion Storage
+Graph-based storage for your personal preferences:
+- Design taste from PR reviews
+- Team tenets and decision patterns
+- Extracted via `steering/team-memory.md` guidance
+
+### 4. CodeRabbit (.rules/REVIEW_GUIDELINES.md)
+Automated code review standards:
+- Language-specific conventions
+- Testing requirements
+- Review criteria
 
 ## Steering Files
 
-Steering files provide context and guidelines that Kiro uses to understand the project and make informed suggestions.
+### Always Loaded
 
-### Global Standards
+**`coding-standards.md`** - High-level design principles
+- Composition over inheritance, DRY, single responsibility
+- Fail fast, design by contract
+- Boy Scout Rule, refactor in small steps
+- References CodeRabbit for detailed standards
 
-**`coding-standards.md`** - Core engineering principles
-- Naming conventions and code clarity
-- Design principles (composition, DRY, single responsibility)
-- Error handling and testing practices
-- Performance considerations
+**`memory-bank.md`** - Memory Bank usage guide
+- When and how to use memory-bank/ folder
+- File structure and hierarchy
+- Search strategy and examples
 
-### Project Context
-
-**`product.md`** - What we're building
+**`product.md`** - Product overview
 - OpenSearch SQL plugin capabilities
 - SQL and PPL query language support
 - Multi-engine architecture (V2, V3)
-- Related ecosystem projects
 
-**`structure.md`** - How the code is organized
+**`structure.md`** - Project organization
 - Multi-module Gradle structure
-- Module responsibilities (core, sql, ppl, opensearch, etc.)
+- Module responsibilities and dependencies
 - Package organization patterns
-- Published artifacts
 
-**`tech.md`** - Tools and technologies
+**`tech.md`** - Technology stack
 - Build system (Gradle 8.x, Java 21)
 - Key dependencies (ANTLR4, Calcite, Lombok)
 - Common build/test/development commands
-- Code formatting with Spotless
 
-### Workflow-Specific
+**`team-memory.md`** - Memory MCP integration
+- How to extract principles from PR reviews
+- Entity types: core_principle, design_pattern, code_maintenance, etc.
+- Memory retrieval and update workflow
 
-**`ppl-command-workflow.md`** (manual inclusion)
-- Specialized workflow for PPL command development
-- Requires baseline study of Splunk documentation
-- Mandates concrete query examples with input/output
-- Enforces specific design.md structure
+### Manual Inclusion
+
+**`ppl-command-workflow.md`** - PPL command RFC workflow
+- RFC template structure (Problem, Proposal, Approach, etc.)
+- Baseline study requirements (Splunk documentation)
+- Concrete PPL query examples with input/output
 - Use with: `#ppl-command-workflow` in chat
+
+## Memory Bank Structure
+
+Located in `memory-bank/` folder (search on-demand):
+
+### Core Files
+- `projectbrief.md` - Project scope and requirements
+- `productContext.md` - Product goals and user experience
+- `systemPatterns.md` - Architecture and design patterns
+- `techContext.md` - Tech stack, dependencies, setup
+- `progress.md` - Current status and roadmap
+
+### OpenSearch-Specific
+- `opensearch-specific/calcite-integration.md` - Calcite patterns
+- `opensearch-specific/module-architecture.md` - Module interactions
+- `opensearch-specific/ppl-parser-patterns.md` - Parser patterns
+
+### Features
+- `features/` - Detailed feature specifications
+
+**Usage:** Search memory-bank/ when you need detailed technical patterns. See `steering/memory-bank.md` for guidance.
 
 ## Hooks
 
@@ -74,16 +128,10 @@ Hooks automatically trigger Kiro actions when specific events occur.
 ### `update-project-steerings.kiro.hook`
 
 **Trigger:** When key project files are edited
-- `README.md`
-- `settings.gradle`
-- `build.gradle`
-- `DEVELOPER_GUIDE.rst`
-- `gradle.properties`
+- `README.md`, `settings.gradle`, `build.gradle`
+- `DEVELOPER_GUIDE.rst`, `gradle.properties`
 
 **Action:** Prompts Kiro to review and suggest updates to steering files
-- Checks if product.md, tech.md, or structure.md need updates
-- Only updates relevant sections
-- Conservative approach - avoids unnecessary changes
 
 **Purpose:** Keeps steering documentation in sync with project evolution
 
@@ -91,16 +139,26 @@ Hooks automatically trigger Kiro actions when specific events occur.
 
 Kiro supports spec-driven development for complex features:
 
-1. **Requirements** - User stories with EARS-compliant acceptance criteria
-2. **Design** - Architecture, components, correctness properties
-3. **Tasks** - Actionable implementation checklist
+### PPL Command Specs (RFC-Based)
+
+1. **requirements.md** - RFC template structure
+   - Problem Statement, Current State, Long-Term Goals
+   - Proposal with concrete PPL query examples
+   - Approach (design decisions)
+   - Implementation Discussion (behavioral notes)
+   - Appendix: Baseline Study (Splunk documentation)
+
+2. **design.md** - Usually not needed
+   - Only for complex features requiring diagrams, algorithms, performance analysis
+
+3. **tasks.md** - Implementation breakdown
+   - Evidence from recent PRs
+   - Planned change list (grouped by category)
+   - Task breakdown with acceptance criteria
 
 ### Creating a Spec
 
-Start a conversation with Kiro describing your feature idea. Kiro will guide you through:
-- Clarifying requirements
-- Creating a design document
-- Generating an implementation task list
+Start a conversation with Kiro describing your feature idea. For PPL commands, include `#ppl-command-workflow`.
 
 ### Executing Tasks
 
@@ -123,6 +181,18 @@ I want to add support for the [command] PPL command
 #ppl-command-workflow
 ```
 
+**Understanding architecture patterns:**
+```
+How does Calcite integration work?
+[Kiro will search memory-bank/opensearch-specific/calcite-integration.md]
+```
+
+**Checking project status:**
+```
+What's the current state of the project?
+[Kiro will read memory-bank/progress.md]
+```
+
 **Understanding a module:**
 ```
 Explain how the async-query module works
@@ -143,5 +213,5 @@ Review my changes for best practices
 
 ---
 
-**Last Updated:** December 2025
+**Last Updated:** December 2024
 **Kiro Version:** Compatible with Kiro IDE
