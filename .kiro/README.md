@@ -51,12 +51,6 @@ Graph-based storage for your personal preferences:
 - Team tenets and decision patterns
 - Extracted via `steering/team-memory.md` guidance
 
-### 4. CodeRabbit (.rules/REVIEW_GUIDELINES.md)
-Automated code review standards:
-- Language-specific conventions
-- Testing requirements
-- Review criteria
-
 ## Steering Files
 
 ### Always Loaded
@@ -87,12 +81,12 @@ Automated code review standards:
 - Key dependencies (ANTLR4, Calcite, Lombok)
 - Common build/test/development commands
 
+### Manual Inclusion
+
 **`team-memory.md`** - Memory MCP integration
 - How to extract principles from PR reviews
 - Entity types: core_principle, design_pattern, code_maintenance, etc.
 - Memory retrieval and update workflow
-
-### Manual Inclusion
 
 **`ppl-command-workflow.md`** - PPL command RFC workflow
 - RFC template structure (Problem, Proposal, Approach, etc.)
@@ -213,5 +207,5 @@ Review my changes for best practices
 
 ---
 
-**Last Updated:** December 2024
+**Last Updated:** December 2025
 **Kiro Version:** Compatible with Kiro IDE

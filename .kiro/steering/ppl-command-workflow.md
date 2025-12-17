@@ -6,9 +6,68 @@ inclusion: manual
 
 When creating or updating PPL command specs (requirements.md, design.md, tasks.md), follow the RFC template structure with PPL-specific adaptations.
 
-## requirements.md Structure
+## requirements.md Structure (MUST MATCH THIS EXACTLY)
 
-Follow the RFC template from `.github/ISSUE_TEMPLATE/request_of_comments.md` with these PPL-specific adaptations:
+````markdown
+## 1. Problem Statement
+[TBD]
+
+## 2. Current State
+[TBD]
+
+## 3. Long-Term Goals
+### Primary Objectives
+[TBD]
+### Out-of-Scope for v1
+[TBD]
+
+## 4. Proposal
+### Use Case 1: [Title]
+**User Story:** [TBD]
+
+**Acceptance Criteria (EARS only):**
+- WHEN ..., THE SYSTEM SHALL ...
+- WHEN ..., THE SYSTEM SHALL ...
+
+**PPL Query:**
+```ppl
+[TBD]
+
+**Input Data:**
+[TBD]
+
+**Expected Output:**
+[TBD]
+
+### Use Case 2: [Title]
+[Same structure as Use Case 1]
+
+### Use Case 3: [Title]
+[Same structure as Use Case 1]
+
+## Appendix: Baseline Study
+[TBD]
+````
+
+**IMPORTANT:** Generate at most 3 use cases in the Proposal section. Focus on the most important and representative scenarios.
+
+**STEP 0: Baseline Study (MANDATORY - DO THIS FIRST)**
+
+Before writing requirements.md, study Splunk's implementation for feature parity:
+
+1. **Read Splunk Documentation:**
+   - Fetch public document from https://docs.splunk.com/Documentation/SplunkCloud/latest/SearchReference/[command]
+   - Alternative URL: https://docs.splunk.com/Documentation/Splunk/latest/SearchReference/[command]
+   - **CRITICAL: Actually fetch and read the Splunk documentation**
+   - **DO NOT** proceed based on assumptions from the command name alone
+   - Read the entire page front-to-back carefully – not skim
+
+2. **Capture from Splunk:**
+   - Syntax forms, parameters, defaults, notable constraints
+   - Behavioral semantics: null/missing handling, type coercion, ordering, determinism
+   - 1-2 canonical examples from Splunk docs with their explanations
+
+After completing the baseline study, follow the RFC template from `.github/ISSUE_TEMPLATE/request_of_comments.md` with these PPL-specific adaptations:
 
 ### 1. Problem Statement
 What issue/challenge needs to be addressed by this PPL command.
@@ -41,6 +100,8 @@ What issue/challenge needs to be addressed by this PPL command.
 ### 4. Proposal
 Suggested solution with **Concrete PPL Query Examples** (MANDATORY).
 
+**IMPORTANT:** Generate at most 3 use cases. Focus on the most important and representative scenarios.
+
 Each use case MUST have:
 - **User Story**: As a [role], I want to [action] so that [benefit]
 - **Acceptance Criteria**: WHEN/THEN format
@@ -52,49 +113,104 @@ Each use case MUST have:
 ````markdown
 ## Proposal
 
-### Use Case 1: Basic Multi-Value Combination
+### Use Case 1: Basic Field Combination
 
-**User Story:** As a data analyst, I want to combine multi-valued fields into a single delimited string.
+**User Story:** As a data analyst, I want to combine multiple rows with the same grouping fields into a single row with a delimited string field, so that I can see all values together.
 
 **Acceptance Criteria:**
-1. WHEN a user specifies a multi-valued field, THEN combine all values into a single string
-2. WHEN a delimiter is specified, THEN use that delimiter to separate values
-3. WHEN no delimiter is specified, THEN use comma as default delimiter
+1. WHEN a user specifies a target field with mvcombine, THEN the system SHALL group rows by all other fields
+2. WHEN rows are grouped, THEN the system SHALL combine target field values into a single delimited string
+3. WHEN no delimiter is specified, THEN the system SHALL use comma "," as the default delimiter
+4. WHEN a delimiter is specified, THEN the system SHALL use that delimiter to separate values
 
-**Query Example:**
+**PPL Query:**
 ```ppl
-source=employees | mvcombine field=skills delim=", "
+source=employees | mvcombine field=department
 ```
 
 **Input Data:**
 ```
-| id | name  | skills              |
-|----|-------|---------------------|
-| 1  | Alice | ["Java", "Python"]  |
-| 2  | Bob   | ["SQL", "NoSQL"]    |
+| id | name  | department |
+|----|-------|------------|
+| 1  | Alice | Engineering|
+| 1  | Alice | Sales      |
+| 1  | Alice | Marketing  |
+| 2  | Bob   | Engineering|
 ```
 
 **Expected Output:**
 ```
-| id | name  | combined_skills    |
-|----|-------|--------------------|
-| 1  | Alice | Java, Python       |
-| 2  | Bob   | SQL, NoSQL         |
+| id | name  | department                    |
+|----|-------|-------------------------------|
+| 1  | Alice | Engineering,Sales,Marketing   |
+| 2  | Bob   | Engineering                   |
 ```
 
 ### Use Case 2: [Next use case]
 [Repeat format]
 ````
 
-### 5. Approach
-High-level implementation strategy - this maps to design.md content:
+### 5. Appendix: Baseline Study
+Include the baseline study from STEP 0 as an appendix.
+
+## design.md Structure (MUST MATCH THIS EXACTLY)
+
+````markdown
+## 1. Approach
+### Implementation Strategy
+[TBD]
+
+### SQL Equivalents
+**Use Case 1:**
+```sql
+[TBD]
+```
+
+**Use Case 2:**
+```sql
+[TBD]
+```
+
+**Use Case 3:**
+```sql
+[TBD]
+```
+
+## 2. Alternative
+### Alternative 1: [Title]
+[TBD]
+
+### Alternative 2: [Title]
+[TBD]
+
+### Why [Chosen Approach]
+[TBD]
+
+## 3. Implementation Discussion
+### Behavioral Notes
+[TBD]
+
+### Open Questions
+[TBD]
+
+### Trade-offs
+[TBD]
+
+## 4. Optional: Advanced Details
+[TBD - Only if needed for complex features]
+````
+
+Create design.md to document technical implementation decisions.
+
+### 1. Approach (MANDATORY)
+High-level implementation strategy:
 
 **Include:**
 - **Subset or Composition?**
   - Is this a subset of existing command, composition of operators, or new command?
   - Coverage proof showing this covers v1 scope
   
-- **Equivalent SQL**: Show SQL equivalent for each requirement
+- **Equivalent SQL**: Show SQL equivalent for each use case from requirements
   
 - **Pushdown Feasibility**: Full/Partial/None with reasoning
 
@@ -110,16 +226,42 @@ High-level implementation strategy - this maps to design.md content:
 ### SQL Equivalents
 **Use Case 1:**
 ```sql
-SELECT id, name, ARRAY_JOIN(skills, ', ') as combined_skills
+SELECT id, name, ARRAY_JOIN(department, ',') as department
 FROM employees
+GROUP BY id, name
 ```
 ````
 
-### 6. Alternative
-Alternative solutions or workarounds that can partially/temporarily solve the problem.
+### 2. Alternative (MANDATORY)
+Alternative implementation approaches or workarounds:
 
-### 7. Implementation Discussion
-Discussion points regarding the proposed implementation:
+**Include:**
+- Alternative technical solutions considered
+- Workarounds that can partially/temporarily solve the problem
+- Why the chosen approach (from section 1) is preferred
+
+**Example:**
+```markdown
+## Alternative
+
+### Alternative 1: Native Command Implementation
+Implement mvcombine as a standalone native command with dedicated logic.
+- **Pros**: Better performance, more control over optimization
+- **Cons**: More code to maintain, duplicates existing functionality
+
+### Alternative 2: User-Level Workaround
+Users can manually use stats with list() aggregation.
+- **Pros**: No new code needed
+- **Cons**: Verbose syntax, not Splunk-compatible, requires user knowledge
+
+### Why Composition Approach (Chosen)
+- Reuses battle-tested operators
+- Simpler implementation and maintenance
+- Sufficient performance for v1 use cases
+```
+
+### 3. Implementation Discussion
+Technical discussion points:
 
 **Include:**
 - **Behavioral Notes** (MANDATORY):
@@ -150,69 +292,12 @@ Discussion points regarding the proposed implementation:
 - **Option B (Native command)**: Better performance but more code to maintain
 ```
 
-## Appendix: Baseline Study (MANDATORY)
-
-**CRITICAL: This section is MANDATORY and must be completed BEFORE writing requirements.**
-
-Before writing any requirements, you MUST study Splunk's implementation for feature parity:
-
-1. **Read Splunk Documentation (USE THE TOOL):**
-   - URL: https://docs.splunk.com/Documentation/SplunkCloud/latest/SearchReference/[command]
-   - Alternative: https://docs.splunk.com/Documentation/Splunk/latest/SearchReference/[command]
-   - **CRITICAL: Actually fetch and read the Splunk documentation**
-   - **DO NOT** proceed based on assumptions from the command name alone
-   - Read the entire page front-to-back carefully – not skim
-
-2. **Capture from Splunk:**
-   - Syntax forms, parameters, defaults, notable constraints
-   - Behavioral semantics: null/missing handling, type coercion, ordering, determinism
-   - 1-2 canonical examples from Splunk docs with their explanations
-
-**Example Baseline Study:**
-```markdown
-## Appendix: Baseline Study
-
-### Splunk Reference
-- **URL:** https://docs.splunk.com/Documentation/Splunk/latest/SearchReference/Mvcombine
-
-### Core Semantic (CRITICAL)
-**Exact quote from Splunk Documentation:**
-"Takes a group of events that are identical except for the specified field, which contains a single value, and combines those events into a single event. The specified field becomes a multivalue field."
-
-**What this means:**
-- Multiple rows with identical values in ALL fields EXCEPT the target field
-- Target field has different single values across these rows
-- Rows are collapsed into ONE row
-- Target field becomes multi-valued/delimited string
-
-### Splunk Syntax
-`mvcombine [delim=<string>] [sdelim=<string>] <field>`
-
-### Key Behaviors
-- Groups events by all fields except target field
-- Default delimiter: space (not comma)
-- Supports sdelim for source delimiter
-- Reduces number of output events
-
-### Potential Drift from Splunk
-- Our default delimiter: comma (different from Splunk's space)
-- We don't support sdelim in v1
-- NULL vs MISSING semantics may differ
-```
-
-## design.md (Usually Not Needed)
-
-**IMPORTANT:** Design decisions are already covered in requirements.md:
-- **Approach section**: Subset/Composition, SQL equivalents, Pushdown feasibility
-- **Implementation Discussion section**: Behavioral notes, trade-offs
-
-**Only create design.md if the feature requires:**
-- Complex architecture diagrams
+### 4. Optional: Advanced Details
+For complex features, include:
+- Architecture diagrams
 - Detailed algorithm pseudocode
 - Performance analysis with benchmarks
 - Security threat modeling
-
-Otherwise, skip design.md and proceed directly to tasks.md.
 
 ## tasks.md Structure
 
