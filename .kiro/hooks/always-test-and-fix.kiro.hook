@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "name": "Always run tests, then auto-format",
+  "description": "On every prompt, if the agent changes code, it must get tests passing first, then run the repo-appropriate formatter before replying.",
+  "version": "1",
+  "when": { "type": "promptSubmit" },
+  "then": {
+    "type": "askAgent",
+    "prompt": "IMPORTANT WORKFLOW RULE:\n\nIf you make ANY code changes in this turn, you MUST follow this order before replying:\n\n1) TESTS FIRST\n- Determine the appropriate test command(s) for this repo.\n- Run unit tests (and integration tests only if relevant to your changes).\n- If tests fail: diagnose, fix, and re-run tests.\n- Repeat until tests pass (max 3 fix cycles). If still failing, stop and summarize: failing command(s), key error lines, and your best next fix.\n\n2) ONLY AFTER TESTS PASS: AUTO-FORMAT\n- Determine the appropriate auto-fix/formatter command(s) for this repo and run them directly.\n\nExamples (NOT mandatory; choose what fits the repo):\n- Auto-format (Scala): `sbt scalafmtAll`\n- Auto-format (Gradle Spotless): `./gradlew spotlessApply`\n"
+  }
+}
