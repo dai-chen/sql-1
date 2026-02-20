@@ -207,8 +207,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
 
   /**
    * Auto-materialize MAP dotted paths declared by {@link UnresolvedPlan#getOperands()}. For each
-   * operand that is a Field with a dotted path into a MAP column (e.g., "doc.user.name" where "doc"
-   * is MAP), project it as a flat column via ITEM() so downstream commands can find it by name.
+   * operand that resolves to an ITEM() access on a MAP column (e.g., "doc.user.name" → ITEM(doc,
+   * 'user.name')), project it as a flat named column so downstream commands can find it by name.
+   * Reuses {@link QualifiedNameResolver} via {@code rexVisitor.analyze()} for path resolution.
    */
   private void materializeMapPathsIfNeeded(UnresolvedPlan node, CalcitePlanContext context) {
     List<UnresolvedExpression> operands = node.getOperands();
@@ -222,22 +223,14 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       if (!(operand instanceof Field)) continue;
       String fieldName = ((Field) operand).getField().toString();
       if (currentFields.contains(fieldName)) continue;
-      int dot = fieldName.indexOf('.');
-      if (dot <= 0) continue;
-      String root = fieldName.substring(0, dot);
-      RelDataTypeField mapField =
-          context.relBuilder.peek().getRowType().getField(root, false, false);
-      if (mapField != null && mapField.getType().getSqlTypeName() == SqlTypeName.MAP) {
-        String path = fieldName.substring(dot + 1);
-        RexNode rootRef = context.relBuilder.field(root);
-        RexNode itemCall =
-            PPLFuncImpTable.INSTANCE.resolve(
-                context.rexBuilder,
-                BuiltinFunctionName.INTERNAL_ITEM,
-                rootRef,
-                context.rexBuilder.makeLiteral(path));
-        toMaterialize.add(itemCall);
-        newNames.add(fieldName);
+      try {
+        RexNode resolved = rexVisitor.analyze(operand, context);
+        if (resolved.getKind() == SqlKind.ITEM) {
+          toMaterialize.add(resolved);
+          newNames.add(fieldName);
+        }
+      } catch (Exception e) {
+        // Field can't be resolved — skip silently, let the command handle the error
       }
     }
 
