@@ -6,6 +6,7 @@
 package org.opensearch.sql.ast.tree;
 
 import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -46,6 +47,14 @@ public class RareTopN extends UnresolvedPlan {
   @Override
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
     return nodeVisitor.visitRareTopN(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    List<UnresolvedExpression> operands = new ArrayList<>();
+    fields.forEach(f -> operands.add(f));
+    groupExprList.forEach(operands::add);
+    return operands;
   }
 
   public enum CommandType {

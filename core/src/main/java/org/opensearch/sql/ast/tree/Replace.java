@@ -8,6 +8,7 @@ package org.opensearch.sql.ast.tree;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,6 +16,7 @@ import lombok.ToString;
 import org.jetbrains.annotations.Nullable;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.expression.Field;
+import org.opensearch.sql.ast.expression.UnresolvedExpression;
 
 @Getter
 @Setter
@@ -54,5 +56,10 @@ public class Replace extends UnresolvedPlan {
   @Override
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
     return nodeVisitor.visitReplace(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    return fieldList.stream().map(f -> (UnresolvedExpression) f).collect(Collectors.toList());
   }
 }

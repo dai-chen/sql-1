@@ -7,6 +7,7 @@ package org.opensearch.sql.ast.tree;
 
 import com.google.common.collect.ImmutableList;
 import java.util.List;
+import java.util.stream.Collectors;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -66,5 +67,12 @@ public class Rename extends UnresolvedPlan {
   @Override
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
     return nodeVisitor.visitRename(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    return renameList.stream()
+        .map(m -> (UnresolvedExpression) m.getOrigin())
+        .collect(Collectors.toList());
   }
 }

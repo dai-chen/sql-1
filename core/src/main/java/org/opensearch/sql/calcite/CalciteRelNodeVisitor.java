@@ -191,6 +191,70 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     return unresolved.accept(this, context);
   }
 
+  /**
+   * Override visitChildren to auto-materialize MAP dotted paths after children are visited. When a
+   * command declares operands via {@link UnresolvedPlan#getOperands()}, any dotted paths into MAP
+   * columns are materialized as flat columns before the command's own logic runs.
+   */
+  @Override
+  public RelNode visitChildren(Node node, CalcitePlanContext context) {
+    RelNode result = super.visitChildren(node, context);
+    if (node instanceof UnresolvedPlan) {
+      materializeMapPathsIfNeeded((UnresolvedPlan) node, context);
+    }
+    return result;
+  }
+
+  /**
+   * Auto-materialize MAP dotted paths declared by {@link UnresolvedPlan#getOperands()}. For each
+   * operand that is a Field with a dotted path into a MAP column (e.g., "doc.user.name" where "doc"
+   * is MAP), project it as a flat column via ITEM() so downstream commands can find it by name.
+   */
+  private void materializeMapPathsIfNeeded(UnresolvedPlan node, CalcitePlanContext context) {
+    List<UnresolvedExpression> operands = node.getOperands();
+    if (operands.isEmpty() || context.relBuilder.size() == 0) return;
+
+    List<String> currentFields = context.relBuilder.peek().getRowType().getFieldNames();
+    List<RexNode> toMaterialize = new ArrayList<>();
+    List<String> newNames = new ArrayList<>();
+
+    for (UnresolvedExpression operand : operands) {
+      if (!(operand instanceof Field)) continue;
+      String fieldName = ((Field) operand).getField().toString();
+      if (currentFields.contains(fieldName)) continue;
+      int dot = fieldName.indexOf('.');
+      if (dot <= 0) continue;
+      String root = fieldName.substring(0, dot);
+      RelDataTypeField mapField =
+          context.relBuilder.peek().getRowType().getField(root, false, false);
+      if (mapField != null && mapField.getType().getSqlTypeName() == SqlTypeName.MAP) {
+        String path = fieldName.substring(dot + 1);
+        RexNode rootRef = context.relBuilder.field(root);
+        RexNode itemCall =
+            PPLFuncImpTable.INSTANCE.resolve(
+                context.rexBuilder,
+                BuiltinFunctionName.INTERNAL_ITEM,
+                rootRef,
+                context.rexBuilder.makeLiteral(path));
+        toMaterialize.add(itemCall);
+        newNames.add(fieldName);
+      }
+    }
+
+    if (!toMaterialize.isEmpty()) {
+      // Use projectPlus (not projectPlusOverriding) to preserve the MAP column.
+      // projectPlusOverriding would remove the MAP column "doc" when adding "doc.user.name"
+      // because shouldOverrideField detects "doc.user.name".startsWith("doc.").
+      context.relBuilder.projectPlus(toMaterialize);
+      List<String> currentFieldsAfter = context.relBuilder.peek().getRowType().getFieldNames();
+      int total = currentFieldsAfter.size();
+      List<String> renamed =
+          new ArrayList<>(currentFieldsAfter.subList(0, total - newNames.size()));
+      renamed.addAll(newNames);
+      context.relBuilder.rename(renamed);
+    }
+  }
+
   @Override
   public RelNode visitRelation(Relation node, CalcitePlanContext context) {
     DataSourceSchemaIdentifierNameResolver nameResolver =

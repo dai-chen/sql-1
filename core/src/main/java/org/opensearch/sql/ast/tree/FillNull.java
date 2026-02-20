@@ -8,6 +8,7 @@ package org.opensearch.sql.ast.tree;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -77,5 +78,12 @@ public class FillNull extends UnresolvedPlan {
   @Override
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
     return nodeVisitor.visitFillNull(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    return replacementPairs.stream()
+        .map(p -> (UnresolvedExpression) p.getLeft())
+        .collect(Collectors.toList());
   }
 }

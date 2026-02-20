@@ -8,6 +8,7 @@ package org.opensearch.sql.ast.tree;
 import com.google.common.collect.ImmutableList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
@@ -63,5 +64,13 @@ public class Project extends UnresolvedPlan {
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
 
     return nodeVisitor.visitProject(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    if (isExcluded()) {
+      return projectList.stream().collect(Collectors.toList());
+    }
+    return Collections.emptyList();
   }
 }
