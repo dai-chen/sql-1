@@ -45,4 +45,9 @@ public class StreamWindow extends UnresolvedPlan {
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
     return nodeVisitor.visitStreamWindow(this, context);
   }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    return groupList != null ? groupList : java.util.Collections.emptyList();
+  }
 }

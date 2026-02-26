@@ -220,11 +220,16 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     List<String> newNames = new ArrayList<>();
 
     for (UnresolvedExpression operand : operands) {
-      if (!(operand instanceof Field)) continue;
-      String fieldName = ((Field) operand).getField().toString();
+      // Unwrap Alias to get the inner expression (e.g., Alias("doc.user.name", Field(...)))
+      UnresolvedExpression inner = operand;
+      if (inner instanceof org.opensearch.sql.ast.expression.Alias alias) {
+        inner = alias.getDelegated();
+      }
+      if (!(inner instanceof Field)) continue;
+      String fieldName = ((Field) inner).getField().toString();
       if (currentFields.contains(fieldName)) continue;
       try {
-        RexNode resolved = rexVisitor.analyze(operand, context);
+        RexNode resolved = rexVisitor.analyze(inner, context);
         if (resolved.getKind() == SqlKind.ITEM) {
           toMaterialize.add(resolved);
           newNames.add(fieldName);

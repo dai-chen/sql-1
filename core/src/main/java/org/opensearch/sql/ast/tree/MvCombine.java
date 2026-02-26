@@ -13,6 +13,7 @@ import lombok.Getter;
 import lombok.ToString;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.expression.Field;
+import org.opensearch.sql.ast.expression.UnresolvedExpression;
 
 @Getter
 @ToString(callSuper = true)
@@ -41,5 +42,10 @@ public class MvCombine extends UnresolvedPlan {
   @Override
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
     return nodeVisitor.visitMvCombine(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    return List.of(field);
   }
 }

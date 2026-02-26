@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.expression.Field;
+import org.opensearch.sql.ast.expression.UnresolvedExpression;
 
 /** AST node representing an {@code expand <field>} operation. */
 @ToString
@@ -39,5 +40,10 @@ public class Expand extends UnresolvedPlan {
   @Override
   public <T, C> T accept(AbstractNodeVisitor<T, C> nodeVisitor, C context) {
     return nodeVisitor.visitExpand(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    return List.of(field);
   }
 }

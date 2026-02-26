@@ -12,6 +12,7 @@ import lombok.*;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Literal;
+import org.opensearch.sql.ast.expression.UnresolvedExpression;
 
 /**
  * AST node representing the PPL addcoltotals command. Computes column-wise totals across events and
@@ -43,5 +44,12 @@ public class AddColTotals extends UnresolvedPlan {
   @Override
   public <T, C> T accept(AbstractNodeVisitor<T, C> visitor, C context) {
     return visitor.visitAddColTotals(this, context);
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    return fieldList.stream()
+        .map(f -> (UnresolvedExpression) f)
+        .collect(java.util.stream.Collectors.toList());
   }
 }

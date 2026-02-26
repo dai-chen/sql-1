@@ -14,6 +14,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.Node;
+import org.opensearch.sql.ast.expression.Field;
+import org.opensearch.sql.ast.expression.QualifiedName;
+import org.opensearch.sql.ast.expression.UnresolvedExpression;
 
 /** AST node represent Lookup operation. */
 @ToString
@@ -58,5 +61,14 @@ public class Lookup extends UnresolvedPlan {
   public enum OutputStrategy {
     APPEND,
     REPLACE
+  }
+
+  @Override
+  public List<UnresolvedExpression> getOperands() {
+    // The mapping values are source-side field names (e.g., "doc.user.name")
+    // that need to be materialized if they are MAP sub-paths.
+    return mappingAliasMap.values().stream()
+        .map(name -> (UnresolvedExpression) new Field(QualifiedName.of(List.of(name.split("\\.")))))
+        .collect(java.util.stream.Collectors.toList());
   }
 }
