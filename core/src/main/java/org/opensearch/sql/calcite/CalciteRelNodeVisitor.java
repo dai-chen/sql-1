@@ -180,11 +180,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   private final CalciteRexNodeVisitor rexVisitor;
   private final CalciteAggCallVisitor aggVisitor;
   private final DataSourceService dataSourceService;
+  private final MapPathMaterializer mapPathMaterializer;
 
   public CalciteRelNodeVisitor(DataSourceService dataSourceService) {
     this.rexVisitor = new CalciteRexNodeVisitor(this);
     this.aggVisitor = new CalciteAggCallVisitor(rexVisitor);
     this.dataSourceService = dataSourceService;
+    this.mapPathMaterializer = new MapPathMaterializer(rexVisitor);
   }
 
   public RelNode analyze(UnresolvedPlan unresolved, CalcitePlanContext context) {
@@ -193,64 +195,12 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
 
   /**
    * Override visitChildren to auto-materialize MAP dotted paths after children are visited. When a
-   * command declares operands via {@link UnresolvedPlan#getOperands()}, any dotted paths into MAP
-   * columns are materialized as flat columns before the command's own logic runs.
+   * command references dotted paths into MAP columns, they are materialized as flat columns before
+   * the command's own logic runs.
    */
   @Override
   public RelNode visitChildren(Node node, CalcitePlanContext context) {
-    RelNode result = super.visitChildren(node, context);
-    if (node instanceof UnresolvedPlan) {
-      materializeMapPathsIfNeeded((UnresolvedPlan) node, context);
-    }
-    return result;
-  }
-
-  /**
-   * Auto-materialize MAP dotted paths declared by {@link UnresolvedPlan#getOperands()}. For each
-   * operand that resolves to an ITEM() access on a MAP column (e.g., "doc.user.name" → ITEM(doc,
-   * 'user.name')), project it as a flat named column so downstream commands can find it by name.
-   * Reuses {@link QualifiedNameResolver} via {@code rexVisitor.analyze()} for path resolution.
-   */
-  private void materializeMapPathsIfNeeded(UnresolvedPlan node, CalcitePlanContext context) {
-    List<UnresolvedExpression> operands = node.getOperands();
-    if (operands.isEmpty() || context.relBuilder.size() == 0) return;
-
-    List<String> currentFields = context.relBuilder.peek().getRowType().getFieldNames();
-    List<RexNode> toMaterialize = new ArrayList<>();
-    List<String> newNames = new ArrayList<>();
-
-    for (UnresolvedExpression operand : operands) {
-      // Unwrap Alias to get the inner expression (e.g., Alias("doc.user.name", Field(...)))
-      UnresolvedExpression inner = operand;
-      if (inner instanceof org.opensearch.sql.ast.expression.Alias alias) {
-        inner = alias.getDelegated();
-      }
-      if (!(inner instanceof Field)) continue;
-      String fieldName = ((Field) inner).getField().toString();
-      if (currentFields.contains(fieldName)) continue;
-      try {
-        RexNode resolved = rexVisitor.analyze(inner, context);
-        if (resolved.getKind() == SqlKind.ITEM) {
-          toMaterialize.add(resolved);
-          newNames.add(fieldName);
-        }
-      } catch (Exception e) {
-        // Field can't be resolved — skip silently, let the command handle the error
-      }
-    }
-
-    if (!toMaterialize.isEmpty()) {
-      // Use projectPlus (not projectPlusOverriding) to preserve the MAP column.
-      // projectPlusOverriding would remove the MAP column "doc" when adding "doc.user.name"
-      // because shouldOverrideField detects "doc.user.name".startsWith("doc.").
-      context.relBuilder.projectPlus(toMaterialize);
-      List<String> currentFieldsAfter = context.relBuilder.peek().getRowType().getFieldNames();
-      int total = currentFieldsAfter.size();
-      List<String> renamed =
-          new ArrayList<>(currentFieldsAfter.subList(0, total - newNames.size()));
-      renamed.addAll(newNames);
-      context.relBuilder.rename(renamed);
-    }
+    return mapPathMaterializer.materializePaths(super.visitChildren(node, context), node, context);
   }
 
   @Override
