@@ -149,6 +149,50 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
     }
   }
 
+  @Test
+  public void testSQLWithMatchUDF() throws Exception {
+    initContext(QueryType.SQL);
+    String sqlQuery =
+        String.format(
+            "SELECT firstname, lastname FROM `%s` WHERE match(lastname, 'Bates') LIMIT 5",
+            TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(sqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      verify(resultSet)
+          .expectSchema(col("firstname", VARCHAR), col("lastname", VARCHAR))
+          .expectData(row("Nanette", "Bates"));
+    }
+  }
+
+  @Test
+  public void testAnsiSQLSelfJoinWithAggregation() throws Exception {
+    initContext(QueryType.ANSI_SQL);
+    // Self-join: find people in the same state, then count per state
+    String ansiSqlQuery =
+        String.format(
+            "SELECT a.\"state\", COUNT(*) AS \"cnt\""
+                + " FROM \"%1$s\" a"
+                + " INNER JOIN \"%1$s\" b ON a.\"state\" = b.\"state\""
+                + " WHERE a.\"age\" > 30 AND b.\"age\" < 30"
+                + " GROUP BY a.\"state\""
+                + " ORDER BY \"cnt\" DESC",
+            TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(ansiSqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      assertNotNull(resultSet);
+      assertEquals("state", resultSet.getMetaData().getColumnName(1));
+      assertEquals("cnt", resultSet.getMetaData().getColumnName(2));
+      assertTrue("Expected at least one row", resultSet.next());
+      assertTrue("Count should be positive", resultSet.getLong("cnt") > 0);
+    }
+  }
+
   /**
    * Creates a dynamic schema that creates OpenSearchIndex on-demand for any table name. This allows
    * querying any index without pre-registering it.
