@@ -112,21 +112,16 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
     initContext(QueryType.SQL);
     String sqlQuery =
         String.format(
-            "SELECT firstname, age FROM `%s` WHERE age > 30 LIMIT 3", TEST_INDEX_ACCOUNT);
+            "SELECT firstname, age FROM `%s` WHERE lastname = 'Duke' LIMIT 3",
+            TEST_INDEX_ACCOUNT);
 
     RelNode logicalPlan = planner.plan(sqlQuery);
     try (PreparedStatement statement = compiler.compile(logicalPlan)) {
       ResultSet resultSet = statement.executeQuery();
 
-      assertNotNull(resultSet);
-      assertEquals("firstname", resultSet.getMetaData().getColumnName(1));
-      assertEquals("age", resultSet.getMetaData().getColumnName(2));
-      int rowCount = 0;
-      while (resultSet.next()) {
-        assertTrue("Age should be > 30", resultSet.getLong("age") > 30);
-        rowCount++;
-      }
-      assertEquals("Expected 3 rows", 3, rowCount);
+      verify(resultSet)
+          .expectSchema(col("firstname", VARCHAR), col("age", BIGINT))
+          .expectData(row("Amber", 32L));
     }
   }
 
@@ -135,17 +130,16 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
     initContext(QueryType.ANSI_SQL);
     String ansiSqlQuery =
         String.format(
-            "SELECT \"firstname\", \"age\" FROM \"%s\" WHERE \"age\" > 30", TEST_INDEX_ACCOUNT);
+            "SELECT \"firstname\", \"age\" FROM \"%s\" WHERE \"lastname\" = 'Duke'",
+            TEST_INDEX_ACCOUNT);
 
     RelNode logicalPlan = planner.plan(ansiSqlQuery);
     try (PreparedStatement statement = compiler.compile(logicalPlan)) {
       ResultSet resultSet = statement.executeQuery();
 
-      assertNotNull(resultSet);
-      assertTrue("Expected at least one row", resultSet.next());
-      assertEquals(VARCHAR, resultSet.getMetaData().getColumnType(1));
-      assertEquals(BIGINT, resultSet.getMetaData().getColumnType(2));
-      assertTrue("Age should be > 30", resultSet.getLong("age") > 30);
+      verify(resultSet)
+          .expectSchema(col("firstname", VARCHAR), col("age", BIGINT))
+          .expectData(row("Amber", 32L));
     }
   }
 
@@ -170,26 +164,24 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
   @Test
   public void testAnsiSQLSelfJoinWithAggregation() throws Exception {
     initContext(QueryType.ANSI_SQL);
-    // Self-join: find people in the same state, then count per state
+    // Self-join on state: count pairs where a.age > 30 and b.age < 30 in state IL
+    // IL has 10 people with age>30 and 11 with age<30, so cross count = 110
     String ansiSqlQuery =
         String.format(
             "SELECT a.\"state\", COUNT(*) AS \"cnt\""
                 + " FROM \"%1$s\" a"
                 + " INNER JOIN \"%1$s\" b ON a.\"state\" = b.\"state\""
-                + " WHERE a.\"age\" > 30 AND b.\"age\" < 30"
-                + " GROUP BY a.\"state\""
-                + " ORDER BY \"cnt\" DESC",
+                + " WHERE a.\"age\" > 30 AND b.\"age\" < 30 AND a.\"state\" = 'IL'"
+                + " GROUP BY a.\"state\"",
             TEST_INDEX_ACCOUNT);
 
     RelNode logicalPlan = planner.plan(ansiSqlQuery);
     try (PreparedStatement statement = compiler.compile(logicalPlan)) {
       ResultSet resultSet = statement.executeQuery();
 
-      assertNotNull(resultSet);
-      assertEquals("state", resultSet.getMetaData().getColumnName(1));
-      assertEquals("cnt", resultSet.getMetaData().getColumnName(2));
-      assertTrue("Expected at least one row", resultSet.next());
-      assertTrue("Count should be positive", resultSet.getLong("cnt") > 0);
+      verify(resultSet)
+          .expectSchema(col("state", VARCHAR), col("cnt", BIGINT))
+          .expectData(row("IL", 110L));
     }
   }
 
