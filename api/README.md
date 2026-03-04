@@ -39,16 +39,25 @@ UnifiedQueryContext pplContext = UnifiedQueryContext.builder()
     .defaultNamespace("opensearch")
     .build();
 
-// OpenSearch SQL
+// OpenSearch SQL (default — uses ANTLR parser with OpenSearch UDFs like match())
 UnifiedQueryContext sqlContext = UnifiedQueryContext.builder()
     .language(QueryType.SQL)
     .catalog("opensearch", opensearchSchema)
     .defaultNamespace("opensearch")
     .build();
 
-// ANSI SQL (uses Calcite's native SQL parser)
-UnifiedQueryContext ansiContext = UnifiedQueryContext.builder()
-    .language(QueryType.ANSI_SQL)
+// Standard SQL via Calcite's native parser (set conformance to opt in)
+UnifiedQueryContext calciteSqlContext = UnifiedQueryContext.builder()
+    .language(QueryType.SQL)
+    .conformance(SqlConformanceEnum.DEFAULT)
+    .catalog("opensearch", opensearchSchema)
+    .defaultNamespace("opensearch")
+    .build();
+
+// MySQL-compatible SQL
+UnifiedQueryContext mysqlContext = UnifiedQueryContext.builder()
+    .language(QueryType.SQL)
+    .conformance(SqlConformanceEnum.MYSQL_5)
     .catalog("opensearch", opensearchSchema)
     .defaultNamespace("opensearch")
     .build();
@@ -67,9 +76,9 @@ RelNode plan = planner.plan("source = logs | where status = 200");
 UnifiedQueryPlanner sqlPlanner = new UnifiedQueryPlanner(sqlContext);
 RelNode plan = sqlPlanner.plan("SELECT * FROM logs WHERE match(message, 'error')");
 
-// ANSI SQL (standard SQL via Calcite's native parser)
-UnifiedQueryPlanner ansiPlanner = new UnifiedQueryPlanner(ansiContext);
-RelNode plan = ansiPlanner.plan("SELECT \"name\", COUNT(*) FROM \"logs\" GROUP BY \"name\"");
+// Standard SQL via Calcite's native parser (conformance set on context)
+UnifiedQueryPlanner calcitePlanner = new UnifiedQueryPlanner(calciteSqlContext);
+RelNode plan = calcitePlanner.plan("SELECT \"name\", COUNT(*) FROM \"logs\" GROUP BY \"name\"");
 ```
 
 ### UnifiedQueryTranspiler

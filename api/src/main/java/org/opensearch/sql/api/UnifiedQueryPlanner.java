@@ -37,6 +37,9 @@ public class UnifiedQueryPlanner {
   /** Unified query context containing CalcitePlanContext with all configuration. */
   private final UnifiedQueryContext context;
 
+  /** Whether to use Calcite's native SQL parser instead of the ANTLR-based parser. */
+  private final boolean useCalciteParser;
+
   /** AST-to-RelNode visitor that builds logical plans from the parsed AST. */
   private final CalciteRelNodeVisitor relNodeVisitor =
       new CalciteRelNodeVisitor(new EmptyDataSourceService());
@@ -47,22 +50,24 @@ public class UnifiedQueryPlanner {
    * @param context the unified query context containing CalcitePlanContext
    */
   public UnifiedQueryPlanner(UnifiedQueryContext context) {
-    this.parser = buildQueryParser(context.getPlanContext().queryType);
     this.context = context;
+    this.useCalciteParser =
+        context.getPlanContext().queryType == QueryType.SQL && context.getConformance() != null;
+    this.parser = useCalciteParser ? null : buildQueryParser(context.getPlanContext().queryType);
   }
 
   /**
    * Parses and analyzes a query string into a Calcite logical plan (RelNode).
    *
-   * @param query the raw query string in PPL, SQL, or ANSI SQL syntax
+   * @param query the raw query string in PPL or SQL syntax
    * @return a logical plan representing the query
    */
   public RelNode plan(String query) {
     try {
-      return switch (context.getPlanContext().queryType) {
-        case PPL, SQL -> preserveCollation(analyze(parse(query)));
-        case ANSI_SQL -> planWithCalcite(query);
-      };
+      if (useCalciteParser) {
+        return planWithCalcite(query);
+      }
+      return preserveCollation(analyze(parse(query)));
     } catch (SyntaxCheckException e) {
       throw e;
     } catch (Exception e) {
@@ -74,7 +79,6 @@ public class UnifiedQueryPlanner {
     return switch (queryType) {
       case PPL -> new PPLSyntaxParser();
       case SQL -> new SQLSyntaxParser();
-      case ANSI_SQL -> null;
     };
   }
 
@@ -103,9 +107,6 @@ public class UnifiedQueryPlanner {
                         .build());
             yield cst.accept(stmtBuilder);
           }
-          default ->
-              throw new IllegalArgumentException(
-                  "Unsupported query type for AST parsing: " + context.getPlanContext().queryType);
         };
 
     if (statement instanceof Query) {
@@ -124,7 +125,7 @@ public class UnifiedQueryPlanner {
       planner.close();
       return relRoot.rel;
     } catch (Exception e) {
-      throw new IllegalStateException("Failed to plan ANSI SQL query", e);
+      throw new IllegalStateException("Failed to plan SQL query", e);
     }
   }
 

@@ -7,6 +7,5 @@ package org.opensearch.sql.executor;
 
 public enum QueryType {
   PPL,
-  SQL,
-  ANSI_SQL
+  SQL
 }

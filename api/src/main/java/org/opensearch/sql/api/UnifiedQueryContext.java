@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import lombok.Getter;
 import lombok.Value;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.RelTraitDef;
@@ -20,6 +21,7 @@ import org.apache.calcite.rel.metadata.DefaultRelMetadataProvider;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Programs;
@@ -43,6 +45,13 @@ public class UnifiedQueryContext implements AutoCloseable {
   Settings settings;
 
   /**
+   * SQL conformance level for Calcite's native SQL parser. When null and language is SQL, the
+   * OpenSearch ANTLR-based SQL parser is used. When set, Calcite's native SqlParser is used with
+   * this conformance level, enabling dialect-specific SQL parsing (e.g., MySQL, Oracle, BigQuery).
+   */
+  @Getter SqlConformance conformance;
+
+  /**
    * Closes the underlying resource managed by this context.
    *
    * @throws Exception if an error occurs while closing the connection
@@ -62,6 +71,7 @@ public class UnifiedQueryContext implements AutoCloseable {
   /** Builder that constructs UnifiedQueryContext. */
   public static class Builder {
     private QueryType queryType;
+    private SqlConformance conformance;
     private final Map<String, Schema> catalogs = new HashMap<>();
     private String defaultNamespace;
     private boolean cacheMetadata = false;
@@ -80,11 +90,25 @@ public class UnifiedQueryContext implements AutoCloseable {
     /**
      * Sets the query language frontend to be used.
      *
-     * @param queryType the {@link QueryType}, such as PPL
+     * @param queryType the {@link QueryType}, such as PPL or SQL
      * @return this builder instance
      */
     public Builder language(QueryType queryType) {
       this.queryType = queryType;
+      return this;
+    }
+
+    /**
+     * Sets the SQL conformance level for Calcite's native SQL parser. Only applicable when language
+     * is {@link QueryType#SQL}. When set, bypasses the OpenSearch ANTLR parser and uses Calcite's
+     * built-in SqlParser with the specified conformance (e.g., {@code
+     * SqlConformanceEnum.MYSQL_5}).
+     *
+     * @param conformance the Calcite {@link SqlConformance} level
+     * @return this builder instance
+     */
+    public Builder conformance(SqlConformance conformance) {
+      this.conformance = conformance;
       return this;
     }
 
@@ -146,12 +170,15 @@ public class UnifiedQueryContext implements AutoCloseable {
      */
     public UnifiedQueryContext build() {
       Objects.requireNonNull(queryType, "Must specify language before build");
+      if (conformance != null && queryType != QueryType.SQL) {
+        throw new IllegalArgumentException("conformance is only applicable for SQL language");
+      }
 
       Settings settings = buildSettings();
       CalcitePlanContext planContext =
           CalcitePlanContext.create(
               buildFrameworkConfig(), SysLimit.fromSettings(settings), queryType);
-      return new UnifiedQueryContext(planContext, settings);
+      return new UnifiedQueryContext(planContext, settings, conformance);
     }
 
     private Settings buildSettings() {
@@ -174,9 +201,14 @@ public class UnifiedQueryContext implements AutoCloseable {
       SchemaPlus rootSchema = CalciteSchema.createRootSchema(true, cacheMetadata).plus();
       catalogs.forEach(rootSchema::add);
 
+      SqlParser.Config parserConfig =
+          conformance != null
+              ? SqlParser.Config.DEFAULT.withConformance(conformance)
+              : SqlParser.Config.DEFAULT;
+
       SchemaPlus defaultSchema = findSchemaByPath(rootSchema, defaultNamespace);
       return Frameworks.newConfigBuilder()
-          .parserConfig(SqlParser.Config.DEFAULT)
+          .parserConfig(parserConfig)
           .defaultSchema(defaultSchema)
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.calc(DefaultRelMetadataProvider.INSTANCE))
