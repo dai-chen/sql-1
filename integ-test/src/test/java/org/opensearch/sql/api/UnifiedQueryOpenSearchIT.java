@@ -41,11 +41,21 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
   public void init() throws Exception {
     super.init();
     loadIndex(Index.ACCOUNT);
+    initContext(QueryType.PPL);
+  }
 
+  @After
+  public void cleanUp() throws Exception {
+    if (context != null) {
+      context.close();
+    }
+  }
+
+  private void initContext(QueryType queryType) {
     String catalogName = "opensearch";
     context =
         UnifiedQueryContext.builder()
-            .language(QueryType.PPL)
+            .language(queryType)
             .catalog(catalogName, createOpenSearchSchema())
             .defaultNamespace(catalogName)
             .setting("plugins.query.size_limit", 200)
@@ -59,13 +69,6 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
             .build();
     planner = new UnifiedQueryPlanner(context);
     compiler = new UnifiedQueryCompiler(context);
-  }
-
-  @After
-  public void cleanUp() throws Exception {
-    if (context != null) {
-      context.close();
-    }
   }
 
   @Test
@@ -101,6 +104,48 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
         assertNotNull(rs);
         assertTrue("Expected at least one row for query: " + query, rs.next());
       }
+    }
+  }
+
+  @Test
+  public void testSimpleSQLQueryExecution() throws Exception {
+    initContext(QueryType.SQL);
+    String sqlQuery =
+        String.format(
+            "SELECT firstname, age FROM `%s` WHERE age > 30 LIMIT 3", TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(sqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      assertNotNull(resultSet);
+      assertEquals("firstname", resultSet.getMetaData().getColumnName(1));
+      assertEquals("age", resultSet.getMetaData().getColumnName(2));
+      int rowCount = 0;
+      while (resultSet.next()) {
+        assertTrue("Age should be > 30", resultSet.getLong("age") > 30);
+        rowCount++;
+      }
+      assertEquals("Expected 3 rows", 3, rowCount);
+    }
+  }
+
+  @Test
+  public void testSimpleAnsiSQLQueryExecution() throws Exception {
+    initContext(QueryType.ANSI_SQL);
+    String ansiSqlQuery =
+        String.format(
+            "SELECT \"firstname\", \"age\" FROM \"%s\" WHERE \"age\" > 30", TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(ansiSqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      assertNotNull(resultSet);
+      assertTrue("Expected at least one row", resultSet.next());
+      assertEquals(VARCHAR, resultSet.getMetaData().getColumnType(1));
+      assertEquals(BIGINT, resultSet.getMetaData().getColumnType(2));
+      assertTrue("Age should be > 30", resultSet.getLong("age") > 30);
     }
   }
 
