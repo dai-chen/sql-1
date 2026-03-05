@@ -397,9 +397,10 @@ public class CalcitePPLFieldPathIT extends PPLIntegTestCase {
   }
 
   @Test
-  public void testReplaceOnDottedPathWithoutSpath() {
+  public void testDottedPathOnTextField() {
     // Without spath, doc is a VARCHAR field. Referencing doc.user.name should produce
-    // a clear error, not an AssertionError from Calcite's SqlItemOperator.
+    // a clear error, not an AssertionError from Calcite's SqlItemOperator via
+    // FieldPathPreMaterializer.
     Throwable e =
         assertThrowsWithReplace(
             IllegalArgumentException.class,
@@ -411,7 +412,7 @@ public class CalcitePPLFieldPathIT extends PPLIntegTestCase {
                     | fields doc.user.name\
                     """,
                     TEST_INDEX));
-    verifyErrorMessageContains(e, "not found");
+    verifyErrorMessageContains(e, "field [doc.user.name] not found");
   }
 
   private void createJsonTestIndex() {

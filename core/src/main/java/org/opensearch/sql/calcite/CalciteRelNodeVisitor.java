@@ -198,7 +198,7 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     RelNode result = super.visitChildren(node, context);
 
     if (node instanceof UnresolvedPlan plan) {
-      // Pre-materialize MAP dotted paths as flat columns after children are analyzed
+      // Pre-materialize dotted field paths as flat columns after children are analyzed
       // (so MAP/struct types are known) but before the command's own visit logic runs.
       fieldPathMaterializer.materializePaths(plan, context);
     }
