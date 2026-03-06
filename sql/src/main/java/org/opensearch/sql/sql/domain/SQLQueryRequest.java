@@ -31,6 +31,7 @@ public class SQLQueryRequest {
   private static final String QUERY_PARAMS_FORMAT = "format";
   private static final String QUERY_PARAMS_SANITIZE = "sanitize";
   private static final String QUERY_PARAMS_PRETTY = "pretty";
+  private static final String QUERY_PARAMS_MODE = "mode";
 
   /** JSON payload in REST request. */
   private final JSONObject jsonContent;
@@ -55,6 +56,10 @@ public class SQLQueryRequest {
   @Accessors(fluent = true)
   private boolean pretty = false;
 
+  @Getter
+  @Accessors(fluent = true)
+  private String mode;
+
   private String cursor;
 
   /** Constructor of SQLQueryRequest that passes request params. */
@@ -71,6 +76,7 @@ public class SQLQueryRequest {
     this.format = getFormat(params);
     this.sanitize = shouldSanitize(params);
     this.pretty = shouldPretty(params);
+    this.mode = params.getOrDefault(QUERY_PARAMS_MODE, null);
     this.cursor = cursor;
   }
 
@@ -90,7 +96,7 @@ public class SQLQueryRequest {
     boolean hasQuery = query != null;
     boolean hasContent = jsonContent != null && !jsonContent.isEmpty();
 
-    Predicate<String> supportedParams = Set.of(QUERY_PARAMS_FORMAT, QUERY_PARAMS_PRETTY)::contains;
+    Predicate<String> supportedParams = Set.of(QUERY_PARAMS_FORMAT, QUERY_PARAMS_PRETTY, QUERY_PARAMS_MODE)::contains;
     boolean hasUnsupportedParams =
         (!params.isEmpty())
             && params.keySet().stream().dropWhile(supportedParams).findAny().isPresent();
@@ -169,5 +175,9 @@ public class SQLQueryRequest {
       return Boolean.parseBoolean(params.get(QUERY_PARAMS_PRETTY));
     }
     return false;
+  }
+
+  public boolean isAnsiMode() {
+    return "ansi".equalsIgnoreCase(mode);
   }
 }
