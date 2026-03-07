@@ -18,9 +18,18 @@ import lombok.Value;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.RelTraitDef;
 import org.apache.calcite.rel.metadata.DefaultRelMetadataProvider;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
+import org.apache.calcite.avatica.util.Casing;
+import org.apache.calcite.config.Lex;
+import org.apache.calcite.sql.SqlBasicFunction;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.sql.type.OperandTypes;
+import org.apache.calcite.sql.type.ReturnTypes;
+import org.apache.calcite.sql.type.SqlTypeFamily;
+import org.apache.calcite.sql.util.SqlOperatorTables;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
@@ -203,15 +212,33 @@ public class UnifiedQueryContext implements AutoCloseable {
 
       SqlParser.Config parserConfig =
           conformance != null
-              ? SqlParser.Config.DEFAULT.withConformance(conformance)
+              ? SqlParser.Config.DEFAULT
+                  .withUnquotedCasing(Casing.UNCHANGED)
+                  .withConformance(conformance)
               : SqlParser.Config.DEFAULT;
 
       SchemaPlus defaultSchema = findSchemaByPath(rootSchema, defaultNamespace);
+
+      SqlBasicFunction matchPhraseUpper =
+          SqlBasicFunction.create(
+              "MATCH_PHRASE",
+              ReturnTypes.BOOLEAN,
+              OperandTypes.family(SqlTypeFamily.CHARACTER, SqlTypeFamily.CHARACTER));
+      SqlBasicFunction matchPhraseLower =
+          SqlBasicFunction.create(
+              "match_phrase",
+              ReturnTypes.BOOLEAN,
+              OperandTypes.family(SqlTypeFamily.CHARACTER, SqlTypeFamily.CHARACTER));
+
       return Frameworks.newConfigBuilder()
           .parserConfig(parserConfig)
           .defaultSchema(defaultSchema)
+          .operatorTable(
+              SqlOperatorTables.chain(
+                  SqlStdOperatorTable.instance(),
+                  SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower)))
           .traitDefs((List<RelTraitDef>) null)
-          .programs(Programs.calc(DefaultRelMetadataProvider.INSTANCE))
+          .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .build();
     }
 
@@ -229,5 +256,6 @@ public class UnifiedQueryContext implements AutoCloseable {
       }
       return current;
     }
+
   }
 }

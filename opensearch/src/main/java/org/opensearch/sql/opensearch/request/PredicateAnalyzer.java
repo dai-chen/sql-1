@@ -419,16 +419,11 @@ public class PredicateAnalyzer {
       }
 
       if (SINGLE_FIELD_RELEVANCE_FUNCTION_SET.contains(funcName)) {
-        List<Expression> fieldQueryOperands =
-            visitList(
-                List.of(
-                    AliasPair.from(ops.get(0), funcName).value,
-                    AliasPair.from(ops.get(1), funcName).value));
+        List<Expression> fieldQueryOperands = visitList(List.of(ops.get(0), ops.get(1)));
         NamedFieldExpression namedFieldExpression =
             (NamedFieldExpression) fieldQueryOperands.get(0);
         String queryLiteralOperand = ((LiteralExpression) fieldQueryOperands.get(1)).stringValue();
-        Map<String, String> optionalArguments =
-            parseRelevanceFunctionOptionalArguments(ops, funcName);
+        Map<String, String> optionalArguments = Map.of();
 
         return SINGLE_FIELD_RELEVANCE_FUNCTION_HANDLERS
             .get(funcName)
@@ -1232,6 +1227,11 @@ public class PredicateAnalyzer {
     @Override
     public QueryExpression not() {
       return new CompoundQueryExpression(partial, boolQuery().mustNot(builder()));
+    }
+
+    @Override
+    QueryExpression isNotTrue() {
+      return not();
     }
   }
 

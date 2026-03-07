@@ -180,4 +180,12 @@ public class SQLQueryRequest {
   public boolean isAnsiMode() {
     return "ansi".equalsIgnoreCase(mode);
   }
+
+  public boolean isOpenSearchMode() {
+    return "opensearch".equalsIgnoreCase(mode);
+  }
+
+  public String getMode() {
+    return mode;
+  }
 }

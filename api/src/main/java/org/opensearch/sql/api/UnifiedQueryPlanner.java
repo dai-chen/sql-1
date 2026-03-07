@@ -123,7 +123,17 @@ public class UnifiedQueryPlanner {
       SqlNode validated = planner.validate(parsed);
       RelRoot relRoot = planner.rel(validated);
       planner.close();
-      return relRoot.rel;
+
+      // Run AggregateCaseToFilterRule to rewrite SUM(CASE WHEN cond THEN NULL ELSE expr END)
+      // into SUM(expr) FILTER(WHERE NOT cond) for native OpenSearch filter aggregation pushdown
+      RelNode rel = relRoot.rel;
+      org.apache.calcite.plan.hep.HepPlanner hepPlanner =
+          new org.apache.calcite.plan.hep.HepPlanner(
+              new org.apache.calcite.plan.hep.HepProgramBuilder()
+                  .addRuleInstance(org.apache.calcite.rel.rules.CoreRules.AGGREGATE_CASE_TO_FILTER)
+                  .build());
+      hepPlanner.setRoot(rel);
+      return hepPlanner.findBestExp();
     } catch (Exception e) {
       throw new IllegalStateException("Failed to plan SQL query", e);
     }

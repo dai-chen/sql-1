@@ -78,15 +78,46 @@ public class RestUnifiedSQLQueryAction {
             .catalog(catalogName, new OpenSearchSchema(dataSourceService))
             .defaultNamespace(catalogName);
 
-    if (request.isAnsiMode()) {
-      builder.conformance(SqlConformanceEnum.DEFAULT);
+    // PoC: ANSI SQL (Calcite) is default; mode=opensearch falls back to OpenSearch SQL (ANTLR)
+    if (!request.isOpenSearchMode()) {
+      builder.conformance(SqlConformanceEnum.LENIENT);
     }
 
     try (UnifiedQueryContext context = builder.build()) {
       UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
       UnifiedQueryCompiler compiler = new UnifiedQueryCompiler(context);
 
-      RelNode plan = planner.plan(request.getQuery());
+      String query = request.getQuery().trim();
+      // Handle EXPLAIN: strip prefix, plan, show logical + optimized physical plan
+      if (query.regionMatches(true, 0, "EXPLAIN ", 0, 8)) {
+        String innerQuery = query.substring(query.toUpperCase().indexOf("SELECT"));
+        RelNode plan = planner.plan(innerQuery);
+        String logical = org.apache.calcite.plan.RelOptUtil.toString(
+            plan, org.apache.calcite.sql.SqlExplainLevel.EXPPLAN_ATTRIBUTES);
+
+        // Capture optimized physical plan via Hook during compilation
+        java.util.concurrent.atomic.AtomicReference<String> physical =
+            new java.util.concurrent.atomic.AtomicReference<>();
+        try (org.apache.calcite.runtime.Hook.Closeable ignored =
+            org.apache.calcite.runtime.Hook.PLAN_BEFORE_IMPLEMENTATION.addThread(obj -> {
+              org.apache.calcite.rel.RelRoot relRoot = (org.apache.calcite.rel.RelRoot) obj;
+              physical.set(org.apache.calcite.plan.RelOptUtil.toString(
+                  relRoot.rel, org.apache.calcite.sql.SqlExplainLevel.EXPPLAN_ATTRIBUTES));
+            })) {
+          try (PreparedStatement stmt = compiler.compile(plan)) {
+            // triggers optimization pipeline and the hook
+          }
+        }
+
+        org.json.JSONObject result = new org.json.JSONObject();
+        result.put("logical", logical);
+        if (physical.get() != null) {
+          result.put("physical", physical.get());
+        }
+        return result.toString(2);
+      }
+
+      RelNode plan = planner.plan(query);
       try (PreparedStatement statement = compiler.compile(plan)) {
         ResultSet rs = statement.executeQuery();
         return formatAsJdbc(rs);
