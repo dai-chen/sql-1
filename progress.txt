@@ -17,13 +17,13 @@ poc/ppl-to-sqlnode-unified-api
 - [x] Task 1: FMPP/JavaCC parser extension infrastructure in api module
 - [x] Task 2: SqlStarExceptReplace SqlNode subclass
 - [x] Task 3: EXCEPT/REPLACE grammar rules in parserImpls.ftl
-- [ ] Task 4: StarExceptReplaceRewriter (SqlShuttle)
+- [x] Task 4: StarExceptReplaceRewriter (SqlShuttle)
 - [ ] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
 - [ ] Task 6: SELECT * REPLACE end-to-end
 - [ ] Task 7: Edge cases, error handling
 
 ## Current Task
-Task 4
+Task 5
 
 ## Notes
 - Calcite 1.41.0, no native EXCEPT/REPLACE support
@@ -51,3 +51,18 @@ Task 4
     - testParseSelectStarExcept, testParseSelectStarReplace, testParseSelectStarExceptAndReplace
     - testParseSelectStarWithoutExceptReplaceStillWorks, testParseSelectStarExceptDoesNotBreakSetExcept
     - testParseQualifiedStarExcept (t.* EXCEPT)
+- Task 4 COMPLETE: StarExceptReplaceRewriter (SqlShuttle)
+  - New file: api/src/main/java/.../calcite/parser/StarExceptReplaceRewriter.java
+  - Extends SqlShuttle, takes SchemaPlus in constructor
+  - rewrite(SqlNode) entry point calls node.accept(this)
+  - visit(SqlCall) detects SqlSelect, rewrites select list
+  - Resolves tables from FROM clause: SqlIdentifier, AS-aliased, SqlJoin (recursive)
+  - For unqualified star: expands ALL columns from ALL tables; qualifies when multiple tables
+  - For qualified star (t.*): only expands matching table/alias
+  - EXCEPT: filters out columns (case-insensitive match)
+  - REPLACE: substitutes AS expression for matching columns
+  - Case-insensitive table lookup via findTable() helper (handles parser casing vs schema casing)
+  - 6 new rewriter tests added (18 total tests, all pass):
+    - testRewriteSelectStarExcept, testRewriteSelectStarExceptMultipleColumns
+    - testRewriteSelectStarReplace, testRewriteSelectStarExceptAndReplace
+    - testRewritePreservesNonStarItems, testRewriteQualifiedStarExcept
