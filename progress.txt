@@ -19,11 +19,11 @@ poc/ppl-to-sqlnode-unified-api
 - [x] Task 3: EXCEPT/REPLACE grammar rules in parserImpls.ftl
 - [x] Task 4: StarExceptReplaceRewriter (SqlShuttle)
 - [x] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
-- [ ] Task 6: SELECT * REPLACE end-to-end
+- [x] Task 6: SELECT * REPLACE end-to-end
 - [ ] Task 7: Edge cases, error handling
 
 ## Current Task
-Task 6
+Task 7
 
 ## Notes
 - Calcite 1.41.0, no native EXCEPT/REPLACE support
@@ -75,3 +75,9 @@ Task 6
     - testPlanSelectStarExcept: SELECT * EXCEPT(age) → 3 columns (id, name, department)
     - testPlanSelectStarExceptMultipleColumns: SELECT * EXCEPT(age, department) → 2 columns
     - testPlanSelectQualifiedStarExcept: SELECT employees.* EXCEPT(age) → 3 columns
+- Task 6 COMPLETE: SELECT * REPLACE end-to-end planner tests
+  - Rewriter already handled REPLACE (Task 4); Task 6 adds end-to-end planner verification
+  - 3 new planner tests added (24 total tests, all pass):
+    - testPlanSelectStarReplace: SELECT * REPLACE(age + 1 AS age) → 4 columns, age replaced
+    - testPlanSelectStarExceptAndReplace: SELECT * EXCEPT(id) REPLACE(age + 1 AS age) → 3 columns
+    - testPlanSelectQualifiedStarReplace: SELECT employees.* REPLACE(UPPER(name) AS name) → 4 columns
