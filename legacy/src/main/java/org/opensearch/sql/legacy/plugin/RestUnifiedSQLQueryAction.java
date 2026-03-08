@@ -24,6 +24,7 @@ import org.opensearch.rest.RestChannel;
 import org.opensearch.sql.api.UnifiedQueryContext;
 import org.opensearch.sql.api.UnifiedQueryPlanner;
 import org.opensearch.sql.api.compiler.UnifiedQueryCompiler;
+import org.opensearch.sql.opensearch.storage.AnsiSQLOpenSearchSchema;
 import org.opensearch.sql.calcite.OpenSearchSchema;
 import org.opensearch.sql.datasource.DataSourceService;
 import org.opensearch.sql.executor.QueryType;
@@ -72,10 +73,15 @@ public class RestUnifiedSQLQueryAction {
 
   private String executeWithUnifiedAPI(SQLQueryRequest request) throws Exception {
     String catalogName = OpenSearchSchema.OPEN_SEARCH_SCHEMA_NAME;
+    OpenSearchSchema baseSchema = new OpenSearchSchema(dataSourceService);
     var builder =
         UnifiedQueryContext.builder()
             .language(QueryType.SQL)
-            .catalog(catalogName, new OpenSearchSchema(dataSourceService))
+            .catalog(
+                catalogName,
+                request.isOpenSearchMode()
+                    ? baseSchema
+                    : new AnsiSQLOpenSearchSchema(baseSchema))
             .defaultNamespace(catalogName);
 
     // PoC: ANSI SQL (Calcite) is default; mode=opensearch falls back to OpenSearch SQL (ANTLR)
