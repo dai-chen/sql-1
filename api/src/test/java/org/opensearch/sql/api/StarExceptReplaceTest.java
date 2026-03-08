@@ -309,4 +309,40 @@ public class StarExceptReplaceTest extends UnifiedQueryTestBase {
     assertNotNull(plan);
     assertEquals(3, plan.getRowType().getFieldCount());
   }
+
+  // ---- End-to-end planner tests: REPLACE ----
+
+  @Test
+  public void testPlanSelectStarReplace() {
+    RelNode plan = planner.plan("SELECT * REPLACE(age + 1 AS age) FROM employees");
+    assertNotNull(plan);
+    // All 4 columns present, age replaced with expression but keeps name
+    assertEquals(4, plan.getRowType().getFieldCount());
+    assertEquals("id", plan.getRowType().getFieldNames().get(0));
+    assertEquals("name", plan.getRowType().getFieldNames().get(1));
+    assertEquals("age", plan.getRowType().getFieldNames().get(2));
+    assertEquals("department", plan.getRowType().getFieldNames().get(3));
+  }
+
+  @Test
+  public void testPlanSelectStarExceptAndReplace() {
+    RelNode plan =
+        planner.plan("SELECT * EXCEPT(id) REPLACE(age + 1 AS age) FROM employees");
+    assertNotNull(plan);
+    // 3 columns: name, age (replaced), department (id excluded)
+    assertEquals(3, plan.getRowType().getFieldCount());
+    assertEquals("name", plan.getRowType().getFieldNames().get(0));
+    assertEquals("age", plan.getRowType().getFieldNames().get(1));
+    assertEquals("department", plan.getRowType().getFieldNames().get(2));
+  }
+
+  @Test
+  public void testPlanSelectQualifiedStarReplace() {
+    RelNode plan =
+        planner.plan("SELECT employees.* REPLACE(UPPER(name) AS name) FROM employees");
+    assertNotNull(plan);
+    // All 4 columns present, name replaced with UPPER expression
+    assertEquals(4, plan.getRowType().getFieldCount());
+    assertEquals("name", plan.getRowType().getFieldNames().get(1));
+  }
 }
