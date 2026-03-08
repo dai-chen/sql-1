@@ -11,9 +11,19 @@ plugins {
     id 'com.diffplug.spotless'
 }
 
+configurations {
+    fmpp
+    javacc
+}
+
 dependencies {
     api project(':ppl')
     api project(':sql')
+
+    // Codegen tools
+    fmpp 'net.sourceforge.fmpp:fmpp:0.9.16'
+    fmpp 'org.freemarker:freemarker:2.3.33'
+    javacc 'net.java.dev.javacc:javacc:4.0'
 
     testImplementation testFixtures(project(':api'))
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
@@ -25,11 +35,69 @@ dependencies {
     testFixturesApi group: 'org.hamcrest', name: 'hamcrest', version: "${hamcrest_version}"
 }
 
+// Directory layout for codegen
+def codegenDir = "${projectDir}/src/main/codegen"
+def templateDir = "${buildDir}/codegen/templates"
+def fmppOutputDir = "${buildDir}/codegen/fmpp"
+def javaccOutputDir = "${buildDir}/codegen/javacc"
+
+// Task 1: Extract Calcite's codegen templates from calcite-core jar
+task extractCalciteTemplates(type: Copy) {
+    description 'Extract Calcite parser templates from calcite-core jar'
+    from {
+        configurations.runtimeClasspath.filter { it.name.startsWith('calcite-core') }.collect { zipTree(it) }
+    }
+    include 'codegen/**'
+    into templateDir
+    eachFile { fcd ->
+        fcd.relativePath = new RelativePath(true, fcd.relativePath.segments.drop(1) as String[])
+    }
+    includeEmptyDirs = false
+}
+
+// Task 2: Copy custom includes over extracted ones (our parserImpls.ftl overrides the default)
+task mergeCodegenIncludes(type: Copy, dependsOn: extractCalciteTemplates) {
+    description 'Merge custom codegen includes with Calcite defaults'
+    from "${codegenDir}/includes"
+    into "${templateDir}/includes"
+}
+
+// Task 3: Run FMPP to process Parser.jj template with our config
+task runFmpp(type: JavaExec, dependsOn: mergeCodegenIncludes) {
+    description 'Run FMPP to generate customized Parser.jj'
+    classpath = configurations.fmpp
+    mainClass = 'fmpp.tools.CommandLine'
+    args = [
+        '-S', "${templateDir}/templates",
+        '-O', fmppOutputDir,
+        '--data', "tdd(${codegenDir}/config.fmpp), default:tdd(${templateDir}/default_config.fmpp)",
+        '--freemarker-links', "includes:${templateDir}/includes"
+    ]
+}
+
+// Task 4: Run JavaCC to generate parser Java files from the FMPP-processed Parser.jj
+task runJavacc(type: JavaExec, dependsOn: runFmpp) {
+    description 'Run JavaCC to generate parser from Parser.jj'
+    classpath = configurations.javacc
+    mainClass = 'javacc'
+    args = [
+        '-OUTPUT_DIRECTORY=' + javaccOutputDir + '/org/opensearch/sql/calcite/parser',
+        fmppOutputDir + '/javacc/Parser.jj'
+    ]
+    doFirst {
+        mkdir javaccOutputDir + '/org/opensearch/sql/calcite/parser'
+    }
+}
+
+// Add generated sources to the main source set
+sourceSets.main.java.srcDirs += javaccOutputDir
+compileJava.dependsOn runJavacc
+
 spotless {
     java {
         target fileTree('.') {
             include '**/*.java'
-            exclude '**/build/**', '**/build-*/**', 'src/main/gen/**'
+            exclude '**/build/**', '**/build-*/**', 'src/main/gen/**', '**/codegen/**'
         }
         importOrder()
         licenseHeader("/*\n" +
