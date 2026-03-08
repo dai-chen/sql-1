@@ -62,8 +62,52 @@ task mergeCodegenIncludes(type: Copy, dependsOn: extractCalciteTemplates) {
     into "${templateDir}/includes"
 }
 
+// Task 2.5: Patch SelectExpression() in extracted Parser.jj to support * EXCEPT/REPLACE
+task patchParserTemplate(dependsOn: mergeCodegenIncludes) {
+    description 'Patch Calcite Parser.jj template to call custom StarExceptReplaceOpt after STAR'
+    doLast {
+        def parserJj = file("${templateDir}/templates/Parser.jj")
+        def content = parserJj.text
+        // Replace the STAR branch in SelectExpression() to call our custom production
+        def original = '''\
+    <STAR> {
+        return SqlIdentifier.star(getPos());
+    }'''
+        def patched = '''\
+    <STAR> {
+        SqlNode star = SqlIdentifier.star(getPos());
+        return StarExceptReplaceOpt(star);
+    }'''
+        if (!content.contains(original)) {
+            throw new GradleException("Cannot find SelectExpression STAR pattern to patch in Parser.jj")
+        }
+        content = content.replace(original, patched)
+
+        // Patch AddSelectItem: after e = SelectExpression(), if e is a star identifier from
+        // a qualified reference (t.*), also check for EXCEPT/REPLACE
+        def origAdd = '''\
+    e = SelectExpression()
+    ('''
+        def patchedAdd = '''\
+    e = SelectExpression()
+    {
+        if (e instanceof SqlIdentifier && ((SqlIdentifier) e).isStar()
+            && !(e instanceof org.apache.calcite.sql.SqlCall)) {
+            e = StarExceptReplaceOpt(e);
+        }
+    }
+    ('''
+        if (!content.contains(origAdd)) {
+            throw new GradleException("Cannot find AddSelectItem pattern to patch in Parser.jj")
+        }
+        content = content.replace(origAdd, patchedAdd)
+
+        parserJj.text = content
+    }
+}
+
 // Task 3: Run FMPP to process Parser.jj template with our config
-task runFmpp(type: JavaExec, dependsOn: mergeCodegenIncludes) {
+task runFmpp(type: JavaExec, dependsOn: patchParserTemplate) {
     description 'Run FMPP to generate customized Parser.jj'
     classpath = configurations.fmpp
     mainClass = 'fmpp.tools.CommandLine'

@@ -3,6 +3,7 @@ parser: {
   class: "OpenSearchSqlParserImpl",
   imports: [
     "org.opensearch.sql.calcite.parser.SqlStarExceptReplace"
+    "org.apache.calcite.sql.fun.SqlStdOperatorTable"
   ]
   implementationFiles: [
     "parserImpls.ftl"
