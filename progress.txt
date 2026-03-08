@@ -20,10 +20,10 @@ poc/ppl-to-sqlnode-unified-api
 - [x] Task 4: StarExceptReplaceRewriter (SqlShuttle)
 - [x] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
 - [x] Task 6: SELECT * REPLACE end-to-end
-- [ ] Task 7: Edge cases, error handling
+- [x] Task 7: Edge cases, error handling
 
 ## Current Task
-Task 7
+ALL TASKS COMPLETE
 
 ## Notes
 - Calcite 1.41.0, no native EXCEPT/REPLACE support
@@ -81,3 +81,16 @@ Task 7
     - testPlanSelectStarReplace: SELECT * REPLACE(age + 1 AS age) → 4 columns, age replaced
     - testPlanSelectStarExceptAndReplace: SELECT * EXCEPT(id) REPLACE(age + 1 AS age) → 3 columns
     - testPlanSelectQualifiedStarReplace: SELECT employees.* REPLACE(UPPER(name) AS name) → 4 columns
+- Task 7 COMPLETE: Edge cases, error handling
+  - Added 5 validation rules to StarExceptReplaceRewriter.expandStarExceptReplace():
+    - EXCEPT column must exist in table → IllegalArgumentException
+    - REPLACE target column must exist in table → IllegalArgumentException
+    - EXCEPT must not remove all columns → IllegalArgumentException
+    - Duplicate columns in EXCEPT list → IllegalArgumentException
+    - Same column in both EXCEPT and REPLACE → IllegalArgumentException
+  - All validations are case-insensitive, per-table in the expansion loop
+  - UnifiedQueryPlanner.plan() wraps exceptions in IllegalStateException, so tests use expected=IllegalStateException.class
+  - 2 edge case tests for JOIN scenarios:
+    - testExceptWithJoin: unqualified star EXCEPT across self-join → removes column from both tables
+    - testQualifiedStarWithMultiTableFrom: qualified e1.* EXCEPT in join → only affects e1
+  - 7 new tests added (31 total StarExceptReplace tests, 62 total api tests, all pass)
