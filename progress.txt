@@ -18,12 +18,12 @@ poc/ppl-to-sqlnode-unified-api
 - [x] Task 2: SqlStarExceptReplace SqlNode subclass
 - [x] Task 3: EXCEPT/REPLACE grammar rules in parserImpls.ftl
 - [x] Task 4: StarExceptReplaceRewriter (SqlShuttle)
-- [ ] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
+- [x] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
 - [ ] Task 6: SELECT * REPLACE end-to-end
 - [ ] Task 7: Edge cases, error handling
 
 ## Current Task
-Task 5
+Task 6
 
 ## Notes
 - Calcite 1.41.0, no native EXCEPT/REPLACE support
@@ -66,3 +66,12 @@ Task 5
     - testRewriteSelectStarExcept, testRewriteSelectStarExceptMultipleColumns
     - testRewriteSelectStarReplace, testRewriteSelectStarExceptAndReplace
     - testRewritePreservesNonStarItems, testRewriteQualifiedStarExcept
+- Task 5 COMPLETE: Wire into UnifiedQueryPlanner.planWithCalcite()
+  - Added StarExceptReplaceRewriter call between parse and validate in planWithCalcite()
+  - Rewriter uses config.getDefaultSchema() to resolve table columns
+  - Planner facade state machine (PARSE→VALIDATE→REL) accepts rewritten SqlNode after parse()
+  - No need to replace Planner with low-level APIs — simple 3-line insertion sufficed
+  - 3 new end-to-end planner tests added (21 total tests, all pass):
+    - testPlanSelectStarExcept: SELECT * EXCEPT(age) → 3 columns (id, name, department)
+    - testPlanSelectStarExceptMultipleColumns: SELECT * EXCEPT(age, department) → 2 columns
+    - testPlanSelectQualifiedStarExcept: SELECT employees.* EXCEPT(age) → 3 columns
