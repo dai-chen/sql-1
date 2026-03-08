@@ -345,4 +345,49 @@ public class StarExceptReplaceTest extends UnifiedQueryTestBase {
     assertEquals(4, plan.getRowType().getFieldCount());
     assertEquals("name", plan.getRowType().getFieldNames().get(1));
   }
+
+  // --- Task 7: Edge cases and error handling ---
+
+  @Test(expected = IllegalStateException.class)
+  public void testExceptNonexistentColumn() {
+    planner.plan("SELECT * EXCEPT(nonexistent) FROM employees");
+  }
+
+  @Test(expected = IllegalStateException.class)
+  public void testReplaceNonexistentColumn() {
+    planner.plan("SELECT * REPLACE(1 AS nonexistent) FROM employees");
+  }
+
+  @Test(expected = IllegalStateException.class)
+  public void testExceptRemovesAllColumns() {
+    planner.plan("SELECT * EXCEPT(id, name, age, department) FROM employees");
+  }
+
+  @Test(expected = IllegalStateException.class)
+  public void testDuplicateColumnsInExcept() {
+    planner.plan("SELECT * EXCEPT(age, age) FROM employees");
+  }
+
+  @Test(expected = IllegalStateException.class)
+  public void testSameColumnInExceptAndReplace() {
+    planner.plan("SELECT * EXCEPT(age) REPLACE(age + 1 AS age) FROM employees");
+  }
+
+  @Test
+  public void testExceptWithJoin() {
+    RelNode plan = planner.plan(
+        "SELECT * EXCEPT(department) FROM employees AS e1 JOIN employees AS e2 ON e1.id = e2.id");
+    assertNotNull(plan);
+    // Each employees table has 4 cols, minus department from each = 3 + 3 = 6
+    assertEquals(6, plan.getRowType().getFieldCount());
+  }
+
+  @Test
+  public void testQualifiedStarWithMultiTableFrom() {
+    RelNode plan = planner.plan(
+        "SELECT e1.* EXCEPT(age) FROM employees AS e1 JOIN employees AS e2 ON e1.id = e2.id");
+    assertNotNull(plan);
+    // Only e1's columns expanded (minus age) = 3 columns
+    assertEquals(3, plan.getRowType().getFieldCount());
+  }
 }

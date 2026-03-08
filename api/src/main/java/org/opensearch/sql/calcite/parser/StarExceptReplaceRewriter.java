@@ -6,9 +6,11 @@
 package org.opensearch.sql.calcite.parser;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -162,6 +164,66 @@ public class StarExceptReplaceRewriter extends SqlShuttle {
       }
 
       RelDataType rowType = table.getRowType(typeFactory);
+
+      // Collect table column names for validation
+      Set<String> tableColumns = new HashSet<>();
+      for (RelDataTypeField f : rowType.getFieldList()) {
+        tableColumns.add(f.getName().toUpperCase());
+      }
+
+      // Validate EXCEPT columns exist and check for duplicates
+      if (except != null) {
+        Set<String> seenExcept = new HashSet<>();
+        for (SqlNode excNode : except) {
+          if (excNode instanceof SqlIdentifier excId) {
+            String excCol = excId.getSimple().toUpperCase();
+            if (!seenExcept.add(excCol)) {
+              throw new IllegalArgumentException(
+                  "Duplicate column '" + excId.getSimple() + "' in EXCEPT list");
+            }
+            if (!tableColumns.contains(excCol)) {
+              throw new IllegalArgumentException(
+                  "EXCEPT column '" + excId.getSimple() + "' not found in table '" + tableName + "'");
+            }
+          }
+        }
+      }
+
+      // Validate REPLACE columns exist
+      if (replace != null) {
+        for (SqlNode repNode : replace) {
+          if (repNode instanceof SqlBasicCall repCall
+              && repCall.getOperator() == SqlStdOperatorTable.AS) {
+            SqlIdentifier repCol = repCall.operand(1);
+            if (!tableColumns.contains(repCol.getSimple().toUpperCase())) {
+              throw new IllegalArgumentException(
+                  "REPLACE column '" + repCol.getSimple() + "' not found in table '" + tableName + "'");
+            }
+          }
+        }
+      }
+
+      // Check EXCEPT/REPLACE overlap
+      if (except != null && replace != null) {
+        Set<String> exceptCols = new HashSet<>();
+        for (SqlNode excNode : except) {
+          if (excNode instanceof SqlIdentifier excId) {
+            exceptCols.add(excId.getSimple().toUpperCase());
+          }
+        }
+        for (SqlNode repNode : replace) {
+          if (repNode instanceof SqlBasicCall repCall
+              && repCall.getOperator() == SqlStdOperatorTable.AS) {
+            SqlIdentifier repCol = repCall.operand(1);
+            if (exceptCols.contains(repCol.getSimple().toUpperCase())) {
+              throw new IllegalArgumentException(
+                  "Column '" + repCol.getSimple() + "' cannot appear in both EXCEPT and REPLACE");
+            }
+          }
+        }
+      }
+
+      int resultSizeBefore = result.size();
       for (RelDataTypeField field : rowType.getFieldList()) {
         String colName = field.getName();
 
@@ -186,6 +248,10 @@ public class StarExceptReplaceRewriter extends SqlShuttle {
           // Single table, unqualified star: emit plain colName
           result.add(new SqlIdentifier(colName, pos));
         }
+      }
+      if (result.size() - resultSizeBefore == 0) {
+        throw new IllegalArgumentException(
+            "EXCEPT removes all columns from table '" + tableName + "'");
       }
     }
   }
