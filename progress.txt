@@ -15,7 +15,7 @@ poc/ppl-to-sqlnode-unified-api
 ## Task Status
 
 - [x] Task 1: FMPP/JavaCC parser extension infrastructure in api module
-- [ ] Task 2: SqlStarExceptReplace SqlNode subclass
+- [x] Task 2: SqlStarExceptReplace SqlNode subclass
 - [ ] Task 3: EXCEPT/REPLACE grammar rules in parserImpls.ftl
 - [ ] Task 4: StarExceptReplaceRewriter (SqlShuttle)
 - [ ] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
@@ -23,7 +23,7 @@ poc/ppl-to-sqlnode-unified-api
 - [ ] Task 7: Edge cases, error handling
 
 ## Current Task
-Task 2
+Task 3
 
 ## Notes
 - Calcite 1.41.0, no native EXCEPT/REPLACE support
@@ -38,3 +38,9 @@ Task 2
 - Existing test: api/src/test/.../UnifiedQueryPlannerTest.java
 - New test: api/src/test/.../StarExceptReplaceTest.java
 - Table schema for tests: employees(id INT, name VARCHAR, age INT, department VARCHAR)
+- Task 2 COMPLETE: SqlStarExceptReplace extends SqlCall with star/except/replace fields
+  - SqlSpecialOperator OPERATOR("STAR_EXCEPT_REPLACE")
+  - unparse() produces: * EXCEPT (a, b), * REPLACE (x+1 AS c), combined, qualified t.*
+  - 3 new unparse tests added to StarExceptReplaceTest (6 total tests, all pass)
+  - config.fmpp updated with SqlStarExceptReplace import
+  - File: api/src/main/java/org/opensearch/sql/calcite/parser/SqlStarExceptReplace.java
