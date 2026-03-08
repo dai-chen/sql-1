@@ -125,7 +125,15 @@ public class RestUnifiedSQLQueryAction {
 
       RelNode plan = planner.plan(query);
       try (PreparedStatement statement = compiler.compile(plan)) {
-        ResultSet rs = statement.executeQuery();
+        ResultSet rs;
+        try {
+          rs = statement.executeQuery();
+        } catch (ExceptionInInitializerError e) {
+          // Calcite's generated code can throw this for invalid data (e.g. bad date literals).
+          // Catch it here to prevent crashing the OpenSearch node.
+          Throwable cause = e.getCause() != null ? e.getCause() : e;
+          throw new IllegalStateException("Failed to compile logical plan", cause);
+        }
         return formatAsJdbc(rs);
       }
     }

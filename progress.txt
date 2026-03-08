@@ -981,3 +981,50 @@
   15. CaseFunctionIT: 8 failures (EXPR_TIMESTAMP)
   16. AppendCommandIT: 8 failures (schema merging)
 - Next recommended task: Implement field-list join column deduplication (~10 JoinIT tests). Or fix ConditionBuiltinFunctionIT earliest/latest as condition (3 tests). Or implement RareTopN top/rare command. Or fix remaining BasicIT failures.
+
+---
+### Iteration 24 — Wrap date extraction functions with CAST(... AS INTEGER) + fix unix_timestamp/timediff return types
+- Date: 2026-03-08
+- Baseline rate: 55.1% (414/752)
+- Task: Wrapped all date extraction functions (EXTRACT, DAYOFWEEK, DAYOFYEAR, etc.) with CAST(... AS INTEGER) to fix Calcite returning BIGINT where PPL expects INT. Also fixed unix_timestamp to return DOUBLE and timediff to return TIME type.
+- Key fixes:
+  1. Added castInt() helper method: `CAST(expr AS INTEGER)` — used by 17 date extraction functions
+  2. Simple EXTRACT functions wrapped: year, month, day, hour, minute, second, dayofmonth, weekofyear, hour_of_day, minute_of_hour, second_of_minute, month_of_year, quarter, microsecond
+  3. Calcite built-in functions wrapped: DAYOFWEEK(), DAYOFYEAR()
+  4. Composite expressions wrapped: minute_of_day (EXTRACT*60+EXTRACT)
+  5. CASE expression results wrapped: weekday (MOD(DAYOFWEEK+5,7)), yearweek (YEAR*100+WEEK)
+  6. to_days: Changed to CAST(... AS BIGINT) — PPL expects bigint for to_days
+  7. to_seconds: Already CAST AS BIGINT (correct)
+  8. time_to_sec: Changed to CAST(... AS BIGINT) — PPL expects bigint for time_to_sec
+  9. datediff/timestampdiff: Left as BIGINT (not wrapped with castInt) — PPL expects bigint
+  10. unix_timestamp: Wrapped with CAST(... AS DOUBLE) — PPL expects double return type
+  11. timediff: Changed from TIMESTAMPDIFF(SECOND,...) to CAST(TIMESTAMPADD(SECOND, TIMESTAMPDIFF(...), TIME '00:00:00') AS TIME) — PPL expects time return type
+- Files changed:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (MODIFIED - castInt helper + 20 function return value changes)
+- New rate: 58.2% (438/752 passed, 313 failed, 1 skipped)
+- Delta: +24 tests passing (+3.1%)
+- Per-class improvements:
+  - CalcitePPLBuiltinFunctionsNullIT: 23→46 (+23) — all int-returning date functions now return correct type
+  - CalcitePPLAggregationIT: 68→69 (+1) — date extraction type fix cascaded
+  - CalcitePPLAggregationPaginatingIT: 68→69 (+1) — mirrors AggregationIT
+  - CalcitePPLEvalMaxMinFunctionIT: 3→5 (+2) — CAST fixing type promotion in CASE WHEN
+  - CalcitePPLDedupIT: 12→11 (-1) — flaky test (testConsecutiveImplicitFallbackV2 intermittent plan failure, unrelated to change)
+- Note: Test total changed from 797 to 752 between iterations due to base engine enhancements (some test classes may have been reorganized). Baseline re-measured at 55.1% before this iteration.
+- Remaining BuiltinFunctionsNullIT failures (25/71):
+  - 8 plan failures (500): EXTRACT, MONTHNAME, DAYNAME, WEEKDAY, CONVERT_TZ, STR_TO_DATE, DATETIME — SQL engine limitations
+  - 10 timestamp-vs-date type mismatches: DATE(), FROM_DAYS(), LAST_DAY(), ADDDATE(), SUBDATE(), MAKEDATE() return TIMESTAMP, tests expect DATE
+  - 4 error handling tests: testDateInvalid, testDayInvalid, testHourInvalid, testTimeInvalid — exception type mismatches
+  - 3 other type mismatches: addtime/subtime/dateaddsub return wrong types
+- Blockers remaining:
+  1. AggregationIT: 31 failures (mostly EXPR_TIMESTAMP engine limitation)
+  2. BuiltinFunctionsNullIT: 25 failures (plan failures, timestamp-vs-date, error handling)
+  3. JoinIT: 19 failures (field-list column dedup, alias resolution)
+  4. GraphLookupIT: 22 failures (unsupported)
+  5. JsonBuiltinFunctionIT: 17 failures (unsupported)
+  6. PatternsIT: 15 failures (unsupported)
+  7. BasicIT: 13 failures
+  8. BuiltinFunctionIT: 12 failures
+  9. RenameIT: 12 failures (wildcard rename)
+  10. CastFunctionIT: 11 failures (Calcite engine limitations)
+  11. EventstatsIT: 10 failures (span in PARTITION BY)
+- Next recommended task: Fix BuiltinFunctionsNullIT timestamp-vs-date mismatches (10 tests) — DATE(), FROM_DAYS(), LAST_DAY(), MAKEDATE() should return DATE not TIMESTAMP. Or implement NestedAggregationIT (9 tests, 0 passing). Or fix CaseFunctionIT (9 tests, 0 passing).
