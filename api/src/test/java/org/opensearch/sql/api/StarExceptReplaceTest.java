@@ -280,4 +280,33 @@ public class StarExceptReplaceTest extends UnifiedQueryTestBase {
     SqlSelect select = (SqlSelect) rewritten;
     assertEquals(3, select.getSelectList().size());
   }
+
+  // --- End-to-end planner tests (Task 5) ---
+
+  @Test
+  public void testPlanSelectStarExcept() {
+    RelNode plan = planner.plan("SELECT * EXCEPT(age) FROM employees");
+    assertNotNull(plan);
+    // Should have 3 columns: id, name, department (age excluded)
+    assertEquals(3, plan.getRowType().getFieldCount());
+    assertEquals("id", plan.getRowType().getFieldNames().get(0));
+    assertEquals("name", plan.getRowType().getFieldNames().get(1));
+    assertEquals("department", plan.getRowType().getFieldNames().get(2));
+  }
+
+  @Test
+  public void testPlanSelectStarExceptMultipleColumns() {
+    RelNode plan = planner.plan("SELECT * EXCEPT(age, department) FROM employees");
+    assertNotNull(plan);
+    assertEquals(2, plan.getRowType().getFieldCount());
+    assertEquals("id", plan.getRowType().getFieldNames().get(0));
+    assertEquals("name", plan.getRowType().getFieldNames().get(1));
+  }
+
+  @Test
+  public void testPlanSelectQualifiedStarExcept() {
+    RelNode plan = planner.plan("SELECT employees.* EXCEPT(age) FROM employees");
+    assertNotNull(plan);
+    assertEquals(3, plan.getRowType().getFieldCount());
+  }
 }

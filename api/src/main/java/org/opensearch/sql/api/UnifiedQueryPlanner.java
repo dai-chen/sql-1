@@ -19,6 +19,7 @@ import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.CalciteRelNodeVisitor;
+import org.opensearch.sql.calcite.parser.StarExceptReplaceRewriter;
 import org.opensearch.sql.common.antlr.Parser;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.executor.QueryType;
@@ -120,6 +121,11 @@ public class UnifiedQueryPlanner {
     try {
       Planner planner = Frameworks.getPlanner(context.getPlanContext().config);
       SqlNode parsed = planner.parse(query);
+
+      // Rewrite EXCEPT/REPLACE before validation
+      parsed = new StarExceptReplaceRewriter(
+          context.getPlanContext().config.getDefaultSchema()).rewrite(parsed);
+
       SqlNode validated = planner.validate(parsed);
       RelRoot relRoot = planner.rel(validated);
       planner.close();
