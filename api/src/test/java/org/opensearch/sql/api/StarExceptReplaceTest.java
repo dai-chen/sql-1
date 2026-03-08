@@ -23,9 +23,12 @@ import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.pretty.SqlPrettyWriter;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
+import org.apache.calcite.jdbc.CalciteSchema;
+import org.apache.calcite.schema.SchemaPlus;
 import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl;
+import org.opensearch.sql.calcite.parser.StarExceptReplaceRewriter;
 import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.executor.QueryType;
 
@@ -214,5 +217,67 @@ public class StarExceptReplaceTest extends UnifiedQueryTestBase {
     assertTrue(node.getStar() instanceof SqlIdentifier);
     SqlIdentifier star = (SqlIdentifier) node.getStar();
     assertTrue(star.isStar());
+  }
+
+  // --- Rewriter tests (Task 4) ---
+
+  private StarExceptReplaceRewriter createRewriter() {
+    SchemaPlus rootSchema = CalciteSchema.createRootSchema(true, false).plus();
+    rootSchema.add(DEFAULT_CATALOG, testSchema);
+    return new StarExceptReplaceRewriter(rootSchema.getSubSchema(DEFAULT_CATALOG));
+  }
+
+  @Test
+  public void testRewriteSelectStarExcept() throws SqlParseException {
+    SqlNode parsed = parse("SELECT * EXCEPT(age) FROM employees");
+    SqlNode rewritten = createRewriter().rewrite(parsed);
+    SqlSelect select = (SqlSelect) rewritten;
+    assertEquals(3, select.getSelectList().size());
+    for (SqlNode item : select.getSelectList()) {
+      assertTrue(!(item instanceof SqlStarExceptReplace));
+    }
+  }
+
+  @Test
+  public void testRewriteSelectStarExceptMultipleColumns() throws SqlParseException {
+    SqlNode parsed = parse("SELECT * EXCEPT(age, department) FROM employees");
+    SqlNode rewritten = createRewriter().rewrite(parsed);
+    SqlSelect select = (SqlSelect) rewritten;
+    assertEquals(2, select.getSelectList().size());
+  }
+
+  @Test
+  public void testRewriteSelectStarReplace() throws SqlParseException {
+    SqlNode parsed = parse("SELECT * REPLACE(age + 1 AS age) FROM employees");
+    SqlNode rewritten = createRewriter().rewrite(parsed);
+    SqlSelect select = (SqlSelect) rewritten;
+    assertEquals(4, select.getSelectList().size());
+    // age is at index 2; should be a SqlBasicCall (AS), not a plain SqlIdentifier
+    SqlNode ageItem = select.getSelectList().get(2);
+    assertTrue(ageItem instanceof SqlBasicCall);
+  }
+
+  @Test
+  public void testRewriteSelectStarExceptAndReplace() throws SqlParseException {
+    SqlNode parsed = parse("SELECT * EXCEPT(department) REPLACE(age + 1 AS age) FROM employees");
+    SqlNode rewritten = createRewriter().rewrite(parsed);
+    SqlSelect select = (SqlSelect) rewritten;
+    assertEquals(3, select.getSelectList().size());
+  }
+
+  @Test
+  public void testRewritePreservesNonStarItems() throws SqlParseException {
+    SqlNode parsed = parse("SELECT id, * EXCEPT(id) FROM employees");
+    SqlNode rewritten = createRewriter().rewrite(parsed);
+    SqlSelect select = (SqlSelect) rewritten;
+    assertEquals(4, select.getSelectList().size());
+  }
+
+  @Test
+  public void testRewriteQualifiedStarExcept() throws SqlParseException {
+    SqlNode parsed = parse("SELECT employees.* EXCEPT(age) FROM employees");
+    SqlNode rewritten = createRewriter().rewrite(parsed);
+    SqlSelect select = (SqlSelect) rewritten;
+    assertEquals(3, select.getSelectList().size());
   }
 }
