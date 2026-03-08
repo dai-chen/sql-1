@@ -24,6 +24,8 @@ import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.SqlBasicFunction;
+import org.apache.calcite.sql.SqlAggFunction;
+import org.apache.calcite.sql.fun.SqlLibraryOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.type.OperandTypes;
@@ -36,7 +38,12 @@ import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Programs;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl;
+import org.opensearch.sql.calcite.udf.udaf.FirstAggFunction;
+import org.opensearch.sql.calcite.udf.udaf.LastAggFunction;
+import static org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils.createUserDefinedAggFunction;
+import org.opensearch.sql.calcite.utils.PPLOperandTypes;
 import org.opensearch.sql.calcite.SysLimit;
+
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.executor.QueryType;
 
@@ -232,13 +239,23 @@ public class UnifiedQueryContext implements AutoCloseable {
               ReturnTypes.BOOLEAN,
               OperandTypes.family(SqlTypeFamily.CHARACTER, SqlTypeFamily.CHARACTER));
 
+      SqlAggFunction pplFirst = createUserDefinedAggFunction(
+          FirstAggFunction.class, "PPL_FIRST", ReturnTypes.ARG0,
+          PPLOperandTypes.ANY_OPTIONAL_INTEGER);
+      SqlAggFunction pplLast = createUserDefinedAggFunction(
+          LastAggFunction.class, "PPL_LAST", ReturnTypes.ARG0,
+          PPLOperandTypes.ANY_OPTIONAL_INTEGER);
+
       return Frameworks.newConfigBuilder()
           .parserConfig(parserConfig)
           .defaultSchema(defaultSchema)
           .operatorTable(
               SqlOperatorTables.chain(
                   SqlStdOperatorTable.instance(),
-                  SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower)))
+                  SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
+                      pplFirst, pplLast,
+                      SqlLibraryOperators.REGEXP_CONTAINS,
+                      SqlLibraryOperators.REGEXP_EXTRACT)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .build();

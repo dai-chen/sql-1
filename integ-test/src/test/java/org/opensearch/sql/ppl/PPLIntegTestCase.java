@@ -14,6 +14,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Locale;
+import java.util.Set;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.JSONException;
@@ -26,6 +27,7 @@ import org.opensearch.client.RequestOptions;
 import org.opensearch.client.Response;
 import org.opensearch.client.ResponseException;
 import org.opensearch.common.collect.MapBuilder;
+import org.opensearch.sql.api.PPLToSqlTranspiler;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.common.setting.Settings.Key;
@@ -41,6 +43,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   @Rule public final RetryProcessor retryProcessor = new RetryProcessor();
   public static final Integer DEFAULT_SUBSEARCH_MAXOUT = 10000;
   public static final Integer DEFAULT_JOIN_SUBSEARCH_MAXOUT = 50000;
+  static final boolean V4_ENABLED = Boolean.getBoolean("ppl.engine.v4");
 
   @Override
   protected void init() throws Exception {
@@ -50,10 +53,31 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   }
 
   protected JSONObject executeQuery(String query) throws IOException {
+    if (V4_ENABLED) {
+      String sql = PPLToSqlTranspiler.transpile(query);
+      LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
+      Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
+      request.setJsonEntity(
+          String.format(Locale.ROOT, "{\"query\": \"%s\"}", sql.replace("\\", "\\\\").replace("\"", "\\\"")));
+      Response response = client().performRequest(request);
+      Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+      String body = getResponseBody(response, true);
+      return stripMetadataColumns(jsonify(body), sql);
+    }
     return jsonify(executeQueryToString(query));
   }
 
   protected String executeQueryToString(String query) throws IOException {
+    if (V4_ENABLED) {
+      String sql = PPLToSqlTranspiler.transpile(query);
+      LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
+      Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
+      request.setJsonEntity(
+          String.format(Locale.ROOT, "{\"query\": \"%s\"}", sql.replace("\\", "\\\\").replace("\"", "\\\"")));
+      Response response = client().performRequest(request);
+      Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+      return getResponseBody(response, true);
+    }
     Response response = client().performRequest(buildRequest(query, QUERY_API_ENDPOINT));
     Assert.assertEquals(200, response.getStatusLine().getStatusCode());
     return getResponseBody(response, true);
@@ -189,6 +213,175 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     } catch (JSONException e) {
       throw new IllegalStateException(String.format("Failed to transform %s to JSON format", text));
     }
+  }
+
+  private static final Set<String> METADATA_FIELDS =
+      Set.of("_id", "_index", "_score", "_maxscore", "_sort", "_routing",
+          "_dedup_rn", "_global_rn", "_group_rn");
+
+  private static final java.util.Map<String, String> SQL_TO_PPL_TYPES = new java.util.HashMap<>();
+
+  static {
+    SQL_TO_PPL_TYPES.put("keyword", "string");
+    SQL_TO_PPL_TYPES.put("text", "string");
+    SQL_TO_PPL_TYPES.put("integer", "int");
+    SQL_TO_PPL_TYPES.put("int", "int");
+    SQL_TO_PPL_TYPES.put("long", "bigint");
+    SQL_TO_PPL_TYPES.put("bigint", "bigint");
+    SQL_TO_PPL_TYPES.put("short", "smallint");
+    SQL_TO_PPL_TYPES.put("smallint", "smallint");
+    SQL_TO_PPL_TYPES.put("byte", "tinyint");
+    SQL_TO_PPL_TYPES.put("tinyint", "tinyint");
+    SQL_TO_PPL_TYPES.put("float", "float");
+    SQL_TO_PPL_TYPES.put("real", "float");
+    SQL_TO_PPL_TYPES.put("half_float", "real");
+    SQL_TO_PPL_TYPES.put("double", "double");
+    SQL_TO_PPL_TYPES.put("boolean", "boolean");
+    SQL_TO_PPL_TYPES.put("date", "timestamp");
+    SQL_TO_PPL_TYPES.put("timestamp", "timestamp");
+    SQL_TO_PPL_TYPES.put("ip", "ip");
+    SQL_TO_PPL_TYPES.put("binary", "binary");
+    SQL_TO_PPL_TYPES.put("geo_point", "geo_point");
+    SQL_TO_PPL_TYPES.put("nested", "array");
+    SQL_TO_PPL_TYPES.put("object", "struct");
+    SQL_TO_PPL_TYPES.put("scaled_float", "double");
+    SQL_TO_PPL_TYPES.put("unsigned_long", "bigint");
+  }
+
+  /**
+   * Strip OpenSearch metadata columns from SQL response to match PPL response format. The SQL
+   * endpoint includes _id, _index, _score etc. in SELECT * results, but PPL endpoint strips them.
+   * Also normalizes type names from SQL format to PPL format.
+   * Additionally strips columns marked for exclusion by rename operations via _RENAME_EXCLUDE
+   * comments in the SQL.
+   */
+  private static JSONObject stripMetadataColumns(JSONObject response, String sql) {
+    // Parse _RENAME_MAP comments from SQL to find rename mappings (old:new pairs)
+    java.util.LinkedHashMap<String, String> renameMappings = new java.util.LinkedHashMap<>();
+    if (sql != null) {
+      java.util.regex.Matcher m = java.util.regex.Pattern
+          .compile("/\\* _RENAME_MAP:([^*]+) \\*/").matcher(sql);
+      while (m.find()) {
+        for (String pair : m.group(1).split(",")) {
+          String[] parts = pair.split(":", 2);
+          if (parts.length == 2) {
+            renameMappings.put(parts[0].trim(), parts[1].trim());
+          }
+        }
+      }
+    }
+
+    response.remove("status");
+    if (!response.has("schema") || !response.has("datarows")) {
+      return response;
+    }
+    org.json.JSONArray schema = response.getJSONArray("schema");
+    org.json.JSONArray datarows = response.getJSONArray("datarows");
+
+    // Normalize NaN to null (PPL returns null for invalid math operations)
+    for (int r = 0; r < datarows.length(); r++) {
+      org.json.JSONArray row = datarows.getJSONArray(r);
+      for (int i = 0; i < row.length(); i++) {
+        Object val = row.get(i);
+        if (val instanceof String && "NaN".equals(val)) {
+          row.put(i, org.json.JSONObject.NULL);
+        }
+      }
+    }
+
+    // Build the output column order, handling renames by placing renamed columns
+    // at the position of their source columns (in-place replacement).
+    // The SQL generates "SELECT *, old AS new" which appends renamed cols at end.
+    // We reorder so the renamed col replaces the source col's position.
+    java.util.List<Integer> keepIndices = new java.util.ArrayList<>();
+    if (!renameMappings.isEmpty()) {
+      Set<String> sourceNames = renameMappings.keySet();
+      Set<String> targetNames = new java.util.HashSet<>(renameMappings.values());
+
+      // Find the last index of each target name (the appended alias)
+      java.util.Map<String, Integer> lastTargetIndex = new java.util.HashMap<>();
+      for (int i = 0; i < schema.length(); i++) {
+        String colName = schema.getJSONObject(i).getString("name");
+        if (targetNames.contains(colName)) {
+          lastTargetIndex.put(colName, i);
+        }
+      }
+
+      // Build a set of indices to skip (source cols, earlier target occurrences, appended aliases)
+      Set<Integer> skipIndices = new java.util.HashSet<>();
+      // Map from source index to the appended alias index (for reordering)
+      java.util.Map<Integer, Integer> sourceToAlias = new java.util.HashMap<>();
+
+      for (int i = 0; i < schema.length(); i++) {
+        String colName = schema.getJSONObject(i).getString("name");
+        if (sourceNames.contains(colName)) {
+          String targetName = renameMappings.get(colName);
+          Integer aliasIdx = lastTargetIndex.get(targetName);
+          if (aliasIdx != null && aliasIdx != i) {
+            // Source col — will be replaced by the alias at this position
+            skipIndices.add(i);
+            sourceToAlias.put(i, aliasIdx);
+            skipIndices.add(aliasIdx); // Don't include alias at its appended position
+          }
+        }
+        // Also skip earlier occurrences of target names (pre-existing cols being replaced)
+        if (targetNames.contains(colName) && lastTargetIndex.get(colName) != null
+            && lastTargetIndex.get(colName) != i) {
+          skipIndices.add(i);
+        }
+      }
+
+      for (int i = 0; i < schema.length(); i++) {
+        if (sourceToAlias.containsKey(i)) {
+          // Insert the alias column at the source column's position
+          keepIndices.add(sourceToAlias.get(i));
+        } else if (!skipIndices.contains(i) && !METADATA_FIELDS.contains(
+            schema.getJSONObject(i).getString("name"))) {
+          keepIndices.add(i);
+        }
+      }
+    } else {
+      // No renames — standard metadata stripping
+      for (int i = 0; i < schema.length(); i++) {
+        String colName = schema.getJSONObject(i).getString("name");
+        if (!METADATA_FIELDS.contains(colName)) {
+          keepIndices.add(i);
+        }
+      }
+    }
+
+    // Build new schema
+    org.json.JSONArray newSchema = new org.json.JSONArray();
+    for (int idx : keepIndices) {
+      org.json.JSONObject col = schema.getJSONObject(idx);
+      String type = col.getString("type");
+      String pplType = SQL_TO_PPL_TYPES.getOrDefault(type, type);
+      col.put("type", pplType);
+      newSchema.put(col);
+    }
+
+    // If no columns were removed, return with just type normalization
+    if (keepIndices.size() == schema.length()) {
+      response.put("schema", newSchema);
+      return response;
+    }
+
+    // Filter datarows
+    org.json.JSONArray newDatarows = new org.json.JSONArray();
+    for (int r = 0; r < datarows.length(); r++) {
+      org.json.JSONArray row = datarows.getJSONArray(r);
+      org.json.JSONArray newRow = new org.json.JSONArray();
+      for (int idx : keepIndices) {
+        newRow.put(row.get(idx));
+      }
+      newDatarows.put(newRow);
+    }
+
+    response.put("schema", newSchema);
+    response.put("datarows", newDatarows);
+    response.put("size", newDatarows.length());
+    response.put("total", newDatarows.length());
+    return response;
   }
 
   protected static boolean isCalciteEnabled() throws IOException {

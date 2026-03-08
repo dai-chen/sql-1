@@ -499,6 +499,16 @@ integTest {
     // Set default query size limit
     systemProperty 'defaultQuerySizeLimit', '10000'
 
+    // Forward PPL V4 transpiler flag to test JVM
+    if (System.getProperty("ppl.engine.v4") != null) {
+        systemProperty 'ppl.engine.v4', System.getProperty("ppl.engine.v4")
+    }
+
+    // Forward pushdown setting to test JVM
+    if (System.getProperty("tests.calcite.pushdown.enabled") != null) {
+        systemProperty 'tests.calcite.pushdown.enabled', System.getProperty("tests.calcite.pushdown.enabled")
+    }
+
     // Tell the test JVM if the cluster JVM is running under a debugger so that tests can use longer timeouts for
     // requests. The 'doFirst' delays reading the debug setting on the cluster till execution time.
     doFirst {
