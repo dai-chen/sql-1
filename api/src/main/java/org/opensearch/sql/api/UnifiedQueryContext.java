@@ -35,6 +35,7 @@ import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Programs;
 import org.opensearch.sql.calcite.CalcitePlanContext;
+import org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl;
 import org.opensearch.sql.calcite.SysLimit;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.executor.QueryType;
@@ -215,6 +216,7 @@ public class UnifiedQueryContext implements AutoCloseable {
               ? SqlParser.Config.DEFAULT
                   .withUnquotedCasing(Casing.UNCHANGED)
                   .withConformance(conformance)
+                  .withParserFactory(OpenSearchSqlParserImpl.FACTORY)
               : SqlParser.Config.DEFAULT;
 
       SchemaPlus defaultSchema = findSchemaByPath(rootSchema, defaultNamespace);

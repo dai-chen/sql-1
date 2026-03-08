@@ -1,0 +1,40 @@
+# SELECT * EXCEPT / REPLACE — Implementation Progress
+
+## Design Doc
+docs/dev/select-except-replace-design.md
+
+## Branch
+poc/ppl-to-sqlnode-unified-api
+
+## Build Command
+./gradlew :api:test 2>&1 | tail -30
+
+## Verification Command
+./gradlew :api:test --tests '*StarExcept*' --tests '*UnifiedQueryPlanner*' 2>&1 | tail -30
+
+## Task Status
+
+- [x] Task 1: FMPP/JavaCC parser extension infrastructure in api module
+- [ ] Task 2: SqlStarExceptReplace SqlNode subclass
+- [ ] Task 3: EXCEPT/REPLACE grammar rules in parserImpls.ftl
+- [ ] Task 4: StarExceptReplaceRewriter (SqlShuttle)
+- [ ] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
+- [ ] Task 6: SELECT * REPLACE end-to-end
+- [ ] Task 7: Edge cases, error handling
+
+## Current Task
+Task 2
+
+## Notes
+- Calcite 1.41.0, no native EXCEPT/REPLACE support
+- ANSI_SQL path only (planWithCalcite in UnifiedQueryPlanner)
+- FMPP/JavaCC infrastructure set up in Task 1 (COMPLETE)
+  - FMPP 0.9.16 + FreeMarker 2.3.33 + JavaCC 4.0 (matching Calcite's JavaCC version)
+  - Pipeline: extractCalciteTemplates → mergeCodegenIncludes → runFmpp → runJavacc → compileJava
+  - Generated parser: org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl
+  - Wired into UnifiedQueryContext.buildFrameworkConfig() when conformance is set
+  - 3 tests verify standard SQL parses correctly with custom parser
+- Test base class: api/src/testFixtures/.../UnifiedQueryTestBase.java
+- Existing test: api/src/test/.../UnifiedQueryPlannerTest.java
+- New test: api/src/test/.../StarExceptReplaceTest.java
+- Table schema for tests: employees(id INT, name VARCHAR, age INT, department VARCHAR)

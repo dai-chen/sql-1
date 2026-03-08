@@ -1,0 +1,9 @@
+parser: {
+  package: "org.opensearch.sql.calcite.parser",
+  class: "OpenSearchSqlParserImpl",
+  imports: [
+  ]
+  implementationFiles: [
+    "parserImpls.ftl"
+  ]
+}
