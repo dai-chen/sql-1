@@ -7,6 +7,7 @@ package org.opensearch.sql.api;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlBasicCall;
@@ -14,13 +15,17 @@ import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlWriter;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.calcite.sql.parser.SqlParseException;
+import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.pretty.SqlPrettyWriter;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.junit.Before;
 import org.junit.Test;
+import org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl;
 import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.executor.QueryType;
 
@@ -132,5 +137,82 @@ public class StarExceptReplaceTest extends UnifiedQueryTestBase {
     SqlPrettyWriter writer = new SqlPrettyWriter();
     node.unparse(writer, 0, 0);
     assertEquals("* EXCEPT (\"a\") REPLACE (\"x\" + 1 AS \"c\")", writer.toString());
+  }
+
+  // --- Parse tests (Task 3) ---
+
+  private SqlParser.Config parserConfig() {
+    return SqlParser.Config.DEFAULT
+        .withParserFactory(OpenSearchSqlParserImpl.FACTORY);
+  }
+
+  private SqlNode parse(String sql) throws SqlParseException {
+    return SqlParser.create(sql, parserConfig()).parseQuery();
+  }
+
+  private SqlStarExceptReplace parseAndGetExceptReplace(String sql) throws SqlParseException {
+    SqlNode node = parse(sql);
+    assertTrue("Expected SqlSelect, got " + node.getClass(), node instanceof SqlSelect);
+    SqlSelect select = (SqlSelect) node;
+    SqlNode firstItem = select.getSelectList().get(0);
+    assertTrue(
+        "Expected SqlStarExceptReplace, got " + firstItem.getClass(),
+        firstItem instanceof SqlStarExceptReplace);
+    return (SqlStarExceptReplace) firstItem;
+  }
+
+  @Test
+  public void testParseSelectStarExcept() throws SqlParseException {
+    SqlStarExceptReplace node = parseAndGetExceptReplace("SELECT * EXCEPT(a, b) FROM t");
+    assertNotNull(node.getExcept());
+    assertEquals(2, node.getExcept().size());
+    assertEquals("A", ((SqlIdentifier) node.getExcept().get(0)).getSimple());
+    assertEquals("B", ((SqlIdentifier) node.getExcept().get(1)).getSimple());
+  }
+
+  @Test
+  public void testParseSelectStarReplace() throws SqlParseException {
+    SqlStarExceptReplace node = parseAndGetExceptReplace("SELECT * REPLACE(x + 1 AS c) FROM t");
+    assertNotNull(node.getReplace());
+    assertEquals(1, node.getReplace().size());
+  }
+
+  @Test
+  public void testParseSelectStarExceptAndReplace() throws SqlParseException {
+    SqlStarExceptReplace node =
+        parseAndGetExceptReplace("SELECT * EXCEPT(a) REPLACE(b + 1 AS b) FROM t");
+    assertNotNull(node.getExcept());
+    assertEquals(1, node.getExcept().size());
+    assertNotNull(node.getReplace());
+    assertEquals(1, node.getReplace().size());
+  }
+
+  @Test
+  public void testParseSelectStarWithoutExceptReplaceStillWorks() throws SqlParseException {
+    SqlNode node = parse("SELECT * FROM t");
+    assertTrue(node instanceof SqlSelect);
+    SqlSelect select = (SqlSelect) node;
+    // Plain * should remain a SqlIdentifier, not SqlStarExceptReplace
+    assertTrue(
+        "Plain * should be SqlIdentifier",
+        select.getSelectList().get(0) instanceof SqlIdentifier);
+  }
+
+  @Test
+  public void testParseSelectStarExceptDoesNotBreakSetExcept() throws SqlParseException {
+    // EXCEPT as set operation should still work
+    SqlNode node = parse("SELECT * FROM t EXCEPT SELECT * FROM t");
+    assertNotNull(node);
+  }
+
+  @Test
+  public void testParseQualifiedStarExcept() throws SqlParseException {
+    SqlStarExceptReplace node = parseAndGetExceptReplace("SELECT t.* EXCEPT(a) FROM t");
+    assertNotNull(node.getExcept());
+    assertEquals(1, node.getExcept().size());
+    // Star should be qualified
+    assertTrue(node.getStar() instanceof SqlIdentifier);
+    SqlIdentifier star = (SqlIdentifier) node.getStar();
+    assertTrue(star.isStar());
   }
 }
