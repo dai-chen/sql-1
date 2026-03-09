@@ -25,7 +25,8 @@ import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.SqlBasicFunction;
 import org.apache.calcite.sql.SqlAggFunction;
-import org.apache.calcite.sql.fun.SqlLibraryOperators;
+import org.apache.calcite.sql.fun.SqlLibrary;
+import org.apache.calcite.sql.fun.SqlLibraryOperatorTableFactory;
 import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
@@ -253,12 +254,13 @@ public class UnifiedQueryContext implements AutoCloseable {
           .operatorTable(
               SqlOperatorTables.chain(
                   SqlStdOperatorTable.instance(),
+                  SqlLibraryOperatorTableFactory.INSTANCE.getOperatorTable(
+                      SqlLibrary.MYSQL,
+                      SqlLibrary.BIG_QUERY,
+                      SqlLibrary.SPARK,
+                      SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
                       pplFirst, pplLast,
-                      SqlLibraryOperators.REGEXP_CONTAINS,
-                      SqlLibraryOperators.REGEXP_EXTRACT,
-                      SqlLibraryOperators.MD5,
-                      SqlLibraryOperators.SHA1,
                       PPLBuiltinOperators.SHA2)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
