@@ -1,0 +1,142 @@
+{
+  "project": "PPL-to-SQL Doctest PoC",
+  "branchName": "poc/ppl-to-sql-doctest",
+  "description": "Translate PPL queries to ANSI SQL via PPLToSqlTranspiler, serve through /_plugins/_pplv4 endpoint, and pass 85% of PPL doctests",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Cherry-pick PPLToSqlTranspiler into api module",
+      "description": "As a developer, I need the PPLToSqlTranspiler class available in the api/ module so it can be used by the new endpoint.",
+      "acceptanceCriteria": [
+        "PPLToSqlTranspiler.java exists at api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java",
+        "Cherry-picked from remotes/origin/poc/ppl-to-sqlnode-unified-api via git show",
+        "./gradlew :api:compileJava passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Use git show to extract, not cherry-pick commit (branches diverged). SelectBuilder is an inner class."
+    },
+    {
+      "id": "US-002",
+      "title": "Create RestPPLV4QueryAction endpoint",
+      "description": "As a developer, I need a /_plugins/_pplv4 REST endpoint that receives PPL, translates to SQL, and executes via the ANSI SQL engine.",
+      "acceptanceCriteria": [
+        "RestPPLV4QueryAction.java exists in legacy/src/main/java/org/opensearch/sql/legacy/plugin/",
+        "Handles POST /_plugins/_pplv4 with body {\"query\": \"<PPL>\"}",
+        "Calls PPLToSqlTranspiler.transpile() then forwards SQL to RestUnifiedSQLQueryAction",
+        "Returns same JDBC JSON format as /_plugins/_ppl",
+        "No fallback — returns error if translation fails",
+        "Endpoint registered in SQLPlugin.java getRestHandlers()",
+        "./gradlew :legacy:compileJava :plugin:compileJava passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Model after RestUnifiedSQLQueryAction. Reuse its execution logic."
+    },
+    {
+      "id": "US-003",
+      "title": "Wire doctest to use /_plugins/_pplv4 endpoint",
+      "description": "As a developer, I need the doctest infrastructure to send PPL queries to the new pplv4 endpoint instead of the ppl endpoint.",
+      "acceptanceCriteria": [
+        "opensearch_connection.py supports query_language='pplv4' routing to /_plugins/_pplv4",
+        "markdown_parser.py has ppl_v4_markdown_transform() that wraps as pplv4_cmd.process()",
+        "test_docs.py creates pplv4_cmd DocTestConnection in setup",
+        "docs/category.json has ppl_cli_v4 category listing all PPL .md files",
+        "Running ./gradlew doctest -Pdocs=where executes via /_plugins/_pplv4"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Copy ppl_cli_calcite file list to ppl_cli_v4. Keep ppl_cli_calcite unchanged."
+    },
+    {
+      "id": "US-004",
+      "title": "End-to-end smoke test with where.md",
+      "description": "As a developer, I need to verify the full pipeline works by running doctest on where.md through the pplv4 endpoint.",
+      "acceptanceCriteria": [
+        "./gradlew doctest -Pdocs=where -Pcategory=ppl_cli_v4 runs without infrastructure errors",
+        "At least 1 PPL query from where.md returns correct results via pplv4",
+        "Translation errors are logged clearly (not silent failures)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "This validates the full stack: markdown parse → transform → HTTP → transpile → SQL execute → format → compare."
+    },
+    {
+      "id": "US-005",
+      "title": "P0 commands: search, where, fields, head, sort, stats, eval, table",
+      "description": "As a developer, I need the transpiler to handle basic PPL commands that map directly to SQL clauses.",
+      "acceptanceCriteria": [
+        "PPLToSqlTranspiler handles all P0 commands correctly",
+        "Doctest pass rate for P0 command docs is >90%",
+        "Run: ./gradlew doctest -Pdocs=search,where,fields,head,sort,stats,eval,table -Pcategory=ppl_cli_v4"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "These are SELECT/FROM/WHERE/ORDER BY/LIMIT/GROUP BY — should mostly work from cherry-picked transpiler."
+    },
+    {
+      "id": "US-006",
+      "title": "P1 commands: top, rare, regex, rename, dedup, join, subquery, append",
+      "description": "As a developer, I need the transpiler to handle standard SQL patterns like ROW_NUMBER, UNION ALL, and JOIN variants.",
+      "acceptanceCriteria": [
+        "PPLToSqlTranspiler handles all P1 commands",
+        "Cumulative doctest pass rate reaches ~50%",
+        "Run full ppl_cli_v4 doctest suite and record results"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "join has 30 examples — largest single command. subquery has 45 examples."
+    },
+    {
+      "id": "US-007",
+      "title": "P2 commands: eventstats, trendline, reverse, lookup, appendpipe, graphlookup",
+      "description": "As a developer, I need the transpiler to handle window functions, CTEs, and recursive CTEs.",
+      "acceptanceCriteria": [
+        "PPLToSqlTranspiler handles all P2 commands",
+        "Cumulative doctest pass rate reaches ~65%",
+        "Run full ppl_cli_v4 doctest suite and record results"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "graphlookup needs recursive CTE. eventstats needs window functions."
+    },
+    {
+      "id": "US-008",
+      "title": "P3 commands: fillnull, replace, rex, parse, flatten, expand, mvexpand",
+      "description": "As a developer, I need the transpiler to handle EXCEPT/REPLACE/UNNEST SQL extensions.",
+      "acceptanceCriteria": [
+        "PPLToSqlTranspiler handles all P3 commands",
+        "Cumulative doctest pass rate reaches ~80%",
+        "Run full ppl_cli_v4 doctest suite and record results"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Depends on StarExceptReplaceRewriter already on this branch."
+    },
+    {
+      "id": "US-009",
+      "title": "P4 stretch: bin, streamstats, chart, timechart to reach 85%",
+      "description": "As a developer, I need to extend the transpiler with enough P4 commands to reach the 85% pass rate target.",
+      "acceptanceCriteria": [
+        "Cumulative doctest pass rate reaches 85%+",
+        "Run full ppl_cli_v4 doctest suite and record final results"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Only implement what's needed to hit 85%. Skip if P0-P3 already reaches target."
+    },
+    {
+      "id": "US-010",
+      "title": "Finalize: mark untranslatable queries, write report",
+      "description": "As a developer, I need to mark TVF-only queries as ignore and document final results.",
+      "acceptanceCriteria": [
+        "P5 commands (patterns, transpose, addcoltotals, fieldformat, nomv) marked with ```ppl ignore in docs",
+        "Final doctest pass rate documented in design doc",
+        "All changes committed with descriptive messages"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Only mark as ignore if they cause test failures. Don't preemptively ignore."
+    }
+  ]
+}

@@ -1,96 +1,24 @@
-# SELECT * EXCEPT / REPLACE — Implementation Progress
+# Ralph Progress Log
+Started: 2026-03-09
 
-## Design Doc
-docs/dev/select-except-replace-design.md
-
-## Branch
-poc/ppl-to-sqlnode-unified-api
-
-## Build Command
-./gradlew :api:test 2>&1 | tail -30
-
-## Verification Command
-./gradlew :api:test --tests '*StarExcept*' --tests '*UnifiedQueryPlanner*' 2>&1 | tail -30
-
-## Task Status
-
-- [x] Task 1: FMPP/JavaCC parser extension infrastructure in api module
-- [x] Task 2: SqlStarExceptReplace SqlNode subclass
-- [x] Task 3: EXCEPT/REPLACE grammar rules in parserImpls.ftl
-- [x] Task 4: StarExceptReplaceRewriter (SqlShuttle)
-- [x] Task 5: Wire into UnifiedQueryPlanner.planWithCalcite()
-- [x] Task 6: SELECT * REPLACE end-to-end
-- [x] Task 7: Edge cases, error handling
-
-## Current Task
-ALL TASKS COMPLETE
-
-## Notes
-- Calcite 1.41.0, no native EXCEPT/REPLACE support
-- ANSI_SQL path only (planWithCalcite in UnifiedQueryPlanner)
-- FMPP/JavaCC infrastructure set up in Task 1 (COMPLETE)
-  - FMPP 0.9.16 + FreeMarker 2.3.33 + JavaCC 4.0 (matching Calcite's JavaCC version)
-  - Pipeline: extractCalciteTemplates → mergeCodegenIncludes → runFmpp → runJavacc → compileJava
-  - Generated parser: org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl
-  - Wired into UnifiedQueryContext.buildFrameworkConfig() when conformance is set
-  - 3 tests verify standard SQL parses correctly with custom parser
-- Test base class: api/src/testFixtures/.../UnifiedQueryTestBase.java
-- Existing test: api/src/test/.../UnifiedQueryPlannerTest.java
-- New test: api/src/test/.../StarExceptReplaceTest.java
-- Table schema for tests: employees(id INT, name VARCHAR, age INT, department VARCHAR)
-- Task 2 COMPLETE: SqlStarExceptReplace SqlNode subclass
-- Task 3 COMPLETE: EXCEPT/REPLACE grammar rules in parserImpls.ftl
-  - Added StarExceptReplaceOpt(SqlNode star) production in parserImpls.ftl
-  - Handles optional EXCEPT(col,...) and REPLACE(expr AS col,...) after any star
-  - Gradle patchParserTemplate task patches SelectExpression() and AddSelectItem() in extracted Parser.jj
-  - SelectExpression: plain * calls StarExceptReplaceOpt after creating SqlIdentifier.star
-  - AddSelectItem: qualified t.* (SqlIdentifier.isStar()) also calls StarExceptReplaceOpt
-  - EXCEPT is already a reserved keyword in Calcite; REPLACE already non-reserved
-  - config.fmpp updated with SqlStdOperatorTable import for AS calls in REPLACE items
-  - 6 new parse tests added (12 total tests, all pass):
-    - testParseSelectStarExcept, testParseSelectStarReplace, testParseSelectStarExceptAndReplace
-    - testParseSelectStarWithoutExceptReplaceStillWorks, testParseSelectStarExceptDoesNotBreakSetExcept
-    - testParseQualifiedStarExcept (t.* EXCEPT)
-- Task 4 COMPLETE: StarExceptReplaceRewriter (SqlShuttle)
-  - New file: api/src/main/java/.../calcite/parser/StarExceptReplaceRewriter.java
-  - Extends SqlShuttle, takes SchemaPlus in constructor
-  - rewrite(SqlNode) entry point calls node.accept(this)
-  - visit(SqlCall) detects SqlSelect, rewrites select list
-  - Resolves tables from FROM clause: SqlIdentifier, AS-aliased, SqlJoin (recursive)
-  - For unqualified star: expands ALL columns from ALL tables; qualifies when multiple tables
-  - For qualified star (t.*): only expands matching table/alias
-  - EXCEPT: filters out columns (case-insensitive match)
-  - REPLACE: substitutes AS expression for matching columns
-  - Case-insensitive table lookup via findTable() helper (handles parser casing vs schema casing)
-  - 6 new rewriter tests added (18 total tests, all pass):
-    - testRewriteSelectStarExcept, testRewriteSelectStarExceptMultipleColumns
-    - testRewriteSelectStarReplace, testRewriteSelectStarExceptAndReplace
-    - testRewritePreservesNonStarItems, testRewriteQualifiedStarExcept
-- Task 5 COMPLETE: Wire into UnifiedQueryPlanner.planWithCalcite()
-  - Added StarExceptReplaceRewriter call between parse and validate in planWithCalcite()
-  - Rewriter uses config.getDefaultSchema() to resolve table columns
-  - Planner facade state machine (PARSE→VALIDATE→REL) accepts rewritten SqlNode after parse()
-  - No need to replace Planner with low-level APIs — simple 3-line insertion sufficed
-  - 3 new end-to-end planner tests added (21 total tests, all pass):
-    - testPlanSelectStarExcept: SELECT * EXCEPT(age) → 3 columns (id, name, department)
-    - testPlanSelectStarExceptMultipleColumns: SELECT * EXCEPT(age, department) → 2 columns
-    - testPlanSelectQualifiedStarExcept: SELECT employees.* EXCEPT(age) → 3 columns
-- Task 6 COMPLETE: SELECT * REPLACE end-to-end planner tests
-  - Rewriter already handled REPLACE (Task 4); Task 6 adds end-to-end planner verification
-  - 3 new planner tests added (24 total tests, all pass):
-    - testPlanSelectStarReplace: SELECT * REPLACE(age + 1 AS age) → 4 columns, age replaced
-    - testPlanSelectStarExceptAndReplace: SELECT * EXCEPT(id) REPLACE(age + 1 AS age) → 3 columns
-    - testPlanSelectQualifiedStarReplace: SELECT employees.* REPLACE(UPPER(name) AS name) → 4 columns
-- Task 7 COMPLETE: Edge cases, error handling
-  - Added 5 validation rules to StarExceptReplaceRewriter.expandStarExceptReplace():
-    - EXCEPT column must exist in table → IllegalArgumentException
-    - REPLACE target column must exist in table → IllegalArgumentException
-    - EXCEPT must not remove all columns → IllegalArgumentException
-    - Duplicate columns in EXCEPT list → IllegalArgumentException
-    - Same column in both EXCEPT and REPLACE → IllegalArgumentException
-  - All validations are case-insensitive, per-table in the expansion loop
-  - UnifiedQueryPlanner.plan() wraps exceptions in IllegalStateException, so tests use expected=IllegalStateException.class
-  - 2 edge case tests for JOIN scenarios:
-    - testExceptWithJoin: unqualified star EXCEPT across self-join → removes column from both tables
-    - testQualifiedStarWithMultiTableFrom: qualified e1.* EXCEPT in join → only affects e1
-  - 7 new tests added (31 total StarExceptReplace tests, 62 total api tests, all pass)
+## Codebase Patterns
+- Build Java: `./gradlew :api:compileJava :legacy:compileJava :plugin:compileJava`
+- Build all (no tests): `./gradlew build -x test -x integTest`
+- Run doctest: `./gradlew doctest -Pdocs=where -Pcategory=ppl_cli_v4`
+- Run all PPL doctest: `./gradlew doctest -Pcategory=ppl_cli_v4`
+- PPL parser: `PPLSyntaxParser` in `ppl/` module, produces ANTLR ParseTree
+- AST builder: `AstBuilder` + `AstStatementBuilder` in `ppl/` module, produces `UnresolvedPlan` linked list
+- Unified query API is in `api/` module: `UnifiedQueryPlanner`, `UnifiedQueryContext`, `UnifiedQueryCompiler`
+- SQL endpoint handler: `RestUnifiedSQLQueryAction` in `legacy/` module — routes ALL SQL through Calcite
+- PPL endpoint handler: `RestPPLQueryAction` in `plugin/` module — routes through PPLService
+- Plugin registration: `SQLPlugin.java` in `plugin/` module — registers REST handlers
+- Doctest is Python-based: `doctest/test_docs.py` orchestrates, `doctest/markdown_parser.py` parses .md files
+- Doctest CLI: `doctest/sql-cli/` is a pure Python HTTP client (opensearch-py), no Java bridge
+- Category config: `docs/category.json` maps doc files to test categories
+- PPL docs: `docs/user/ppl/cmd/*.md` — 52 files, ~315 PPL query blocks in cmd/ alone
+- ANSI SQL path: Calcite SqlParser → SqlNode → SqlValidator → SqlToRelConverter → RelNode
+- SELECT * EXCEPT/REPLACE: supported via `StarExceptReplaceRewriter` + custom parser in `api/`
+- PPLToSqlTranspiler source: `git show remotes/origin/poc/ppl-to-sqlnode-unified-api:api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java`
+- Translation report: `docs/dev/ppl-to-sql-translation-report.md` — 365 examples, 44 commands, 91% standard SQL
+- Design doc: `docs/plans/2026-03-09-ppl-to-sql-doctest-design.md`
+---
