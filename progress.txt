@@ -1114,3 +1114,37 @@
   13. CaseFunctionIT: 9 failures (IP type schema, pushdown, DATE_TRUNC, CountBin)
   14. NestedAggregationIT: 9 failures (pushdown-gated)
 - Next recommended task: Fix BuiltinFunctionIT remaining 10 failures — testSignAndRound (type mismatch), testModShouldReturnWiderTypes/testModFloatAndNegative (MOD type issues), testDivide/testDivideShouldReturnNull (division type issues). Or fix BasicIT remaining 12 failures. Or implement CryptographicFunctionIT (4 tests) — MD5/SHA1/SHA2 functions.
+
+---
+### Iteration 27 — Register MD5/SHA1/SHA2 cryptographic functions in Calcite operator table
+- Date: 2026-03-09
+- Baseline rate: 60.0% (451/752)
+- Task: Added MD5, SHA1, and SHA2 cryptographic function operators to the Calcite SQL planner's operator table in UnifiedQueryContext.java. The transpiler's default visitFunction handler already uppercases function names (md5→MD5, sha1→SHA1, sha2→SHA2), so no transpiler changes were needed — only operator registration.
+- Key fixes:
+  1. Added SqlLibraryOperators.MD5 to operator table — Calcite built-in MD5(string)→string
+  2. Added SqlLibraryOperators.SHA1 to operator table — Calcite built-in SHA1(string)→string
+  3. Added PPLBuiltinOperators.SHA2 to operator table — custom PPL UDF SHA2(string, int)→string with algorithm dispatch (224/256/384/512)
+  4. Added import for PPLBuiltinOperators
+- Files changed:
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (MODIFIED - 1 import + 3 operators added to SqlOperatorTables.of())
+- New rate: 60.5% (455/752 passed, 296 failed, 1 skipped)
+- Delta: +4 tests passing (+0.5%)
+- Per-class improvements:
+  - CalcitePPLCryptographicFunctionIT: 0→4 (+4) — testMd5, testSha1, testSha2, testSha2WrongAlgorithmShouldThrow all passing
+- No regressions in any other test class.
+- Blockers remaining:
+  1. AggregationIT: 31 failures (span/time, percentile, first/last edge cases)
+  2. GraphLookupIT: 22 failures (unsupported)
+  3. JoinIT: 19 failures (field-list column dedup, alias resolution)
+  4. BuiltinFunctionsNullIT: 17 failures (engine limitations, error handling)
+  5. JsonBuiltinFunctionIT: 17 failures (unsupported)
+  6. PatternsIT: 15 failures (unsupported)
+  7. SpathCommandIT: 14 failures (unsupported)
+  8. BasicIT: 12 failures
+  9. RenameIT: 12 failures (wildcard rename)
+  10. CastFunctionIT: 11 failures (Calcite engine limitations)
+  11. EventstatsIT: 10 failures (span in PARTITION BY)
+  12. BuiltinFunctionIT: 10 failures
+  13. NestedAggregationIT: 9 failures (dot-notation nested fields, RareTopN)
+  14. CaseFunctionIT: 9 failures (IP type schema, pushdown, DATE_TRUNC, CountBin)
+- Next recommended task: Fix dot-notation nested field quoting in visitQualifiedName (6 NestedAggregationIT tests) — quote multi-part names as single identifier "address.area" instead of address.area. Or implement RareTopN command (top/rare). Or fix eval forward-reference inlining for EnhancedCoalesceIT (1 test).

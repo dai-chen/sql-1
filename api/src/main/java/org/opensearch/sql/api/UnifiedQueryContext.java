@@ -26,6 +26,7 @@ import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.SqlBasicFunction;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.fun.SqlLibraryOperators;
+import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.type.OperandTypes;
@@ -255,7 +256,10 @@ public class UnifiedQueryContext implements AutoCloseable {
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
                       pplFirst, pplLast,
                       SqlLibraryOperators.REGEXP_CONTAINS,
-                      SqlLibraryOperators.REGEXP_EXTRACT)))
+                      SqlLibraryOperators.REGEXP_EXTRACT,
+                      SqlLibraryOperators.MD5,
+                      SqlLibraryOperators.SHA1,
+                      PPLBuiltinOperators.SHA2)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .build();
