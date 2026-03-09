@@ -72,6 +72,18 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
 
   protected String executeQueryToString(String query) throws IOException {
     if (V4_ENABLED) {
+      // For EXPLAIN queries, route through PPL explain endpoint (V4 transpiler can't replicate explain format)
+      String trimmed = query.trim().toLowerCase(Locale.ROOT);
+      if (trimmed.startsWith("explain ")) {
+        String mode = "standard";
+        if (trimmed.startsWith("explain simple ")) mode = "simple";
+        else if (trimmed.startsWith("explain extended ")) mode = "extended";
+        else if (trimmed.startsWith("explain cost ")) mode = "cost";
+        Response response = client().performRequest(
+            buildRequest(query, String.format(EXPLAIN_API_ENDPOINT, "json", mode)));
+        Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+        return getResponseBody(response, true);
+      }
       String sql = PPLToSqlTranspiler.transpile(query);
       LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
       Request request = new Request("POST", "/_plugins/_sql?format=jdbc");

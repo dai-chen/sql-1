@@ -203,7 +203,10 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
             astBuilder, AstStatementBuilder.StatementBuilderContext.builder().build());
     Statement stmt = stmtBuilder.visit(cst);
     Query query = (Query) stmt;
-    UnresolvedPlan plan = query.getPlan();
+    return transpilePlan(query.getPlan());
+  }
+
+  private static String transpilePlan(UnresolvedPlan plan) {
 
     // Flatten the AST chain from leaf (Relation) outward
     List<UnresolvedPlan> nodes = new ArrayList<>();
@@ -1148,7 +1151,29 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
 
     sb.from = fromBuilder.toString();
     sb.select = new ArrayList<>();
-    sb.select.add("*");
+    if (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
+      List<String> sharedFields = node.getJoinFields().get().stream()
+          .map(f -> f.getField().toString()).collect(Collectors.toList());
+      Literal overwriteLit = node.getArgumentMap().get("overwrite");
+      boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
+      String lRef = leftAlias != null ? quoteId(leftAlias) : "";
+      String rRef = rightAlias != null ? quoteId(rightAlias) : "";
+      String exceptList = sharedFields.stream().map(f -> quoteId(f))
+          .collect(Collectors.joining(", "));
+      StringBuilder selectExpr = new StringBuilder();
+      if (overwrite) {
+        String replaceList = sharedFields.stream()
+            .map(f -> rRef + "." + quoteId(f) + " AS " + quoteId(f))
+            .collect(Collectors.joining(", "));
+        selectExpr.append(lRef).append(".* REPLACE(").append(replaceList).append("), ");
+      } else {
+        selectExpr.append(lRef).append(".*, ");
+      }
+      selectExpr.append(rRef).append(".* EXCEPT(").append(exceptList).append(")");
+      sb.select.add(selectExpr.toString());
+    } else {
+      sb.select.add("*");
+    }
     sb.where = null;
     sb.groupBy = null;
     sb.orderBy = null;
@@ -1590,9 +1615,15 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       return "(" + args.get(0) + " * " + args.get(1) + ")";
     }
     if ("/".equals(name) && args.size() == 2) {
+      if (isNonZeroLiteral(args.get(1))) {
+        return "(" + args.get(0) + " / " + args.get(1) + ")";
+      }
       return "CASE WHEN " + args.get(1) + " = 0 THEN NULL ELSE (" + args.get(0) + " / " + args.get(1) + ") END";
     }
     if ("%".equals(name) && args.size() == 2) {
+      if (isNonZeroLiteral(args.get(1))) {
+        return "MOD(" + args.get(0) + ", " + args.get(1) + ")";
+      }
       return "CASE WHEN " + args.get(1) + " = 0 THEN NULL ELSE MOD(" + args.get(0) + ", " + args.get(1) + ") END";
     }
 
@@ -1701,6 +1732,9 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       return "SUBSTRING(" + String.join(", ", args) + ")";
     }
     if ("mod".equals(name) || "%".equals(name)) {
+      if (isNonZeroLiteral(args.get(1))) {
+        return "MOD(" + args.get(0) + ", " + args.get(1) + ")";
+      }
       return "CASE WHEN " + args.get(1) + " = 0 THEN NULL ELSE MOD(" + args.get(0) + ", " + args.get(1) + ") END";
     }
     if ("extract".equals(name)) {
@@ -2017,6 +2051,26 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
   }
 
   // --- Helpers ---
+
+  /**
+   * Check if a SQL expression string is a non-zero numeric literal.
+   * Matches plain numbers (e.g. 2, 7.0, -3) and CAST(n AS type) wrappers.
+   */
+  private static boolean isNonZeroLiteral(String expr) {
+    String value = expr.trim();
+    // Unwrap CAST(n AS type)
+    if (value.startsWith("CAST(") && value.endsWith(")")) {
+      int asIdx = value.toUpperCase().indexOf(" AS ");
+      if (asIdx > 0) {
+        value = value.substring(5, asIdx).trim();
+      }
+    }
+    try {
+      return Double.parseDouble(value) != 0.0;
+    } catch (NumberFormatException e) {
+      return false;
+    }
+  }
 
   private static String quoteId(String id) {
     // Only quote if the identifier contains special characters or is a SQL keyword
