@@ -1940,8 +1940,38 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if ("REGEXP".equalsIgnoreCase(op)) {
       return "REGEXP_CONTAINS(" + visitExpr(node.getLeft()) + ", " + visitExpr(node.getRight()) + ")";
     }
-    return "(" + visitExpr(node.getLeft()) + " " + op + " "
-        + visitExpr(node.getRight()) + ")";
+    String left = visitExpr(node.getLeft());
+    String right = visitExpr(node.getRight());
+    String lt = extractDatetimeCastType(left);
+    String rt = extractDatetimeCastType(right);
+    if (lt != null && rt != null && !lt.equals(rt)) {
+      left = castToTimestampIfNeeded(left, lt);
+      right = castToTimestampIfNeeded(right, rt);
+    }
+    return "(" + left + " " + op + " " + right + ")";
+  }
+
+  private String extractDatetimeCastType(String expr) {
+    String upper = expr.toUpperCase();
+    for (String t : new String[]{"DATE", "TIME", "TIMESTAMP"}) {
+      if (upper.endsWith("AS " + t + ")")) return t;
+    }
+    return null;
+  }
+
+  private String castToTimestampIfNeeded(String expr, String type) {
+    if ("TIMESTAMP".equals(type)) return expr;
+    if ("TIME".equals(type)) {
+      // PPL semantics: TIME means today's date + that time
+      // Extract literal time value and build timestamp with today's date at transpile time
+      java.util.regex.Matcher m = java.util.regex.Pattern
+          .compile("(?i)CAST\\('([^']+)' AS TIME\\)").matcher(expr);
+      if (m.matches()) {
+        return "TIMESTAMP '" + java.time.LocalDate.now() + " " + m.group(1) + "'";
+      }
+      return "CAST(" + expr + " AS TIMESTAMP)";
+    }
+    return "CAST(" + expr + " AS TIMESTAMP)";
   }
 
   @Override

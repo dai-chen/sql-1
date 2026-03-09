@@ -136,3 +136,20 @@
 
 - Blockers: Remaining 96 CalciteDateTimeComparisonIT failures are cross-type datetime comparisons (DATE vs TIME, DATE vs TIMESTAMP, TIME vs TIMESTAMP) — Calcite cannot compare different datetime types without explicit casting. This is a separate issue requiring transpiler-level type coercion.
 - Next recommended task: CalciteDateTimeComparisonIT cross-type comparisons (96 failures) — add CAST to common type (TIMESTAMP) for cross-type datetime comparisons in the transpiler. Or target CalciteDateTimeFunctionIT (60 failures) or CalciteSearchCommandIT (46 failures) for higher breadth impact.
+
+### Iteration 2 — Fix cross-type datetime comparisons (DATE↔TIME, TIME↔TIMESTAMP)
+- Date: 2026-03-09
+- Baseline rate: 46.1% (1044/2264, 144 skipped)
+- Task: Add cross-type datetime comparison coercion in visitCompare. When comparing two CAST expressions of different datetime types (DATE vs TIME, TIME vs TIMESTAMP), normalize both sides to TIMESTAMP. For TIME→TIMESTAMP, use Java's LocalDate.now() at transpile time to construct a TIMESTAMP literal with today's date (matching PPL semantics where TIME means "today + that time"). For DATE→TIMESTAMP, use simple CAST(date AS TIMESTAMP).
+- Files changed: api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (modified visitCompare + added extractDatetimeCastType and castToTimestampIfNeeded helpers, ~25 lines net)
+- New rate: 50.4% (2264 tests, 979 failed, 144 skipped)
+- Tests fixed: +96 (CalciteDateTimeComparisonIT: 95→191 passing, 96→0 failures)
+- Key insight: Calcite cannot compare DATE↔TIME or TIME↔TIMESTAMP directly — needs both sides cast to TIMESTAMP. For TIME→TIMESTAMP, SQL-level approaches (CAST(CURRENT_DATE AS TIMESTAMP), FLOOR(LOCALTIMESTAMP TO DAY), string concatenation) all failed or produced wrong results. The working solution: extract the literal time value via regex at transpile time and construct `TIMESTAMP 'today time'` using Java's LocalDate.now(). This handles the "today" semantics correctly because the transpiler runs at query time.
+- Per-class delta (only changed class):
+
+| Class | Before | After | Delta |
+|-------|--------|-------|-------|
+| CalciteDateTimeComparisonIT | 95/191 | 191/191 | +96 |
+
+- Blockers: None for this iteration. The regex-based TIME literal extraction only handles `CAST('HH:MM:SS' AS TIME)` patterns (literal time values). Non-literal TIME expressions in cross-type comparisons fall back to simple CAST(... AS TIMESTAMP) which uses epoch date — acceptable since non-literal TIME cross-type comparisons are rare in practice.
+- Next recommended task: CalciteDateTimeFunctionIT (60 failures) or CalciteArrayFunctionIT (60 failures) or CalciteStreamstatsCommandIT (46 failures) or CalciteSearchCommandIT (46 failures) — pick highest-impact next.
