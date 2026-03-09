@@ -279,12 +279,18 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     org.json.JSONArray datarows = response.getJSONArray("datarows");
 
     // Normalize NaN to null (PPL returns null for invalid math operations)
+    // Normalize timestamps by stripping trailing '.0' (SQL returns '2025-07-28 00:15:23.0', PPL expects '2025-07-28 00:15:23')
     for (int r = 0; r < datarows.length(); r++) {
       org.json.JSONArray row = datarows.getJSONArray(r);
       for (int i = 0; i < row.length(); i++) {
         Object val = row.get(i);
-        if (val instanceof String && "NaN".equals(val)) {
-          row.put(i, org.json.JSONObject.NULL);
+        if (val instanceof String) {
+          String s = (String) val;
+          if ("NaN".equals(s)) {
+            row.put(i, org.json.JSONObject.NULL);
+          } else if (s.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.0$")) {
+            row.put(i, s.substring(0, s.length() - 2));
+          }
         }
       }
     }

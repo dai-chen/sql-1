@@ -1228,3 +1228,46 @@
   13. CaseFunctionIT: 9 failures (IP type schema, pushdown, DATE_TRUNC)
   14. NestedAggregationIT: 9 failures (nested field semantics — engine limitation)
 - Next recommended task: Fix ConditionBuiltinFunctionIT earliest/latest as filter functions (3 tests). Or implement CONV/CRC32/TYPEOF functions (6 BuiltinFunctionIT tests). Or fix remaining ConditionBuiltinFunctionIT failures. Or fix CaseFunctionIT if IP type schema issue can be worked around.
+
+---
+### Iteration 30 — Fix timestamp '.0' suffix in SQL response normalization
+- Date: 2026-03-09
+- Baseline rate: 60.9% (458/752)
+- Task: Added timestamp value normalization in PPLIntegTestCase.stripMetadataColumns() to strip trailing '.0' from timestamp strings returned by the SQL endpoint. The SQL endpoint returns timestamps like '2025-07-28 00:15:23.0' but PPL expects '2025-07-28 00:15:23'. Added regex check in the existing NaN→null datarows loop: if a string matches `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.0$`, strip the last 2 characters. Only strips '.0' (single zero fractional second), preserves meaningful fractional seconds like '.123456'.
+- Key fixes:
+  1. Timestamp '.0' stripping: In stripMetadataColumns datarows loop, added `else if (s.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.0$"))` branch that calls `row.put(i, s.substring(0, s.length() - 2))`.
+  2. This fixed first/last aggregate functions on timestamp/birthdate fields across multiple test classes.
+- Files changed:
+  - integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (MODIFIED - 3 lines added in stripMetadataColumns datarows loop)
+- New rate: 63.2% (475/752 passed, 277 failed, 1 skipped)
+- Delta: +17 tests passing (+2.3%)
+- Per-class improvements:
+  - CalcitePPLAggregationIT: 70→76 (+6) — testFirstLastWithTimestamp, testFirstLastWithBirthdate, testFirstLastBirthdateByGender, testFirstLastBirthdateWithOtherFields, testFirstLastTimestampWithValue, testFirstLastTimestampByCategory
+  - CalcitePPLAggregationPaginatingIT: 70→76 (+6) — mirrors AggregationIT
+  - CalcitePPLBasicIT: 31→34 (+3) — timestamp normalization cascaded to date field tests
+  - CalcitePPLEventstatsIT: 17→18 (+1) — timestamp normalization cascaded
+  - CalcitePPLSortIT: 16→17 (+1) — timestamp normalization cascaded
+- No regressions in any other test class.
+- Remaining AggregationIT failures (24/100):
+  - 14 "Failed to plan" (500): span/time grouping, percentile, median — engine limitations
+  - 4 take/array type: take returns array type, SQL returns scalar
+  - 2 SumNull/SumGroupByNullValue: SUM of nulls returns null (SQL) vs 0 (PPL pushdown)
+  - 2 text type with take: array type mismatch
+  - 2 other assertion mismatches
+- Blockers remaining:
+  1. AggregationIT: 24 failures (span/time, percentile, take/array, SumNull)
+  2. GraphLookupIT: 22 failures (unsupported)
+  3. JoinIT: 19 failures (field-list column dedup, alias resolution)
+  4. BuiltinFunctionsNullIT: 18 failures (engine limitations, error handling)
+  5. JsonBuiltinFunctionIT: 17 failures (unsupported)
+  6. PatternsIT: 15 failures (unsupported)
+  7. SpathCommandIT: 14 failures (unsupported)
+  8. RenameIT: 12 failures (wildcard rename)
+  9. CastFunctionIT: 11 failures (Calcite engine limitations)
+  10. BuiltinFunctionIT: 10 failures (TYPEOF/CONV/CRC32, type mismatches)
+  11. EventstatsIT: 9 failures (span in PARTITION BY)
+  12. CaseFunctionIT: 9 failures (IP type schema, pushdown, DATE_TRUNC)
+  13. NestedAggregationIT: 9 failures (nested field semantics)
+  14. BasicIT: 8 failures
+  15. AppendCommandIT: 8 failures (schema merging)
+- Next recommended task: Fix ConditionBuiltinFunctionIT remaining 7 failures. Or fix BasicIT remaining 8 failures. Or implement COALESCE(SUM(...), 0) for SumNull tests (2 AggregationIT + 2 PaginatingIT = 4 tests).
