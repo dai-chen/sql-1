@@ -1313,3 +1313,44 @@
   15. StringBuiltinFunctionIT: 7 failures (REVERSE, regex replace)
   16. CaseFunctionIT: 6 failures (5 IP type schema, 1 engine limitation)
 - Next recommended task: Fix ConditionBuiltinFunctionIT remaining 7 failures. Or implement CONV/CRC32/TYPEOF functions (BuiltinFunctionIT). Or fix remaining BasicIT 8 failures. Or fix CaseFunctionIT IP type schema issue (5 tests — requires engine-level IP type support).
+
+---
+### Iteration 32 — Fix EXTRACT case-sensitivity + eval regex case-sensitivity + TIMESTAMPADD return type
+- Date: 2026-03-09
+- Baseline rate: 64.0% (481/752)
+- Task: Fixed three case-sensitivity bugs and one return type issue in PPLToSqlTranspiler.java.
+- Key fixes:
+  1. EXTRACT handler: Changed `"EXTRACT".equals(name)` to `"extract".equals(name)` — PPL parser produces lowercase function name `extract`, so the uppercase comparison never matched. Generated SQL was `EXTRACT('YEAR', "date")` (wrong) instead of `EXTRACT(YEAR FROM "date")` (correct).
+  2. Eval forward-reference inlining: Removed `(?i)` flag from regex. Case-insensitive matching caused PPL variable names like `timestamp` to match SQL keywords like `TIMESTAMP` in generated SQL, producing garbled output (e.g., `CAST('2025-12-02' AS (CAST('2025-12-01 15:02:61' AS TIMESTAMP)))` instead of `CAST('2025-12-02' AS TIMESTAMP)`).
+  3. Eval self-reference detection: Removed `(?i)` flag from regex. Same root cause — prevented false positive self-reference detection when variable name matched SQL keyword.
+  4. TIMESTAMPADD return type: Wrapped `TIMESTAMPADD(unit, n, field)` with `CAST(... AS TIMESTAMP)`. Calcite TIMESTAMPADD preserves input type (DATE→DATE), but PPL TIMESTAMPADD always returns TIMESTAMP.
+- Files changed:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (MODIFIED - 4 targeted fixes, ~4 lines changed)
+- New rate: 64.4% (484/752 passed, 257 failed, 11 skipped)
+- Delta: +3 tests passing (+0.4%)
+- Per-class improvements:
+  - CalcitePPLBuiltinFunctionsNullIT: 56→59 (+3) — testExtractNull (EXTRACT syntax fix), testUnixTimestampNull (eval case-sensitivity fix), testTimestampaddNull (CAST AS TIMESTAMP fix)
+- No regressions in any other test class.
+- Remaining BuiltinFunctionsNullIT failures (15/71):
+  - 5 "Failed to plan" (engine limitation): testDaynameNull, testMonthnameNull, testWeekDayNull, testStrToDateNull, testConvertTZInvalid
+  - 4 error handling (expect specific exceptions): testDateInvalid, testDayInvalid, testHourInvalid, testTimeInvalid
+  - 3 type mismatches (need type info at transpile time): testAddSubDateNull, testAddtimeNull/testAddTimeNull, testSubtimeNull
+  - 2 garbled SQL from eval case-sensitivity (still affected): testDatetimeInvalid (invalid datetime strings also cause engine failure), testStrTDateInvalid2
+- Blockers remaining:
+  1. AggregationIT: 22 failures (span/time, percentile, take — engine limitations)
+  2. GraphLookupIT: 22 failures (unsupported)
+  3. JoinIT: 19 failures (field-list column dedup, alias resolution)
+  4. JsonBuiltinFunctionIT: 17 failures (unsupported — needs JSON UDFs)
+  5. PatternsIT: 15 failures (unsupported — needs pattern extraction UDF)
+  6. BuiltinFunctionsNullIT: 15 failures (engine limitations, error handling, type mismatches)
+  7. SpathCommandIT: 14 failures (unsupported)
+  8. RenameIT: 12 failures (wildcard rename)
+  9. CastFunctionIT: 11 failures (Calcite engine limitations)
+  10. BuiltinFunctionIT: 10 failures (CONV/CRC32/TYPEOF, type mismatches)
+  11. EventstatsIT: 9 failures (span in PARTITION BY)
+  12. BasicIT: 8 failures (error handling, date format, decimal precision)
+  13. AppendCommandIT: 8 failures (schema merging)
+  14. ConditionBuiltinFunctionIT: 7 failures (earliest/latest, struct/nested types)
+  15. StringBuiltinFunctionIT: 7 failures (REVERSE, regex replace)
+  16. CaseFunctionIT: 6 failures (IP type schema, DATE_TRUNC)
+- Next recommended task: Fix remaining eval case-sensitivity issues (testDatetimeInvalid uses `eval timestamp=..., date=..., time=...` pattern — the forward-reference inlining still replaces `timestamp` inside CAST expressions because the variable appears before `date`/`time` in the eval batch). Or implement CONV/CRC32/TYPEOF UDFs (10 BuiltinFunctionIT tests). Or fix CaseFunctionIT IP type schema issue (5 tests). Or fix JoinIT field-list column deduplication (10+ tests).

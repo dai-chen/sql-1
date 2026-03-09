@@ -758,13 +758,13 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       // Inline references to earlier eval aliases defined in this same batch
       for (Map.Entry<String, String> prev : evalAliases.entrySet()) {
         expr = expr.replaceAll(
-            "(?i)\\b" + java.util.regex.Pattern.quote(prev.getKey()) + "\\b(?!\\s*\\()",
+            "\\b" + java.util.regex.Pattern.quote(prev.getKey()) + "\\b(?!\\s*\\()",
             "(" + prev.getValue() + ")");
       }
       // Detect self-referencing eval (column override) to avoid duplicate column ambiguity
       // Match varName as a bare column reference (not followed by '(' which would be a function call)
       boolean isSelfRef = java.util.regex.Pattern.compile(
-          "(?i)\\b" + java.util.regex.Pattern.quote(varName) + "\\b(?!\\s*\\()")
+          "\\b" + java.util.regex.Pattern.quote(varName) + "\\b(?!\\s*\\()")
           .matcher(expr.replaceAll("'[^']*'", "")).find();
       if (isSelfRef) {
         String tempAlias = "_e" + (evalCounter++);
@@ -1703,7 +1703,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if ("mod".equals(name) || "%".equals(name)) {
       return "CASE WHEN " + args.get(1) + " = 0 THEN NULL ELSE MOD(" + args.get(0) + ", " + args.get(1) + ") END";
     }
-    if ("EXTRACT".equals(name)) {
+    if ("extract".equals(name)) {
       String part = args.get(0).replace("'", "");
       return "EXTRACT(" + part + " FROM " + args.get(1) + ")";
     }
@@ -1747,7 +1747,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     }
     if ("timestampadd".equals(name)) {
       String unit = args.get(0).replace("'", "");
-      return "TIMESTAMPADD(" + unit + ", " + args.get(1) + ", " + args.get(2) + ")";
+      return "CAST(TIMESTAMPADD(" + unit + ", " + args.get(1) + ", " + args.get(2) + ") AS TIMESTAMP)";
     }
     if ("date".equals(name)) return "CAST(" + args.get(0) + " AS DATE)";
     if ("time".equals(name)) return "CAST(" + args.get(0) + " AS TIME)";
