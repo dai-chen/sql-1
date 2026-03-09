@@ -63,6 +63,7 @@ import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.Parse;
+import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Search;
@@ -215,7 +216,9 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     for (UnresolvedPlan node : nodes) {
       if (node instanceof Relation) {
         Relation rel = (Relation) node;
-        sb.from = quoteId(rel.getTableQualifiedName().toString());
+        String tableName = rel.getTableQualifiedName().toString();
+        sb.from = quoteId(tableName);
+        sb.tableAliases.add(tableName);
       } else if (node instanceof Filter) {
         transpiler.processFilter((Filter) node, sb);
       } else if (node instanceof Aggregation) {
@@ -232,9 +235,12 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         transpiler.processRename((Rename) node, sb);
       } else if (node instanceof Dedupe) {
         transpiler.processDedupe((Dedupe) node, sb);
+      } else if (node instanceof RareTopN) {
+        transpiler.processRareTopN((RareTopN) node, sb);
       } else if (node instanceof SubqueryAlias) {
         SubqueryAlias alias = (SubqueryAlias) node;
         sb.from = sb.from + " " + quoteId(alias.getAlias());
+        sb.tableAliases.add(alias.getAlias());
       } else if (node instanceof Join) {
         transpiler.processJoin((Join) node, sb);
       } else if (node instanceof Window) {
@@ -327,7 +333,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       }
       // Fix C: Preserve qualified names (e.g. b.country) in output schema
       // Only for 2-part names like "b.country" (table alias + column), not nested paths
-      if (!selectSql.contains(" AS ") && !selectSql.contains("(")) {
+      if (!selectSql.contains(" AS ") && !selectSql.contains("(") && !selectSql.startsWith("\"")) {
         int dotIdx = selectSql.indexOf('.');
         if (dotIdx > 0 && selectSql.indexOf('.', dotIdx + 1) < 0) {
           // Exactly one dot — likely a table.column reference
@@ -961,6 +967,64 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     }
   }
 
+  private void processRareTopN(RareTopN node, SelectBuilder sb) {
+    // Extract options
+    Argument.ArgumentMap args = Argument.ArgumentMap.of(node.getArguments());
+    String countFieldName = (String) args.get(RareTopN.Option.countField.name()).getValue();
+    boolean showCount = (Boolean) args.get(RareTopN.Option.showCount.name()).getValue();
+    boolean useNull = (Boolean) args.get(RareTopN.Option.useNull.name()).getValue();
+    int k = node.getNoOfResults();
+    boolean isTop = node.getCommandType() == RareTopN.CommandType.TOP;
+
+    List<String> fieldNames = node.getFields().stream()
+        .map(f -> visitExpr(f)).collect(Collectors.toList());
+    List<String> groupNames = node.getGroupExprList().stream()
+        .map(this::visitExpr).collect(Collectors.toList());
+    List<String> allGroupBy = new ArrayList<>(groupNames);
+    allGroupBy.addAll(fieldNames);
+
+    // Step 0: wrap current state
+    sb.wrapAsSubquery();
+
+    // If useNull=false, filter out nulls on the field columns
+    if (!useNull) {
+      List<String> nullChecks = new ArrayList<>();
+      for (String f : allGroupBy) {
+        nullChecks.add(f + " IS NOT NULL");
+      }
+      sb.where = String.join(" AND ", nullChecks);
+    }
+
+    // Step 1: GROUP BY allGroupBy with COUNT(*)
+    sb.wrapAsSubquery();
+    List<String> selectItems = new ArrayList<>(allGroupBy);
+    selectItems.add("COUNT(*) AS " + quoteId(countFieldName));
+    sb.select = selectItems;
+    sb.groupBy = new ArrayList<>(allGroupBy);
+    sb.hasGroupBy = true;
+
+    // Step 2: ROW_NUMBER window
+    sb.wrapAsSubquery();
+    String orderDir = isTop ? "DESC" : "ASC";
+    String partitionClause = groupNames.isEmpty() ? "" : "PARTITION BY " + String.join(", ", groupNames) + " ";
+    sb.select = new ArrayList<>();
+    sb.select.add("*");
+    sb.select.add("ROW_NUMBER() OVER (" + partitionClause + "ORDER BY " + quoteId(countFieldName) + " " + orderDir + ") AS _rn");
+
+    // Step 3: filter _rn <= k
+    sb.wrapAsSubquery();
+    sb.where = "_rn <= " + k;
+
+    // Step 4: project final columns (strip _rn, optionally strip count)
+    sb.wrapAsSubquery();
+    List<String> finalCols = new ArrayList<>(fieldNames);
+    finalCols.addAll(0, groupNames);
+    if (showCount) {
+      finalCols.add(quoteId(countFieldName));
+    }
+    sb.select = finalCols;
+  }
+
   // --- Join support ---
 
   private void processJoin(Join node, SelectBuilder sb) {
@@ -997,6 +1061,10 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       leftAlias = "_l";
       rightAlias = "_r";
     }
+
+    // Track join aliases so visitQualifiedName can distinguish alias.col from nested fields
+    if (leftAlias != null) sb.tableAliases.add(leftAlias);
+    if (rightAlias != null) sb.tableAliases.add(rightAlias);
 
     // Map join type to SQL keyword
     Join.JoinType jt = node.getJoinType();
@@ -1137,6 +1205,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     String leftSql = sb.build();
     String leftAlias = "_l";
     String rightAlias = "_r";
+    sb.tableAliases.add(leftAlias);
+    sb.tableAliases.add(rightAlias);
 
     Relation lookupRel = extractRelation(node.getLookupRelation());
     String lookupTable = lookupRel != null
@@ -1246,10 +1316,16 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     flatten(plan, nodes);
     PPLToSqlTranspiler transpiler = new PPLToSqlTranspiler();
     SelectBuilder sb = new SelectBuilder();
+    // Propagate outer table aliases for correlated subquery references
+    if (currentSb != null) {
+      sb.tableAliases.addAll(currentSb.tableAliases);
+    }
     transpiler.currentSb = sb;
     for (UnresolvedPlan node : nodes) {
       if (node instanceof Relation) {
-        sb.from = quoteId(((Relation) node).getTableQualifiedName().toString());
+        String tableName = ((Relation) node).getTableQualifiedName().toString();
+        sb.from = quoteId(tableName);
+        sb.tableAliases.add(tableName);
       } else if (node instanceof Filter) {
         transpiler.processFilter((Filter) node, sb);
       } else if (node instanceof Aggregation) {
@@ -1266,8 +1342,12 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         transpiler.processRename((Rename) node, sb);
       } else if (node instanceof Dedupe) {
         transpiler.processDedupe((Dedupe) node, sb);
+      } else if (node instanceof RareTopN) {
+        transpiler.processRareTopN((RareTopN) node, sb);
       } else if (node instanceof SubqueryAlias) {
-        sb.from = sb.from + " " + quoteId(((SubqueryAlias) node).getAlias());
+        String subAlias = ((SubqueryAlias) node).getAlias();
+        sb.from = sb.from + " " + quoteId(subAlias);
+        sb.tableAliases.add(subAlias);
       } else if (node instanceof Join) {
         transpiler.processJoin((Join) node, sb);
       } else if (node instanceof Window) {
@@ -1442,17 +1522,23 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
 
   @Override
   public String visitQualifiedName(QualifiedName node, Void ctx) {
+    List<String> parts = node.getParts();
     // Resolve deferred parse columns for single-part names
-    if (currentSb != null && node.getParts().size() == 1) {
-      String name = node.getParts().get(0);
+    if (currentSb != null && parts.size() == 1) {
+      String name = parts.get(0);
       String computed = currentSb.deferredColumns.get(name);
       if (computed != null) {
         return computed;
       }
     }
-    return node.getParts().stream()
-        .map(PPLToSqlTranspiler::quoteId)
-        .collect(Collectors.joining("."));
+    // Multi-part names: check if first part is a known table alias (table.column reference)
+    if (parts.size() >= 2 && currentSb != null && currentSb.tableAliases.contains(parts.get(0))) {
+      return parts.stream()
+          .map(PPLToSqlTranspiler::quoteId)
+          .collect(Collectors.joining("."));
+    }
+    // Otherwise, treat as a single OpenSearch flattened field name
+    return quoteId(String.join(".", parts));
   }
 
   @Override
@@ -2019,6 +2105,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     /** Pending renames: oldName -> newName. Used to exclude original columns from results. */
     java.util.LinkedHashMap<String, String> renames = new java.util.LinkedHashMap<>();
     boolean inJoin;
+    java.util.Set<String> tableAliases = new java.util.HashSet<>();
 
     SelectBuilder() {
       select.add("*");
@@ -2040,6 +2127,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       computedColumns = new HashMap<>();
       deferredColumns = new HashMap<>();
       renames = new java.util.LinkedHashMap<>();
+      inJoin = false;
+      tableAliases = new java.util.HashSet<>();
     }
 
     String build() {

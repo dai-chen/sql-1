@@ -1148,3 +1148,45 @@
   13. NestedAggregationIT: 9 failures (dot-notation nested fields, RareTopN)
   14. CaseFunctionIT: 9 failures (IP type schema, pushdown, DATE_TRUNC, CountBin)
 - Next recommended task: Fix dot-notation nested field quoting in visitQualifiedName (6 NestedAggregationIT tests) — quote multi-part names as single identifier "address.area" instead of address.area. Or implement RareTopN command (top/rare). Or fix eval forward-reference inlining for EnhancedCoalesceIT (1 test).
+
+---
+### Iteration 28 — Implement RareTopN command + fix dot-notation nested field quoting
+- Date: 2026-03-09
+- Baseline rate: 60.5% (455/752 CalcitePPL*IT) / 41.0% (925/2256 all Calcite*IT)
+- Task: Two changes: (1) Implement processRareTopN() for PPL `top` and `rare` commands using GROUP BY + ROW_NUMBER window + filter pattern. (2) Fix visitQualifiedName to quote multi-part OpenSearch field names as single identifiers ("address.area") while preserving join alias references (b.country) via tableAliases tracking in SelectBuilder.
+- Key fixes:
+  1. processRareTopN: GROUP BY (groupExprList + fields) with COUNT(*), ROW_NUMBER() OVER (PARTITION BY groupExprList ORDER BY count DESC for TOP / ASC for RARE), filter WHERE _rn <= noOfResults, project final columns with optional count column (showCount). Handles useNull option (skip WHERE IS NOT NULL filter).
+  2. visitQualifiedName dot-notation fix: Track table aliases in SelectBuilder.tableAliases (populated from Relation, SubqueryAlias, processJoin, processLookup). Multi-part names where first part is a known alias → keep as table.column. Otherwise → quote as single identifier "field.subfield".
+  3. Propagate tableAliases to subqueries via transpileSubPlan() for correlated subquery support.
+  4. processAggregation Fix C guard: Skip "add AS for table.column" logic for already-quoted identifiers (startsWith("\"")).
+- Files changed:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (MODIFIED - processRareTopN ~45 lines, visitQualifiedName rewrite, SelectBuilder.tableAliases, alias tracking in 7 locations)
+- New rate: 60.5% (455/752 CalcitePPL*IT) / 41.7% (941/2256 all Calcite*IT)
+- Delta: +1 PPL test, +16 total tests (+0.7% full scope)
+- Per-class improvements:
+  - CalciteTopCommandIT: 0→5 (+5) — top without group, top N, top N with group, useNull, useNullFalse
+  - CalciteRareCommandIT: 0→3 (+3) — rare without group, useNull, useNullFalse
+  - CalcitePPLAggregationIT: 66→69 (+3) — dot-notation fix enabled nested field aggregation tests
+  - CalcitePPLAggregationPaginatingIT: 66→69 (+3) — mirrors AggregationIT
+  - CalcitePPLExistsSubqueryIT: 15→16 (+1) — dot-notation fix helped correlated subquery
+  - +1 from other non-PPL classes (likely StatsCommandIT or WhereCommandIT)
+- Remaining RareTopN failures (3/12):
+  - 2 legacyFalse: DEFAULT_SETTINGS doesn't include PPL_SYNTAX_LEGACY_PREFERRED, so useNull defaults incorrectly
+  - 1 testRareWithGroup: Non-deterministic tie-breaking in rare results
+- No regressions in any test class.
+- Blockers remaining:
+  1. BuiltinFunctionsNullIT: 17 failures (engine limitations, error handling)
+  2. AggregationIT: 31 failures (span/time, percentile, first/last edge cases)
+  3. GraphLookupIT: 22 failures (unsupported)
+  4. JoinIT: 19 failures (field-list column dedup, alias resolution)
+  5. JsonBuiltinFunctionIT: 17 failures (unsupported)
+  6. PatternsIT: 15 failures (unsupported)
+  7. SpathCommandIT: 14 failures (unsupported)
+  8. BasicIT: 12 failures
+  9. RenameIT: 12 failures (wildcard rename)
+  10. CastFunctionIT: 11 failures (Calcite engine limitations)
+  11. EventstatsIT: 10 failures (span in PARTITION BY)
+  12. BuiltinFunctionIT: 10 failures
+  13. CaseFunctionIT: 9 failures (IP type schema, pushdown, DATE_TRUNC)
+  14. NestedAggregationIT: 9 failures (nested field unnesting requires pushdown)
+- Next recommended task: Fix PPL string `+` operator → SQL `||` concatenation (4 CalciteEvalCommandIT tests). Or fix ConditionBuiltinFunctionIT remaining failures. Or fix EnhancedCoalesceIT remaining 5 failures.
