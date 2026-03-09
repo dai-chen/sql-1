@@ -14,6 +14,8 @@ import java.sql.ResultSetMetaData;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -124,6 +126,7 @@ public class RestUnifiedSQLQueryAction {
       }
 
       RelNode plan = planner.plan(query);
+      List<String> udtTypes = extractUdtTypes(plan);
       try (PreparedStatement statement = compiler.compile(plan)) {
         ResultSet rs;
         try {
@@ -134,12 +137,26 @@ public class RestUnifiedSQLQueryAction {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
           throw new IllegalStateException("Failed to compile logical plan", cause);
         }
-        return formatAsJdbc(rs);
+        return formatAsJdbc(rs, udtTypes);
       }
     }
   }
 
-  private String formatAsJdbc(ResultSet rs) throws Exception {
+  private static List<String> extractUdtTypes(RelNode plan) {
+    List<String> types = new ArrayList<>();
+    for (RelDataTypeField field : plan.getRowType().getFieldList()) {
+      RelDataType t = field.getType();
+      String typeName = t.toString();
+      if (typeName.contains("EXPR_IP")) {
+        types.add("ip");
+      } else {
+        types.add(null);
+      }
+    }
+    return types;
+  }
+
+  private String formatAsJdbc(ResultSet rs, List<String> udtTypes) throws Exception {
     ResultSetMetaData meta = rs.getMetaData();
     int columnCount = meta.getColumnCount();
 
@@ -147,10 +164,11 @@ public class RestUnifiedSQLQueryAction {
     json.append("{\"schema\":[");
     for (int i = 1; i <= columnCount; i++) {
       if (i > 1) json.append(",");
+      String udtOverride = (i - 1 < udtTypes.size()) ? udtTypes.get(i - 1) : null;
       json.append("{\"name\":\"")
           .append(escape(meta.getColumnLabel(i)))
           .append("\",\"type\":\"")
-          .append(jdbcTypeToString(meta.getColumnType(i)))
+          .append(udtOverride != null ? udtOverride : jdbcTypeToString(meta.getColumnType(i), meta.getColumnTypeName(i)))
           .append("\"}");
     }
     json.append("],");
@@ -200,7 +218,8 @@ public class RestUnifiedSQLQueryAction {
     return s.replace("\\", "\\\\").replace("\"", "\\\"");
   }
 
-  private static String jdbcTypeToString(int type) {
+  private static String jdbcTypeToString(int type, String typeName) {
+    if (typeName != null && typeName.contains("EXPR_IP")) return "ip";
     return switch (type) {
       case java.sql.Types.VARCHAR, java.sql.Types.CHAR, java.sql.Types.LONGVARCHAR -> "keyword";
       case java.sql.Types.INTEGER -> "integer";

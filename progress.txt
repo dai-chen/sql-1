@@ -1473,3 +1473,39 @@
   14. StringBuiltinFunctionIT: 7 failures (REVERSE, regex replace)
   15. CaseFunctionIT: 6 failures (IP type schema, engine limitations)
 - Next recommended task: Fix JoinIT alias resolution (4 tests) — when left=t1 right=t2 overrides AS alias, the transpiler should use t1/t2 as SQL aliases and make the AS alias accessible for field references. Or fix cross-table field-list join column dedup (7 tests) — requires schema info or a different SQL pattern. Or implement CONV/CRC32/TYPEOF UDFs (BuiltinFunctionIT). Or fix remaining ConditionBuiltinFunctionIT failures.
+
+---
+### Iteration 36 — Fix IP type schema in JDBC response (EXPR_IP UDT → "ip" type)
+- Date: 2026-03-09
+- Baseline rate: 65.8% (495/752)
+- Task: Fixed IP type fields being reported as "keyword"/"string" in SQL endpoint JDBC responses. The Calcite schema maps IP fields to EXPR_IP UDT (SqlTypeName.OTHER), which the JDBC metadata layer returned as type code 1111 ("other"). Added UDT type extraction from the RelNode plan's row type to detect EXPR_IP fields and override the JDBC type to "ip".
+- Key fixes:
+  1. extractUdtTypes(): New method that inspects plan.getRowType() field list. For each field, checks if the RelDataType toString contains "EXPR_IP" and returns "ip" override. Returns null for non-UDT fields.
+  2. formatAsJdbc(): Now accepts List<String> udtTypes parameter. For each column, uses the UDT override if present, otherwise falls back to jdbcTypeToString().
+  3. jdbcTypeToString(): Signature changed to accept (int type, String typeName) for future UDT detection via JDBC metadata (currently unused since Calcite returns "other" for all UDTs).
+  4. This fix is in the SQL endpoint response formatting layer, not the transpiler — it affects how the Calcite engine reports column types for all SQL queries, not just V4 transpiled ones.
+- Files changed:
+  - legacy/src/main/java/org/opensearch/sql/legacy/plugin/RestUnifiedSQLQueryAction.java (MODIFIED - extractUdtTypes, formatAsJdbc udtTypes param, imports for RelDataType/RelDataTypeField)
+- New rate: 66.5% (500/752 passed, 241 failed, 11 skipped)
+- Delta: +5 tests passing (+0.7%)
+- Per-class improvements:
+  - CalcitePPLCaseFunctionIT: 2→7 (+5) — testCaseWhenWithCast, testCaseWhenNoElse, testCaseWhenWithIn, testCaseWhenInFilter, testCaseWhenInSubquery (all weblogs tests with IP host field)
+- No regressions in any other test class.
+- Remaining CaseFunctionIT failures (1/9):
+  - 1 testCaseCanBePushedDownAsCompositeRangeQuery: "Failed to plan query" engine limitation (composite range aggregation with case() in GROUP BY)
+- Blockers remaining:
+  1. AggregationIT: 22 failures (span/time, percentile, take — engine limitations)
+  2. GraphLookupIT: 22 failures (unsupported)
+  3. JoinIT: 18 failures (field-list column dedup, alias resolution)
+  4. JsonBuiltinFunctionIT: 17 failures (unsupported — needs JSON UDFs)
+  5. PatternsIT: 15 failures (unsupported — GROK/PATTERNS)
+  6. BuiltinFunctionsNullIT: 15 failures (engine limitations, error handling)
+  7. SpathCommandIT: 14 failures (unsupported)
+  8. RenameIT: 12 failures (wildcard rename)
+  9. CastFunctionIT: 11 failures (Calcite engine limitations)
+  10. BuiltinFunctionIT: 9 failures (CONV/CRC32/TYPEOF, MOD type)
+  11. BasicIT: 8 failures (error handling, date format, decimal precision)
+  12. AppendCommandIT: 8 failures (schema merging)
+  13. ConditionBuiltinFunctionIT: 7 failures (earliest/latest, struct/nested types)
+  14. StringBuiltinFunctionIT: 7 failures (REVERSE, regex replace)
+- Next recommended task: Fix ConditionBuiltinFunctionIT earliest/latest as filter functions (2 tests). Or implement CONV/CRC32/TYPEOF UDFs (BuiltinFunctionIT). Or fix JoinIT alias resolution (4 tests). Or fix remaining BasicIT 8 failures.
