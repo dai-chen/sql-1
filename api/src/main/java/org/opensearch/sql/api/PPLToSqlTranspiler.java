@@ -281,7 +281,13 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     boolean hasComputedColumns = sb.select.size() > 1
         || (sb.select.size() == 1 && !"*".equals(sb.select.get(0)));
     if (sb.hasGroupBy || hasComputedColumns) {
+      Map<String, String> savedComputed = new HashMap<>(sb.computedColumns);
       sb.wrapAsSubquery();
+      sb.computedColumns.putAll(savedComputed);
+    }
+    // Resolve computedColumn references in the condition
+    for (Map.Entry<String, String> entry : sb.computedColumns.entrySet()) {
+      cond = cond.replaceAll("(?i)\\b" + java.util.regex.Pattern.quote(entry.getKey()) + "\\b", entry.getValue());
     }
     if (sb.where == null) {
       sb.where = cond;
@@ -740,7 +746,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       // Match varName as a bare column reference (not followed by '(' which would be a function call)
       boolean isSelfRef = java.util.regex.Pattern.compile(
           "(?i)\\b" + java.util.regex.Pattern.quote(varName) + "\\b(?!\\s*\\()")
-          .matcher(expr).find();
+          .matcher(expr.replaceAll("'[^']*'", "")).find();
       if (isSelfRef) {
         String tempAlias = "_e" + (evalCounter++);
         items.add(expr + " AS " + quoteId(tempAlias));
@@ -1978,7 +1984,20 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
           "RESULT", "RETURN", "RETURNS", "SIGNAL", "CONDITION", "DECLARE",
           "AVG", "MIN", "MAX", "SUM", "COUNT", "ABS", "MOD", "UPPER", "LOWER",
           "LENGTH", "REPLACE", "ROUND", "FLOOR", "CEIL", "CEILING", "POWER",
-          "SQRT", "LOG", "LN", "EXP", "SIGN", "TRUNCATE", "EXTRACT", "UNKNOWN");
+          "SQRT", "LOG", "LN", "EXP", "SIGN", "TRUNCATE", "EXTRACT", "UNKNOWN",
+          "METHOD", "SCOPE", "CATALOG", "SCHEMA", "DOMAIN", "ROLE", "AUTHORIZATION",
+          "PRIVILEGES", "GRANT", "REVOKE", "COMMIT", "ROLLBACK", "TRANSACTION",
+          "START", "WORK", "SAVEPOINT", "RELEASE", "PREPARE", "EXECUTE",
+          "DESCRIBE", "OPEN", "CLOSE", "DEALLOCATE", "LANGUAGE", "EXTERNAL",
+          "SPECIFIC", "PARAMETER", "FUNCTION", "PROCEDURE", "CALL", "TRIGGER",
+          "EACH", "BEFORE", "AFTER", "FOR", "WHILE", "DO", "LOOP", "REPEAT",
+          "UNTIL", "ELSEIF", "CONTINUE", "EXIT", "HANDLER", "FOUND",
+          "SENSITIVE", "INSENSITIVE", "ASENSITIVE", "SCROLL", "NO", "HOLD",
+          "RELATIVE", "ABSOLUTE", "PRIOR", "INPUT", "OUTPUT", "INOUT",
+          "DYNAMIC", "STATIC", "DEPTH", "BREADTH", "SEARCH", "CYCLE",
+          "NORMALIZE", "CLASSIFIER", "MEASURES", "PERMUTE", "RUNNING",
+          "PREV", "DEFINE", "MATCH_RECOGNIZE", "PATTERN", "SUBSET",
+          "INITIAL", "SEEK", "SKIP", "EMPTY", "GROUPS", "BEGIN");
 
   private static String nextAlias() {
     return "_t" + (++subqueryCounter);

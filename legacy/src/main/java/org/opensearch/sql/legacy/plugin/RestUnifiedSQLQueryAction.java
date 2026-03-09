@@ -208,7 +208,7 @@ public class RestUnifiedSQLQueryAction {
       case java.sql.Types.SMALLINT -> "short";
       case java.sql.Types.TINYINT -> "byte";
       case java.sql.Types.FLOAT, java.sql.Types.REAL -> "float";
-      case java.sql.Types.DOUBLE -> "double";
+      case java.sql.Types.DOUBLE, java.sql.Types.DECIMAL, java.sql.Types.NUMERIC -> "double";
       case java.sql.Types.BOOLEAN -> "boolean";
       case java.sql.Types.DATE -> "date";
       case java.sql.Types.TIME -> "time";

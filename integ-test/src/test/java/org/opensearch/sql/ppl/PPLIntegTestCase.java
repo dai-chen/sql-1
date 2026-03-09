@@ -355,7 +355,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     for (int idx : keepIndices) {
       org.json.JSONObject col = schema.getJSONObject(idx);
       String type = col.getString("type");
-      String pplType = SQL_TO_PPL_TYPES.getOrDefault(type, type);
+      String pplType = SQL_TO_PPL_TYPES.getOrDefault(type.toLowerCase(), type.toLowerCase());
       col.put("type", pplType);
       newSchema.put(col);
     }
