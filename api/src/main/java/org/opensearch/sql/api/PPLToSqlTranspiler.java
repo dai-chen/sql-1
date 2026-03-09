@@ -627,6 +627,11 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
           }
           return excludedNames.contains(name);
         });
+      } else {
+        String exceptCols = excludedNames.stream()
+            .map(n -> "\"" + n.replace("\"", "\"\"") + "\"")
+            .collect(Collectors.joining(", "));
+        sb.select.set(0, "* EXCEPT(" + exceptCols + ")");
       }
       return;
     }
@@ -745,9 +750,17 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     sb.wrapAsSubquery();
     List<String> items = new ArrayList<>();
     items.add("*");
+    // Track eval aliases defined in this batch for forward-reference inlining
+    java.util.LinkedHashMap<String, String> evalAliases = new java.util.LinkedHashMap<>();
     for (Let let : node.getExpressionList()) {
       String varName = let.getVar().getField().toString();
       String expr = visitExpr(let.getExpression());
+      // Inline references to earlier eval aliases defined in this same batch
+      for (Map.Entry<String, String> prev : evalAliases.entrySet()) {
+        expr = expr.replaceAll(
+            "(?i)\\b" + java.util.regex.Pattern.quote(prev.getKey()) + "\\b(?!\\s*\\()",
+            "(" + prev.getValue() + ")");
+      }
       // Detect self-referencing eval (column override) to avoid duplicate column ambiguity
       // Match varName as a bare column reference (not followed by '(' which would be a function call)
       boolean isSelfRef = java.util.regex.Pattern.compile(
@@ -757,8 +770,10 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         String tempAlias = "_e" + (evalCounter++);
         items.add(expr + " AS " + quoteId(tempAlias));
         sb.computedColumns.put(varName, quoteId(tempAlias));
+        evalAliases.put(varName, expr);
       } else {
         items.add(expr + " AS " + quoteId(varName));
+        evalAliases.put(varName, expr);
       }
     }
     sb.select = items;
