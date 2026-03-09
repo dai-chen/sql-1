@@ -27,7 +27,6 @@ import org.apache.calcite.sql.SqlBasicFunction;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.fun.SqlLibrary;
 import org.apache.calcite.sql.fun.SqlLibraryOperatorTableFactory;
-import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.type.OperandTypes;
@@ -260,8 +259,7 @@ public class UnifiedQueryContext implements AutoCloseable {
                       SqlLibrary.SPARK,
                       SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
-                      pplFirst, pplLast,
-                      PPLBuiltinOperators.SHA2)))
+                      pplFirst, pplLast)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .build();

@@ -80,6 +80,9 @@ public class AnsiSQLOpenSearchTable extends AbstractTable implements Translatabl
                 : legacyName.equals("date") ? SqlTypeName.DATE : SqlTypeName.TIME;
         return typeFactory.createSqlType(sqlType, true);
       }
+      if (legacyName.equals("binary")) {
+        return typeFactory.createSqlType(SqlTypeName.VARBINARY, true);
+      }
       return OpenSearchTypeFactory.convertExprTypeToRelDataType(fieldType);
     }
   }

@@ -16,7 +16,7 @@ transpiled to SQL and sent to the Calcite SQL endpoint instead of the PPL endpoi
 
 ## Test Surface
 
-The complete test scope is ALL `Calcite*IT` classes (112 classes in `integ-test/.../remote/`).
+The complete test scope is ALL `Calcite*IT` classes (113 classes in `integ-test/.../remote/`).
 
 | Category | Classes (examples) | Priority |
 |----------|---------|----------|
@@ -127,7 +127,7 @@ Goal: increase Calcite*IT pass rate to ≥85% for the PPL V4 transpiler branch.
 IMPORTANT: The SQL engine has been enhanced with a simplified OpenSearch schema (standard SQL types, no UDT) and SELECT * EXCEPT/REPLACE support. Read the "Base Engine Capabilities" section in the ralph-loop-prompt doc before implementing. Use EXCEPT/REPLACE instead of workarounds. Date/time functions should work on date fields now.
 
 Rules:
-1. **Measure baseline EFFICIENTLY.** Running `scripts/ppl_it_rate.sh` takes a LONG time (runs all 112 Calcite*IT classes). Follow these rules:
+1. **Measure baseline EFFICIENTLY.** Running `scripts/ppl_it_rate.sh` takes a LONG time (runs all 113 Calcite*IT classes). Follow these rules:
    - Run the full suite AT MOST ONCE per iteration — at the END, after implementation is done.
    - For targeted validation DURING development, run only the specific class(es) you're working on:
      `./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.Calcite<ClassName>IT" -Dppl.engine.v4=true -Dtests.calcite.pushdown.enabled=false --continue`
@@ -158,7 +158,7 @@ Rules:
    - Blockers: <any issues hit>
    - Next recommended task: <what to do next iteration>
    ```
-6. Commit the iteration: `git add -A && git commit -m "V4 Iteration N: <task name> — rate X% → Y%"` using the actual values from the progress entry you just wrote. Local commit only, do not push.
+6. Commit and push the iteration: `git add -A && git commit -m "V4 Iteration N: <task name> — rate X% → Y%" && git push` using the actual values from the progress entry you just wrote.
 7. If the rate does NOT improve, explain why and propose the next better slice. Do not retry the same approach — pivot.
 8. Do NOT broaden scope. Do NOT attempt multiple commands in one iteration. One bounded task per loop.
 
@@ -170,6 +170,13 @@ Now: read the files, determine baseline, pick one task, implement it, measure, l
 ## Base Engine Capabilities (enhanced after Iteration 23, outside the Ralph loop)
 
 After Iteration 23, the Calcite SQL engine behind `/_plugins/_sql` was enhanced in a separate side project (`poc/extend-calcite-sql-select` branch, now rebased under this branch). **This work is already done — do NOT attempt to modify the engine. The Ralph loop's job is purely transpiler translation work.** Just use these new capabilities when generating SQL:
+
+### SQL Library Functions (registered after Iteration 36)
+- `SqlLibrary.MYSQL`, `SqlLibrary.BIG_QUERY`, `SqlLibrary.SPARK`, `SqlLibrary.POSTGRESQL` are all registered via `SqlLibraryOperatorTableFactory` in `UnifiedQueryContext.java`
+- This means hundreds of functions are available without individual registration, including: `REVERSE`, `REGEXP_REPLACE`, `LEFT`, `RIGHT`, `SOUNDEX`, `FORMAT`, `INITCAP`, `MD5`, `SHA1`, `SHA2`, `REGEXP_CONTAINS`, `REGEXP_EXTRACT`, `ARRAY_AGG`, `STRING_AGG`, `IF`, `NVL`, `LPAD`, `RPAD`, and many more
+- Individual registrations of `MD5`/`SHA1`/`REGEXP_CONTAINS`/`REGEXP_EXTRACT` (from Iteration 27) are now redundant — covered by dialect
+- Custom PPL functions (`pplFirst`, `pplLast`, `matchPhrase`) are still individually registered since they're not in any Calcite library
+- **Impact on transpiler**: functions like `REVERSE`, `REGEXP_REPLACE` that were previously failing at the engine level ("No match found for function signature") should now work. The transpiler just needs to emit the correct SQL function name.
 
 ### Simplified OpenSearch Schema (no UDT)
 - OpenSearch date/time fields are now mapped to **standard SQL TIMESTAMP/DATE/TIME** — NOT UDT EXPR_TIMESTAMP/EXPR_DATE/EXPR_TIME

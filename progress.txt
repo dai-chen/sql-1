@@ -4,10 +4,135 @@
 # Previous progress archived to: progress-archived-2026-03-09.txt
 
 ## Current State
-- Current rate: TBD (run scripts/ppl_it_rate.sh to measure baseline with complete scope)
+- Current rate: 46.1% (1044/2264, 144 skipped)
 - V4 transpiler: IMPLEMENTED (api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java)
 - Test wiring: IMPLEMENTED (PPLIntegTestCase.java V4 routing via -Dppl.engine.v4=true)
 
 ## Iteration Log
 
-(Fresh start — previous iterations archived)
+### Iteration 1 — Fix EXPR_BINARY UDT crash on SELECT * expansion
+- Date: 2026-03-09
+- Baseline rate: 42.0% (950/2264)
+- Task: Convert OpenSearch binary fields to standard SQL VARBINARY type in AnsiSQLOpenSearchTable.convertToStandardType(), following the same pattern used for DATE/TIME/TIMESTAMP. This prevents Calcite's SQL validator from crashing when SELECT * expands columns on indexes containing binary_value fields (EXPR_BINARY UDT).
+- Files changed: opensearch/src/main/java/org/opensearch/sql/opensearch/storage/AnsiSQLOpenSearchTable.java (+3 lines)
+- New rate: 46.1% (1044/2264)
+- Tests fixed: +94 (mostly CalciteDateTimeComparisonIT: 0→95 passing)
+- Root cause: EXPR_BINARY UDT type caused UnsupportedOperationException in Calcite's SqlTypeUtil.addCharsetAndCollation during SELECT * expansion. The fix maps binary fields to SqlTypeName.VARBINARY (standard SQL type) in the schema layer, same as DATE/TIME/TIMESTAMP are already mapped.
+- Per-class breakdown (full suite run):
+
+| Class | Total | Passed | Failed | Skipped |
+|-------|-------|--------|--------|---------|
+| CalciteDateTimeComparisonIT | 191 | 95 | 96 | 0 |
+| CalciteDateTimeFunctionIT | 65 | 3 | 60 | 2 |
+| CalciteArrayFunctionIT | 60 | 0 | 60 | 0 |
+| CalciteStreamstatsCommandIT | 46 | 0 | 46 | 0 |
+| CalciteSearchCommandIT | 52 | 5 | 46 | 1 |
+| CalciteBinCommandIT | 70 | 0 | 43 | 27 |
+| CalciteMultiValueStatsIT | 31 | 0 | 31 | 0 |
+| CalcitePPLGraphLookupIT | 22 | 0 | 22 | 0 |
+| CalcitePPLAggregationPaginatingIT | 100 | 78 | 22 | 0 |
+| CalcitePPLAggregationIT | 100 | 78 | 22 | 0 |
+| CalciteStatsCommandIT | 63 | 42 | 21 | 0 |
+| CalciteReplaceCommandIT | 21 | 0 | 21 | 0 |
+| CalciteFieldsCommandIT | 39 | 18 | 21 | 0 |
+| CalciteNoMvCommandIT | 20 | 1 | 19 | 0 |
+| CalciteTimechartCommandIT | 18 | 0 | 18 | 0 |
+| CalciteRexCommandIT | 18 | 0 | 18 | 0 |
+| CalcitePPLJoinIT | 39 | 21 | 18 | 0 |
+| CalcitePPLJsonBuiltinFunctionIT | 18 | 1 | 17 | 0 |
+| CalciteMultisearchCommandIT | 17 | 0 | 17 | 0 |
+| CalciteNewAddedCommandsIT | 22 | 6 | 16 | 0 |
+| CalciteMvExpandCommandIT | 16 | 0 | 16 | 0 |
+| CalcitePPLPatternsIT | 15 | 0 | 15 | 0 |
+| CalciteMVAppendFunctionIT | 15 | 0 | 15 | 0 |
+| CalciteChartCommandIT | 15 | 0 | 15 | 0 |
+| CalciteSortCommandIT | 30 | 16 | 14 | 0 |
+| CalciteRelevanceFunctionIT | 15 | 0 | 14 | 1 |
+| CalcitePPLSpathCommandIT | 14 | 0 | 14 | 0 |
+| CalcitePPLBuiltinFunctionsNullIT | 71 | 58 | 13 | 0 |
+| CalciteDateTimeImplementationIT | 17 | 4 | 13 | 0 |
+| CalciteTimechartPerFunctionIT | 12 | 0 | 12 | 0 |
+| CalcitePPLRenameIT | 22 | 10 | 12 | 0 |
+| CalciteNowLikeFunctionIT | 12 | 0 | 12 | 0 |
+| CalciteConvertTZFunctionIT | 14 | 2 | 12 | 0 |
+| CalcitePPLCastFunctionIT | 21 | 10 | 11 | 0 |
+| CalciteAddTotalsCommandIT | 11 | 0 | 11 | 0 |
+| CalciteMathematicalFunctionIT | 62 | 52 | 10 | 0 |
+| CalciteFillNullCommandIT | 13 | 3 | 10 | 0 |
+| CalciteAliasFieldAggregationIT | 9 | 0 | 9 | 0 |
+| CalcitePPLBuiltinFunctionIT | 26 | 18 | 8 | 0 |
+| CalcitePPLBasicIT | 42 | 34 | 8 | 0 |
+| CalcitePPLAppendCommandIT | 8 | 0 | 8 | 0 |
+| CalciteMatchPhrasePrefixIT | 8 | 0 | 8 | 0 |
+| CalciteGeoPointFormatsIT | 9 | 1 | 8 | 0 |
+| CalciteReverseCommandIT | 7 | 0 | 7 | 0 |
+| CalcitePPLConditionBuiltinFunctionIT | 22 | 15 | 7 | 0 |
+| CalciteTextFunctionIT | 24 | 18 | 6 | 0 |
+| CalciteQueryStringIT | 6 | 0 | 6 | 0 |
+| CalcitePPLStringBuiltinFunctionIT | 27 | 21 | 6 | 0 |
+| CalciteMvCombineCommandIT | 7 | 1 | 6 | 0 |
+| CalciteIPComparisonIT | 6 | 0 | 6 | 0 |
+| CalciteGeoIpFunctionsIT | 7 | 1 | 6 | 0 |
+| CalciteAddColTotalsCommandIT | 6 | 0 | 6 | 0 |
+| CalciteTrendlineCommandIT | 5 | 0 | 5 | 0 |
+| CalciteSimpleQueryStringIT | 5 | 0 | 5 | 0 |
+| CalciteRegexCommandIT | 5 | 0 | 5 | 0 |
+| CalciteQueryAnalysisIT | 14 | 9 | 5 | 0 |
+| CalciteMultiMatchIT | 5 | 0 | 5 | 0 |
+| CalciteLikeQueryIT | 11 | 5 | 5 | 1 |
+| CalciteFieldFormatCommandIT | 5 | 0 | 5 | 0 |
+| CalciteExpandCommandIT | 6 | 0 | 5 | 1 |
+| CalciteWhereCommandIT | 37 | 30 | 4 | 3 |
+| CalciteTransposeCommandIT | 4 | 0 | 4 | 0 |
+| CalcitePPLLookupIT | 17 | 13 | 4 | 0 |
+| CalcitePPLEnhancedCoalesceIT | 15 | 11 | 4 | 0 |
+| CalciteParseCommandIT | 7 | 3 | 4 | 0 |
+| CalciteFlattenCommandIT | 5 | 0 | 4 | 1 |
+| CalciteEvalCommandIT | 4 | 0 | 4 | 0 |
+| CalcitePPLInSubqueryIT | 18 | 14 | 3 | 1 |
+| CalcitePPLGrokIT | 3 | 0 | 3 | 0 |
+| CalcitePPLExistsSubqueryIT | 19 | 16 | 3 | 0 |
+| CalcitePPLEvalMaxMinFunctionIT | 8 | 5 | 3 | 0 |
+| CalcitePPLAppendPipeCommandIT | 4 | 1 | 3 | 0 |
+| CalciteMatchBoolPrefixIT | 3 | 0 | 3 | 0 |
+| CalciteDescribeCommandIT | 3 | 0 | 3 | 0 |
+| CalciteDataTypeIT | 6 | 3 | 3 | 0 |
+| CalciteSystemFunctionIT | 2 | 0 | 2 | 0 |
+| CalciteSettingsIT | 2 | 0 | 2 | 0 |
+| CalcitePPLPluginIT | 5 | 3 | 2 | 0 |
+| CalcitePPLEventstatsIT | 27 | 25 | 2 | 0 |
+| CalcitePPLCryptographicFunctionIT | 4 | 2 | 2 | 0 |
+| CalcitePPLAppendcolIT | 2 | 0 | 2 | 0 |
+| CalciteFlattenDocValueIT | 2 | 0 | 2 | 0 |
+| CalciteTopCommandIT | 6 | 5 | 1 | 0 |
+| CalciteRareCommandIT | 5 | 4 | 1 | 0 |
+| CalcitePPLSortIT | 18 | 17 | 1 | 0 |
+| CalcitePPLScalarSubqueryIT | 14 | 13 | 1 | 0 |
+| CalcitePPLIPFunctionIT | 1 | 0 | 1 | 0 |
+| CalcitePPLDedupIT | 12 | 11 | 1 | 0 |
+| CalcitePPLCaseFunctionIT | 9 | 7 | 1 | 1 |
+| CalciteObjectFieldOperateIT | 5 | 4 | 1 | 0 |
+| CalciteMatchPhraseIT | 2 | 1 | 1 | 0 |
+| CalciteMatchIT | 1 | 0 | 1 | 0 |
+| CalciteIPFunctionsIT | 1 | 0 | 1 | 0 |
+| CalciteDedupCommandIT | 4 | 3 | 1 | 0 |
+| CalciteExplainIT | 236 | 163 | 0 | 73 |
+| CalciteSQLJsonFunctionIT | 8 | 8 | 0 | 0 |
+| CalciteShowDataSourcesCommandIT | 2 | 0 | 0 | 2 |
+| CalciteResourceMonitorIT | 1 | 1 | 0 | 0 |
+| CalciteRenameCommandIT | 2 | 2 | 0 | 0 |
+| CalcitePrometheusDataSourceCommandsIT | 11 | 0 | 0 | 11 |
+| CalcitePPLTrendlineIT | 7 | 7 | 0 | 0 |
+| CalcitePPLParseIT | 6 | 6 | 0 | 0 |
+| CalcitePPLNestedAggregationIT | 9 | 0 | 0 | 9 |
+| CalcitePPLFillnullIT | 3 | 3 | 0 | 0 |
+| CalcitePPLExplainIT | 4 | 4 | 0 | 0 |
+| CalciteOperatorIT | 21 | 21 | 0 | 0 |
+| CalciteLegacyAPICompatibilityIT | 6 | 6 | 0 | 0 |
+| CalciteJsonFunctionsIT | 5 | 0 | 0 | 5 |
+| CalciteInformationSchemaCommandIT | 3 | 0 | 0 | 3 |
+| CalciteHeadCommandIT | 6 | 4 | 0 | 2 |
+| CalciteCsvFormatIT | 2 | 2 | 0 | 0 |
+
+- Blockers: Remaining 96 CalciteDateTimeComparisonIT failures are cross-type datetime comparisons (DATE vs TIME, DATE vs TIMESTAMP, TIME vs TIMESTAMP) — Calcite cannot compare different datetime types without explicit casting. This is a separate issue requiring transpiler-level type coercion.
+- Next recommended task: CalciteDateTimeComparisonIT cross-type comparisons (96 failures) — add CAST to common type (TIMESTAMP) for cross-type datetime comparisons in the transpiler. Or target CalciteDateTimeFunctionIT (60 failures) or CalciteSearchCommandIT (46 failures) for higher breadth impact.
