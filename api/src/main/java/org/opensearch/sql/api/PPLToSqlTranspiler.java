@@ -1070,7 +1070,9 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     String rightAlias = resolveAlias(node.getRight());
 
     // Fix D: Self-join — disambiguate when left and right reference the same table
+    boolean isSelfJoin = false;
     if (leftAlias != null && leftAlias.equals(rightAlias) && !leftWrapped) {
+      isSelfJoin = true;
       leftSql = leftSql + " " + quoteId("_l");
       rightSql = rightSql + " " + quoteId("_r");
       leftAlias = "_l";
@@ -1084,23 +1086,17 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     // Map join type to SQL keyword
     Join.JoinType jt = node.getJoinType();
 
-    // Build ON clause
+    // Build ON clause (field-list conditions built after max wrapping to use correct alias)
     String onClause = null;
     if (node.getJoinCondition().isPresent()) {
       onClause = visitExpr(node.getJoinCondition().get());
-    } else if (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
-      List<String> conditions = new ArrayList<>();
-      for (Field f : node.getJoinFields().get()) {
-        String fname = f.getField().toString();
-        String lRef = leftAlias != null ? quoteId(leftAlias) + "." + quoteId(fname) : quoteId(fname);
-        String rRef = rightAlias != null ? quoteId(rightAlias) + "." + quoteId(fname) : quoteId(fname);
-        conditions.add(lRef + " = " + rRef);
-      }
-      onClause = String.join(" AND ", conditions);
     }
 
     // SEMI/ANTI joins → EXISTS/NOT EXISTS (Calcite SQL parser doesn't support SEMI/ANTI syntax)
     if (jt == Join.JoinType.SEMI || jt == Join.JoinType.ANTI) {
+      if (onClause == null && node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
+        onClause = buildFieldListOnClause(node.getJoinFields().get(), leftAlias, rightAlias);
+      }
       String existsPrefix = (jt == Join.JoinType.SEMI) ? "EXISTS" : "NOT EXISTS";
       String subquery = "SELECT 1 FROM " + rightSql;
       if (onClause != null) {
@@ -1125,7 +1121,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       case LEFT: joinKeyword = "LEFT JOIN"; break;
       case RIGHT: joinKeyword = "RIGHT JOIN"; break;
       case CROSS:
-        if (onClause != null) {
+        if (onClause != null || (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty())) {
           joinKeyword = "INNER JOIN"; // cross join with condition → inner join
         } else {
           joinKeyword = "CROSS JOIN";
@@ -1133,8 +1129,31 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         break;
       case FULL: joinKeyword = "FULL OUTER JOIN"; break;
       default:
-        joinKeyword = (onClause == null) ? "CROSS JOIN" : "INNER JOIN";
+        joinKeyword = (onClause == null && !(node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty())) ? "CROSS JOIN" : "INNER JOIN";
         break;
+    }
+
+    // Max option: limit right-side matches per left-side row via ROW_NUMBER
+    Literal maxLit = node.getArgumentMap().get("max");
+    int maxVal = maxLit != null ? ((Number) maxLit.getValue()).intValue() : 0;
+    if (maxVal > 0 && node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
+      List<String> fieldNames = node.getJoinFields().get().stream()
+          .map(f -> quoteId(f.getField().toString())).collect(Collectors.toList());
+      String partitionBy = String.join(", ", fieldNames);
+      String innerAlias = nextAlias();
+      String outerAlias = nextAlias();
+      rightSql = "(SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY "
+          + partitionBy + ") " + quoteId("_row_number_dedup_") + " FROM " + rightSql
+          + ") " + quoteId(innerAlias) + " WHERE " + quoteId("_row_number_dedup_")
+          + " <= " + maxVal + ") " + quoteId(outerAlias);
+      sb.tableAliases.remove(rightAlias);
+      rightAlias = outerAlias;
+      sb.tableAliases.add(rightAlias);
+    }
+
+    // Build field-list ON clause after max wrapping so it uses the correct right alias
+    if (onClause == null && node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
+      onClause = buildFieldListOnClause(node.getJoinFields().get(), leftAlias, rightAlias);
     }
 
     // Assemble FROM clause
@@ -1148,11 +1167,15 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
 
     sb.from = fromBuilder.toString();
     sb.select = new ArrayList<>();
-    if (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
+    Literal overwriteLit = node.getArgumentMap().get("overwrite");
+    boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
+    if (isSelfJoin) {
+      // Self-join: all columns are shared, select from one side to avoid duplicates
+      String ref = overwrite ? quoteId(rightAlias) : quoteId(leftAlias);
+      sb.select.add(ref + ".*");
+    } else if (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
       List<String> sharedFields = node.getJoinFields().get().stream()
           .map(f -> f.getField().toString()).collect(Collectors.toList());
-      Literal overwriteLit = node.getArgumentMap().get("overwrite");
-      boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
       String lRef = leftAlias != null ? quoteId(leftAlias) : "";
       String rRef = rightAlias != null ? quoteId(rightAlias) : "";
       String exceptList = sharedFields.stream().map(f -> quoteId(f))
@@ -1177,6 +1200,17 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     sb.limit = null;
     sb.offset = null;
     sb.hasGroupBy = false;
+  }
+
+  private static String buildFieldListOnClause(List<Field> fields, String leftAlias, String rightAlias) {
+    List<String> conditions = new ArrayList<>();
+    for (Field f : fields) {
+      String fname = f.getField().toString();
+      String lRef = leftAlias != null ? quoteId(leftAlias) + "." + quoteId(fname) : quoteId(fname);
+      String rRef = rightAlias != null ? quoteId(rightAlias) + "." + quoteId(fname) : quoteId(fname);
+      conditions.add(lRef + " = " + rRef);
+    }
+    return String.join(" AND ", conditions);
   }
 
   /** Resolve a join side (left or right) into a SQL FROM fragment, e.g. "tableName alias" */

@@ -1429,3 +1429,47 @@
   13. AppendCommandIT: 8 failures (schema merging)
   14. ConditionBuiltinFunctionIT: 7 failures (earliest/latest, struct/nested types)
 - Next recommended task: Fix ConditionBuiltinFunctionIT remaining 7 failures. Or implement CONV/CRC32/TYPEOF functions (BuiltinFunctionIT). Or fix JoinIT field-list column deduplication (~10 tests). Or fix remaining BasicIT 8 failures.
+
+---
+### Iteration 35 — Fix self-join field-list column dedup + implement max option + refactor ON clause building
+- Date: 2026-03-09
+- Baseline rate: 64.9% (488/752)
+- Task: Three targeted fixes in processJoin(): (1) Self-join detection for field-list joins — when both sides reference the same table, use `SELECT right_alias.*` (overwrite=true) or `SELECT left_alias.*` (overwrite=false) instead of REPLACE/EXCEPT which produces duplicate columns. (2) Implement `max` option for field-list joins using ROW_NUMBER() OVER (PARTITION BY field_list) to limit right-side matches per left-side row. (3) Refactor field-list ON clause building into helper method, deferred after max wrapping so it uses the correct right alias.
+- Key fixes:
+  1. Self-join detection: Added `isSelfJoin` boolean tracking. When left and right table names match (already detected for alias disambiguation), the field-list join SELECT uses `right_alias.*` (overwrite=true) or `left_alias.*` (overwrite=false) instead of REPLACE/EXCEPT. This eliminates duplicate columns for self-joins where ALL columns are shared.
+  2. Max option: When `max > 0` and field-list is present, wraps right side in ROW_NUMBER subquery: `(SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY fields) _row_number_dedup_ FROM right) _t WHERE _row_number_dedup_ <= max) _t2`. Updates rightAlias and tableAliases accordingly.
+  3. buildFieldListOnClause helper: Extracted field-list ON clause construction into static helper method. Called after max wrapping so ON clause references the correct (potentially wrapped) right alias. Also used for SEMI/ANTI joins with field-list.
+  4. CROSS JOIN detection fix: Updated CROSS→INNER fallback to also check for field-list presence (not just onClause).
+- Files changed:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (MODIFIED - processJoin rewrite ~49 lines added/15 removed, buildFieldListOnClause helper)
+- New rate: 66.0% (496/752 passed, 245 failed, 11 skipped)
+- Delta: +8 tests passing (+1.1%) — 1 confirmed from self-join fix, ~7 from flaky test variance
+- Per-class improvements:
+  - CalcitePPLJoinIT: 20→21 (+1) — testJoinWithFieldListSelfJoin (self-join with field-list now produces correct 6 columns)
+  - CalcitePPLAggregationIT: ~73→78 (+5 flaky) — testFirstLastWithTimestamp, testFirstLastTimestampByCategory, testFirstLastTimestampWithValue, testMultipleAggregatesWithAliases, testMultipleAggregatesWithAliasesByClause (pass individually, flaky in full suite)
+  - CalcitePPLExistsSubqueryIT: 16→16 (0, 1 flaky variance)
+- No regressions in any test class.
+- Remaining JoinIT failures (18/39):
+  - 7 field-list column dedup (cross-table): REPLACE/EXCEPT still produces duplicate non-field-list shared columns (e.g., `country` in state_country + occupation). Needs schema info to fix.
+  - 4 alias resolution: inner alias not visible at outer scope (testCheckAccessTheReference*)
+  - 3 SMJ sort push-down: expression-based ON clause fails to plan (engine limitation)
+  - 2 multiple joins: deeply nested SQL fails to plan (engine limitation)
+  - 1 subsearch maxout: subsearch result limit not enforced in V4
+  - 1 self-join without field-list: can't auto-derive join condition without schema info
+- Blockers remaining:
+  1. AggregationIT: 22 failures (span/time, percentile, take — engine limitations)
+  2. GraphLookupIT: 22 failures (unsupported)
+  3. JoinIT: 18 failures (field-list column dedup, alias resolution, engine limitations)
+  4. JsonBuiltinFunctionIT: 17 failures (unsupported — needs JSON UDFs)
+  5. PatternsIT: 15 failures (unsupported — GROK/PATTERNS)
+  6. BuiltinFunctionsNullIT: 15 failures (engine limitations, error handling)
+  7. SpathCommandIT: 14 failures (unsupported)
+  8. RenameIT: 12 failures (wildcard rename)
+  9. CastFunctionIT: 11 failures (Calcite engine limitations)
+  10. BuiltinFunctionIT: 9 failures (CONV/CRC32/TYPEOF, MOD type)
+  11. BasicIT: 8 failures (error handling, date format, decimal precision)
+  12. AppendCommandIT: 8 failures (schema merging)
+  13. ConditionBuiltinFunctionIT: 7 failures (earliest/latest, struct/nested types)
+  14. StringBuiltinFunctionIT: 7 failures (REVERSE, regex replace)
+  15. CaseFunctionIT: 6 failures (IP type schema, engine limitations)
+- Next recommended task: Fix JoinIT alias resolution (4 tests) — when left=t1 right=t2 overrides AS alias, the transpiler should use t1/t2 as SQL aliases and make the AS alias accessible for field references. Or fix cross-table field-list join column dedup (7 tests) — requires schema info or a different SQL pattern. Or implement CONV/CRC32/TYPEOF UDFs (BuiltinFunctionIT). Or fix remaining ConditionBuiltinFunctionIT failures.
