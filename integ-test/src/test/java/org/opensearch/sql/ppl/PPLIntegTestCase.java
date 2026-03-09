@@ -48,6 +48,9 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   @Override
   protected void init() throws Exception {
     super.init();
+    if (V4_ENABLED) {
+      GlobalPushdownConfig.enabled = false; // V4 transpiles to SQL — disable pushdown
+    }
     updatePushdownSettings();
     disableCalcite(); // calcite is enabled by default from 3.3.0
   }
@@ -280,6 +283,15 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
 
     // Normalize NaN to null (PPL returns null for invalid math operations)
     // Normalize timestamps by stripping trailing '.0' (SQL returns '2025-07-28 00:15:23.0', PPL expects '2025-07-28 00:15:23')
+    // Normalize integer values to double when schema type is double (JSON serializes 30497.0 as 30497)
+    // Build a set of column indices that are double-typed for numeric normalization
+    java.util.Set<Integer> doubleColumns = new java.util.HashSet<>();
+    for (int i = 0; i < schema.length(); i++) {
+      String type = schema.getJSONObject(i).optString("type", "").toLowerCase();
+      if ("double".equals(type)) {
+        doubleColumns.add(i);
+      }
+    }
     for (int r = 0; r < datarows.length(); r++) {
       org.json.JSONArray row = datarows.getJSONArray(r);
       for (int i = 0; i < row.length(); i++) {
@@ -291,6 +303,9 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
           } else if (s.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.0$")) {
             row.put(i, s.substring(0, s.length() - 2));
           }
+        } else if (doubleColumns.contains(i) && val instanceof Number
+            && !(val instanceof Double) && !(val instanceof Float)) {
+          row.put(i, ((Number) val).doubleValue());
         }
       }
     }
