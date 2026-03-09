@@ -237,7 +237,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     SQL_TO_PPL_TYPES.put("half_float", "real");
     SQL_TO_PPL_TYPES.put("double", "double");
     SQL_TO_PPL_TYPES.put("boolean", "boolean");
-    SQL_TO_PPL_TYPES.put("date", "timestamp");
+    SQL_TO_PPL_TYPES.put("date", "date");
     SQL_TO_PPL_TYPES.put("timestamp", "timestamp");
     SQL_TO_PPL_TYPES.put("ip", "ip");
     SQL_TO_PPL_TYPES.put("binary", "binary");

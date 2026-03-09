@@ -1596,6 +1596,10 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if ("mod".equals(name) || "%".equals(name)) {
       return "CASE WHEN " + args.get(1) + " = 0 THEN NULL ELSE MOD(" + args.get(0) + ", " + args.get(1) + ") END";
     }
+    if ("EXTRACT".equals(name)) {
+      String part = args.get(0).replace("'", "");
+      return "EXTRACT(" + part + " FROM " + args.get(1) + ")";
+    }
     if ("year".equals(name)) return castInt("EXTRACT(YEAR FROM " + args.get(0) + ")");
     if ("month".equals(name)) return castInt("EXTRACT(MONTH FROM " + args.get(0) + ")");
     if ("day".equals(name)) return castInt("EXTRACT(DAY FROM " + args.get(0) + ")");
@@ -1616,23 +1620,23 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if ("date_add".equals(name) || "adddate".equals(name)) {
       if (args.get(1).startsWith("INTERVAL")) {
         String[] parts = args.get(1).split("\\s+");
-        return "TIMESTAMPADD(" + parts[parts.length - 1] + ", " + parts[1] + ", " + args.get(0) + ")";
+        return "CAST(TIMESTAMPADD(" + parts[parts.length - 1] + ", " + parts[1] + ", " + args.get(0) + ") AS TIMESTAMP)";
       }
       return "TIMESTAMPADD(DAY, " + args.get(1) + ", " + args.get(0) + ")";
     }
     if ("date_sub".equals(name) || "subdate".equals(name)) {
       if (args.get(1).startsWith("INTERVAL")) {
         String[] parts = args.get(1).split("\\s+");
-        return "TIMESTAMPADD(" + parts[parts.length - 1] + ", -" + parts[1] + ", " + args.get(0) + ")";
+        return "CAST(TIMESTAMPADD(" + parts[parts.length - 1] + ", -" + parts[1] + ", " + args.get(0) + ") AS TIMESTAMP)";
       }
       return "TIMESTAMPADD(DAY, -" + args.get(1) + ", " + args.get(0) + ")";
     }
     if ("datediff".equals(name)) {
-      return "TIMESTAMPDIFF(DAY, " + args.get(1) + ", " + args.get(0) + ")";
+      return "CAST(TIMESTAMPDIFF(DAY, " + args.get(1) + ", " + args.get(0) + ") AS BIGINT)";
     }
     if ("timestampdiff".equals(name)) {
       String unit = args.get(0).replace("'", "");
-      return "TIMESTAMPDIFF(" + unit + ", " + args.get(1) + ", " + args.get(2) + ")";
+      return "CAST(TIMESTAMPDIFF(" + unit + ", " + args.get(1) + ", " + args.get(2) + ") AS BIGINT)";
     }
     if ("timestampadd".equals(name)) {
       String unit = args.get(0).replace("'", "");
@@ -1666,7 +1670,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE CAST(TIMESTAMPADD(DAY, CAST(" + args.get(0) + " AS INTEGER) - 366, DATE '0001-01-01') AS DATE) END";
     if ("to_seconds".equals(name))
       return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE CAST((TIMESTAMPDIFF(DAY, DATE '0001-01-01', CAST(" + args.get(0) + " AS DATE)) + 366) * 86400 AS BIGINT) END";
-    if ("last_day".equals(name)) return "LAST_DAY(" + args.get(0) + ")";
+    if ("last_day".equals(name)) return "CAST(LAST_DAY(" + args.get(0) + ") AS DATE)";
     if ("time_to_sec".equals(name))
       return "CAST((EXTRACT(HOUR FROM " + args.get(0) + ") * 3600 + EXTRACT(MINUTE FROM " + args.get(0) + ") * 60 + EXTRACT(SECOND FROM " + args.get(0) + ")) AS BIGINT)";
     if ("sec_to_time".equals(name))
