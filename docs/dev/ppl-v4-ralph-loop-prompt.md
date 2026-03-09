@@ -16,35 +16,44 @@ transpiled to SQL and sent to the Calcite SQL endpoint instead of the PPL endpoi
 
 ## Test Surface
 
-| Category | Classes | ~Tests | Priority |
-|----------|---------|--------|----------|
-| Basic (source, where, fields, sort, head) | CalcitePPLBasicIT | 40 | P0 |
-| Aggregation (stats, top, rare) | CalcitePPLAggregationIT | 99 | P0 |
-| Eval + functions | CalcitePPLBuiltinFunctionIT, CalcitePPLCaseFunctionIT, CalcitePPLConditionBuiltinFunctionIT, CalcitePPLEvalMaxMinFunctionIT | 64 | P0 |
-| Sort | CalcitePPLSortIT | 18 | P0 |
-| Dedup | CalcitePPLDedupIT | 12 | P1 |
-| Rename | CalcitePPLRenameIT | 22 | P1 |
-| Eventstats | CalcitePPLEventstatsIT | 27 | P1 |
-| Join | CalcitePPLJoinIT | 39 | P1 |
-| String functions | CalcitePPLStringBuiltinFunctionIT | 27 | P1 |
-| Null handling | CalcitePPLBuiltinFunctionsNullIT | 71 | P1 |
-| Datetime invalid | CalcitePPLBuiltinDatetimeFunctionInvalidIT | 45 | P2 |
-| Subqueries | CalcitePPLExistsSubqueryIT, CalcitePPLInSubqueryIT, CalcitePPLScalarSubqueryIT | 50 | P2 |
-| Cast | CalcitePPLCastFunctionIT | 5 | P2 |
-| Fillnull | CalcitePPLFillnullIT | 3 | P2 |
-| Parse/Grok/Patterns | CalcitePPLParseIT, CalcitePPLGrokIT, CalcitePPLPatternsIT | 24 | P2 |
-| Trendline | CalcitePPLTrendlineIT | 7 | P2 |
-| Append | CalcitePPLAppendCommandIT, CalcitePPLAppendPipeCommandIT | 12 | P2 |
-| Lookup | CalcitePPLLookupIT | 17 | P2 |
-| JSON | CalcitePPLJsonBuiltinFunctionIT | 18 | P3 |
-| Spath | CalcitePPLSpathCommandIT | 14 | P3 |
-| Coalesce | CalcitePPLEnhancedCoalesceIT | 15 | P3 |
-| Crypto | CalcitePPLCryptographicFunctionIT | 4 | P3 |
-| IP | CalcitePPLIPFunctionIT | 1 | P3 |
-| Explain | CalcitePPLExplainIT | 4 | P3 |
-| GraphLookup | CalcitePPLGraphLookupIT | 22 | P3 |
-| Appendcol | CalcitePPLAppendcolIT | 2 | P3 |
-| Nested agg | CalcitePPLNestedAggregationIT | 9 | P3 |
+The complete test scope is ALL `Calcite*IT` classes (112 classes in `integ-test/.../remote/`).
+
+| Category | Classes (examples) | Priority |
+|----------|---------|----------|
+| Basic (source, where, fields, sort, head) | CalciteBasicIT, CalciteWhereCommandIT, CalciteFieldsCommandIT, CalciteSortCommandIT, CalciteHeadCommandIT, CalciteSearchCommandIT | P0 |
+| Aggregation (stats, top, rare) | CalciteAggregationIT, CalciteStatsCommandIT, CalciteTopCommandIT, CalciteRareCommandIT, CalciteMultiValueStatsIT | P0 |
+| Eval + functions | CalciteBuiltinFunctionIT, CalciteCaseFunctionIT, CalciteConditionBuiltinFunctionIT, CalciteEvalMaxMinFunctionIT, CalciteEvalCommandIT, CalciteMathematicalFunctionIT, CalciteOperatorIT | P0 |
+| Sort | CalciteSortIT, CalciteSortCommandIT | P0 |
+| Dedup | CalciteDedupIT, CalciteDedupCommandIT | P1 |
+| Rename | CalciteRenameIT, CalciteRenameCommandIT | P1 |
+| Eventstats | CalciteEventstatsIT, CalciteStreamstatsCommandIT | P1 |
+| Join | CalciteJoinIT | P1 |
+| String functions | CalciteStringBuiltinFunctionIT, CalciteTextFunctionIT | P1 |
+| Null handling | CalciteBuiltinFunctionsNullIT | P1 |
+| DateTime | CalciteBuiltinDatetimeFunctionInvalidIT, CalciteDateTimeFunctionIT, CalciteDateTimeComparisonIT, CalciteDateTimeImplementationIT, CalciteConvertTZFunctionIT, CalciteNowLikeFunctionIT | P1 |
+| Subqueries | CalciteExistsSubqueryIT, CalciteInSubqueryIT, CalciteScalarSubqueryIT | P2 |
+| Cast | CalciteCastFunctionIT | P2 |
+| Fillnull | CalciteFillnullIT, CalciteFillNullCommandIT | P2 |
+| Parse/Grok/Patterns | CalciteParseIT, CalciteGrokIT, CalcitePatternsIT, CalciteParseCommandIT, CalciteRegexCommandIT | P2 |
+| Trendline | CalciteTrendlineIT, CalciteTrendlineCommandIT | P2 |
+| Append | CalciteAppendCommandIT, CalciteAppendPipeCommandIT | P2 |
+| Lookup | CalciteLookupIT | P2 |
+| JSON | CalciteJsonBuiltinFunctionIT, CalciteJsonFunctionsIT | P2 |
+| Spath | CalciteSpathCommandIT | P3 |
+| Coalesce | CalciteEnhancedCoalesceIT | P3 |
+| Crypto | CalciteCryptographicFunctionIT | P3 |
+| IP | CalciteIPFunctionIT, CalciteIPFunctionsIT, CalciteIPComparisonIT | P3 |
+| Explain | CalciteExplainIT | P3 |
+| GraphLookup | CalciteGraphLookupIT | P3 |
+| Appendcol | CalciteAppendcolIT | P3 |
+| Nested agg | CalciteNestedAggregationIT | P3 |
+| New commands | CalciteNewAddedCommandsIT, CalciteBinCommandIT, CalciteChartCommandIT, CalciteTimechartCommandIT, CalciteTimechartPerFunctionIT, CalciteExpandCommandIT, CalciteFlattenCommandIT, CalciteReplaceCommandIT, CalciteReverseCommandIT, CalciteTransposeCommandIT | P2 |
+| Data types | CalciteDataTypeIT, CalciteCsvFormatIT, CalciteVisualizationFormatIT | P2 |
+| Relevance/Match | CalciteMatchIT, CalciteMatchBoolPrefixIT, CalciteMatchPhraseIT, CalciteMatchPhrasePrefixIT, CalciteMultiMatchIT, CalciteQueryStringIT, CalciteSimpleQueryStringIT, CalciteRelevanceFunctionIT, CalciteLikeQueryIT | P2 |
+| Geo | CalciteGeoIpFunctionsIT, CalciteGeoPointFormatsIT | P3 |
+| MV functions | CalciteMVAppendFunctionIT, CalciteMvCombineCommandIT, CalciteMvExpandCommandIT, CalciteNoMvCommandIT | P2 |
+| System/Settings | CalciteSettingsIT, CalciteResourceMonitorIT, CalciteSystemFunctionIT, CalciteInformationSchemaCommandIT, CalciteDescribeCommandIT, CalciteShowDataSourcesCommandIT | P3 |
+| Other | CalciteQueryAnalysisIT, CalciteObjectFieldOperateIT, CalciteFlattenDocValueIT, CalciteFieldFormatCommandIT, CalciteMultisearchCommandIT, CalciteArrayFunctionIT, CalciteRexCommandIT, CalciteLegacyAPICompatibilityIT, CalcitePrometheusDataSourceCommandsIT, CalcitePluginIT, CalciteAggregationPaginatingIT | P3 |
 
 ## Recommended Iteration Order
 
@@ -113,12 +122,17 @@ Read these files first:
 - docs/dev/ppl-v4-sqlnode-research.md (command inventory and translation patterns)
 - progress.txt (what's been done so far)
 
-Goal: increase CalcitePPL*IT pass rate to ≥85% for the PPL V4 transpiler branch.
+Goal: increase Calcite*IT pass rate to ≥85% for the PPL V4 transpiler branch.
 
 IMPORTANT: The SQL engine has been enhanced with a simplified OpenSearch schema (standard SQL types, no UDT) and SELECT * EXCEPT/REPLACE support. Read the "Base Engine Capabilities" section in the ralph-loop-prompt doc before implementing. Use EXCEPT/REPLACE instead of workarounds. Date/time functions should work on date fields now.
 
 Rules:
-1. Run `scripts/ppl_it_rate.sh` to get the current baseline rate. If this is the first iteration and no V4 code exists yet, note that the baseline is 0% (all tests use the existing PPL endpoint, V4 wiring doesn't exist yet).
+1. **Measure baseline EFFICIENTLY.** Running `scripts/ppl_it_rate.sh` takes a LONG time (runs all 112 Calcite*IT classes). Follow these rules:
+   - Run the full suite AT MOST ONCE per iteration — at the END, after implementation is done.
+   - For targeted validation DURING development, run only the specific class(es) you're working on:
+     `./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.Calcite<ClassName>IT" -Dppl.engine.v4=true -Dtests.calcite.pushdown.enabled=false --continue`
+   - After the full suite run, extract ALL useful info from that single run: per-class pass/fail counts, failure categories, specific failing test names. Record this in progress.txt so the NEXT iteration doesn't need to re-run the full suite just to understand the current state.
+   - If progress.txt already has a recent per-class breakdown and you only changed code affecting specific classes, you can SKIP the full suite run and instead: run only the affected classes, then CALCULATE the new overall rate by updating the per-class numbers from progress.txt.
 2. Read progress.txt to see what's been done. Pick exactly ONE bounded, highest-impact unfinished task from the Recommended Iteration Order section above.
 3. Implement ONLY that one task with minimal code changes. Follow these constraints:
    - PPLToSqlTranspiler.java is a pure function: String transpile(String ppl). No OpenSearch dependencies, no V3 imports.
@@ -127,10 +141,8 @@ Rules:
    - SQL output must be human-readable.
    - When pipe stages conflict (WHERE after GROUP BY), auto-wrap as subquery.
    - No fallback to V3/V2. Unsupported commands fail explicitly with "unsupported in V4".
-   - Do NOT modify any existing CalcitePPL*IT test file.
-4. Run the relevant tests to verify your change works:
-   - For targeted validation: `./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.CalcitePPL<RelevantClass>IT" -Dppl.engine.v4=true -Dtests.calcite.pushdown.enabled=false --continue`
-   - Then run `scripts/ppl_it_rate.sh` for the overall rate.
+   - Do NOT modify any existing Calcite*IT test file.
+4. Validate your change by running ONLY the affected test class(es) (see rule 1). Then optionally run the full suite once if needed for overall rate.
 5. Update progress.txt with a new iteration entry:
    ```
    ### Iteration N — <task name>
@@ -140,6 +152,9 @@ Rules:
    - Files changed: <list>
    - New rate: <rate after>
    - Tests fixed: <count and examples>
+   - Per-class breakdown (from full suite run, if done):
+     | Class | Passed | Failed | Skipped | Delta |
+     (include ALL classes, or at minimum all classes with failures)
    - Blockers: <any issues hit>
    - Next recommended task: <what to do next iteration>
    ```
@@ -195,7 +210,7 @@ Avoid these pitfalls:
 If a session was interrupted, use this shorter version:
 
 ```
-Read docs/dev/ppl-v4-ralph-loop-prompt.md and progress.txt. Resume the PPL V4 Ralph loop from where we left off. Run scripts/ppl_it_rate.sh for current rate, pick the next highest-impact task, implement it, measure, update progress.txt, commit. One task only.
+Read docs/dev/ppl-v4-ralph-loop-prompt.md and progress.txt. Resume the PPL V4 Ralph loop from where we left off. Check progress.txt for the latest per-class breakdown to understand current state WITHOUT re-running the full suite. Pick the next highest-impact task, implement it, validate with targeted test runs, update progress.txt, commit. One task only.
 ```
 
 ---
@@ -205,5 +220,5 @@ Read docs/dev/ppl-v4-ralph-loop-prompt.md and progress.txt. Resume the PPL V4 Ra
 When you know exactly which test class to fix:
 
 ```
-Read docs/dev/ppl-v4-ralph-loop-prompt.md and progress.txt. Current PPL V4 rate is <X>%. Focus on CalcitePPL<ClassName>IT — it has <N> tests and <M> are failing. Read the failing test methods, understand what PPL commands/functions they exercise, implement the missing transpiler support, run the tests, update progress.txt, commit.
+Read docs/dev/ppl-v4-ralph-loop-prompt.md and progress.txt. Current PPL V4 rate is <X>% (across ALL Calcite*IT classes). Focus on Calcite<ClassName>IT — it has <N> tests and <M> are failing. Read the failing test methods, understand what PPL commands/functions they exercise, implement the missing transpiler support, run the tests, update progress.txt, commit.
 ```
