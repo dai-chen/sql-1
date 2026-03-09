@@ -418,12 +418,9 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       windowExprs.add(windowExpr + " AS " + quoteId(aliasName));
     }
 
-    // Build final SELECT: keep *, add span column if present, add window expressions
+    // Build final SELECT: keep *, add window expressions (span is only in PARTITION BY)
     List<String> finalSelect = new ArrayList<>();
     finalSelect.add("*");
-    if (spanAlias != null) {
-      finalSelect.add(spanExpr + " AS " + quoteId(spanAlias));
-    }
     finalSelect.addAll(windowExprs);
     sb.select = finalSelect;
   }
