@@ -24,6 +24,8 @@ import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.SqlBasicFunction;
+import org.apache.calcite.sql.fun.SqlLibrary;
+import org.apache.calcite.sql.fun.SqlLibraryOperatorTableFactory;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.type.OperandTypes;
@@ -238,6 +240,11 @@ public class UnifiedQueryContext implements AutoCloseable {
           .operatorTable(
               SqlOperatorTables.chain(
                   SqlStdOperatorTable.instance(),
+                  SqlLibraryOperatorTableFactory.INSTANCE.getOperatorTable(
+                      SqlLibrary.MYSQL,
+                      SqlLibrary.BIG_QUERY,
+                      SqlLibrary.SPARK,
+                      SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
