@@ -152,7 +152,9 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     FUNC_MAP.put("length", "CHAR_LENGTH");
     FUNC_MAP.put("substring", "SUBSTRING");
     FUNC_MAP.put("trim", "TRIM");
-    FUNC_MAP.put("replace", "REPLACE");
+    FUNC_MAP.put("replace", "REGEXP_REPLACE");
+    FUNC_MAP.put("regexp_match", "REGEXP_CONTAINS");
+    FUNC_MAP.put("regex_match", "REGEXP_CONTAINS");
     FUNC_MAP.put("concat", "CONCAT");
     FUNC_MAP.put("coalesce", "COALESCE");
     FUNC_MAP.put("count", "COUNT");
@@ -2104,7 +2106,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       return "TRIM(TRAILING ' ' FROM " + args.get(0) + ")";
     }
     if ("replace".equals(name)) {
-      return "REPLACE(" + args.get(0) + ", " + args.get(1) + ", " + args.get(2) + ")";
+      String replacement = args.get(2).replaceAll("\\\\(\\d)", "\\$$1");
+      return "REGEXP_REPLACE(" + args.get(0) + ", " + args.get(1) + ", " + replacement + ")";
     }
     if ("substr".equals(name)) {
       return "SUBSTRING(" + String.join(", ", args) + ")";

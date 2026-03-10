@@ -4,7 +4,7 @@
 # Previous progress archived to: progress-archived-2026-03-09.txt
 
 ## Current State
-- Current rate: 51.5% (1165/2264, 144 skipped)
+- Current rate: 58.5% (1324/2264, 144 skipped)
 - V4 transpiler: IMPLEMENTED (api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java)
 - Test wiring: IMPLEMENTED (PPLIntegTestCase.java V4 routing via -Dppl.engine.v4=true)
 
@@ -920,3 +920,38 @@
 
 - Blockers: Remaining 2 CalciteMathematicalFunctionIT failures are hard: cbrt needs exact Math.cbrt() parity (POWER(x,1/3) has inherent precision loss), conv needs UDF registration in SQL operator table. CalciteSearchCommandIT escaped-quote fix unblocked parsing but tests hit nanosecond timestamp and relevance pushdown engine errors.
 - Next recommended task: Fix replace()→REGEXP_REPLACE mapping (6 CalcitePPLStringBuiltinFunctionIT + 1 CalciteTextFunctionIT = 7 tests). Or fix regexp_match→REGEXP_CONTAINS (5 CalciteTextFunctionIT tests). Or target CalciteDateTimeFunctionIT (35 failures) or CalcitePPLJoinIT (18 failures) for higher volume.
+
+### Iteration 11 — Fix replace()→REGEXP_REPLACE and regexp_match→REGEXP_CONTAINS function mappings
+- Date: 2026-03-10
+- Baseline rate: 57.9% (1311/2264, 144 skipped)
+- Task: Three function mapping fixes in PPLToSqlTranspiler.java:
+  1. Changed FUNC_MAP: replace→REGEXP_REPLACE (PPL's replace() is regex-aware, uses Java's String.replaceAll() under the hood)
+  2. Added FUNC_MAP: regexp_match→REGEXP_CONTAINS, regex_match→REGEXP_CONTAINS (Calcite BigQuery library function)
+  3. Added back-reference conversion in replace handler: \\N→$N in replacement string (PPL uses Java-style \\1, Calcite REGEXP_REPLACE uses $1)
+- Files changed: api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (+4 lines, ~2 lines modified)
+- Changes:
+  1. FUNC_MAP.put("replace", "REPLACE") → FUNC_MAP.put("replace", "REGEXP_REPLACE")
+  2. Added FUNC_MAP.put("regexp_match", "REGEXP_CONTAINS") and FUNC_MAP.put("regex_match", "REGEXP_CONTAINS")
+  3. In visitFunction replace handler: added `String replacement = args.get(2).replaceAll("\\\\(\\d)", "\\$$1")` to convert \\1→$1 back-references
+- New rate: 58.5% (1324/2264, 144 skipped)
+- Tests fixed: +13 net
+  - CalciteTextFunctionIT: 18→24 (+6) — all regexp_match/regex_match tests now pass
+  - CalcitePPLStringBuiltinFunctionIT: 21→26 (+5) — regex replace, capture groups, email domain replacement now pass
+  - CalciteRexCommandIT: 0→1 (+1) — bonus from REGEXP_CONTAINS availability
+  - CalciteNewAddedCommandsIT: 6→7 (+1) — bonus
+  - CalcitePPLExistsSubqueryIT: 16→17 (+1) — bonus
+  - CalcitePPLPluginIT: 4→3 (-1) — flaky regression
+- Per-class breakdown (full suite run, only classes with changes):
+
+| Class | Before | After | Delta |
+|-------|--------|-------|-------|
+| CalciteTextFunctionIT | 18/24 | 24/24 | +6 |
+| CalcitePPLStringBuiltinFunctionIT | 21/27 | 26/27 | +5 |
+| CalciteRexCommandIT | 0/18 | 1/18 | +1 |
+| CalciteNewAddedCommandsIT | 6/22 | 7/22 | +1 |
+| CalcitePPLExistsSubqueryIT | 16/19 | 17/19 | +1 |
+| CalcitePPLPluginIT | 4/5 | 3/5 | -1 (flaky) |
+
+- Remaining 1 CalcitePPLStringBuiltinFunctionIT failure: testReplaceWithInvalidRegexPattern — error message format mismatch (server returns UncheckedExecutionException wrapping PatternSyntaxException, test expects different format)
+- Blockers: None. The REGEXP_REPLACE mapping is correct for PPL's regex-aware replace(). The back-reference conversion handles the \\N→$N syntax difference between PPL and Calcite.
+- Next recommended task: CalciteSearchCommandIT (46 failures) — largest remaining block but mostly engine-level issues (nanosecond timestamps, relevance pushdown). CalciteDateTimeFunctionIT (35 failures) — scattered datetime function issues. CalciteMultiValueStatsIT (31 failures, 0 passing) — multi-value stats. CalciteFieldsCommandIT (21 failures) — wildcard field expansion needs schema access. CalcitePPLJoinIT (18 failures) — alias resolution, REPLACE/EXCEPT, CROSS JOIN issues.
