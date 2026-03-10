@@ -69,6 +69,8 @@ import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
+import org.opensearch.sql.ast.tree.Replace;
+import org.opensearch.sql.ast.tree.ReplacePair;
 import org.opensearch.sql.ast.tree.Search;
 import org.opensearch.sql.ast.tree.Sort;
 import org.opensearch.sql.ast.tree.SubqueryAlias;
@@ -78,6 +80,7 @@ import org.opensearch.sql.ast.tree.StreamWindow;
 import org.opensearch.sql.ast.expression.WindowFrame;
 import org.opensearch.sql.ast.expression.WindowBound;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
+import org.opensearch.sql.calcite.utils.WildcardUtils;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
 import org.opensearch.sql.ppl.parser.AstBuilder;
@@ -242,6 +245,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         transpiler.processEval((Eval) node, sb);
       } else if (node instanceof Rename) {
         transpiler.processRename((Rename) node, sb);
+      } else if (node instanceof Replace) {
+        transpiler.processReplace((Replace) node, sb);
       } else if (node instanceof Dedupe) {
         transpiler.processDedupe((Dedupe) node, sb);
       } else if (node instanceof RareTopN) {
@@ -695,8 +700,15 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
 
   private void processProject(Project node, SelectBuilder sb) {
     List<UnresolvedExpression> projectList = node.getProjectList();
-    // Top-level Project(AllFields) is a passthrough
+    // Top-level Project(AllFields) is a passthrough — but resolve pending computedColumns
     if (projectList.size() == 1 && projectList.get(0) instanceof AllFields) {
+      if (!sb.computedColumns.isEmpty() && sb.select.size() == 1 && "*".equals(sb.select.get(0))) {
+        String replaceClauses = sb.computedColumns.entrySet().stream()
+            .map(e -> e.getValue() + " AS " + quoteId(e.getKey()))
+            .collect(Collectors.joining(", "));
+        sb.select.set(0, "* REPLACE(" + replaceClauses + ")");
+        sb.computedColumns.clear();
+      }
       return;
     }
 
@@ -951,6 +963,27 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       for (Map.Entry<String, String> e : mappings.entrySet()) {
         sb.computedColumns.put(e.getValue(), quoteId(e.getKey()));
       }
+    }
+  }
+
+  private void processReplace(Replace node, SelectBuilder sb) {
+    for (Field field : node.getFieldList()) {
+      String fieldName = getFieldName(field);
+      String expr = sb.computedColumns.containsKey(fieldName)
+          ? sb.computedColumns.get(fieldName) : quoteId(fieldName);
+      for (ReplacePair pair : node.getReplacePairs()) {
+        String pattern = pair.getPattern().getValue().toString();
+        String replacement = pair.getReplacement().getValue().toString();
+        if (WildcardUtils.containsWildcard(pattern) || WildcardUtils.containsWildcard(replacement)) {
+          WildcardUtils.validateWildcardSymmetry(pattern, replacement);
+          String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
+          String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
+          expr = "REGEXP_REPLACE(" + expr + ", '" + regexPattern.replace("'", "''") + "', '" + regexReplacement.replace("'", "''") + "')";
+        } else {
+          expr = "REPLACE(" + expr + ", '" + pattern.replace("'", "''") + "', '" + replacement.replace("'", "''") + "')";
+        }
+      }
+      sb.computedColumns.put(fieldName, expr);
     }
   }
 
@@ -1504,6 +1537,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         transpiler.processEval((Eval) node, sb);
       } else if (node instanceof Rename) {
         transpiler.processRename((Rename) node, sb);
+      } else if (node instanceof Replace) {
+        transpiler.processReplace((Replace) node, sb);
       } else if (node instanceof Dedupe) {
         transpiler.processDedupe((Dedupe) node, sb);
       } else if (node instanceof RareTopN) {
@@ -1584,6 +1619,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         subTranspiler.processEval((Eval) subNode, subSb);
       } else if (subNode instanceof Rename) {
         subTranspiler.processRename((Rename) subNode, subSb);
+      } else if (subNode instanceof Replace) {
+        subTranspiler.processReplace((Replace) subNode, subSb);
       } else if (subNode instanceof Dedupe) {
         subTranspiler.processDedupe((Dedupe) subNode, subSb);
       } else if (subNode instanceof Join) {
