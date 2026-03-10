@@ -484,3 +484,137 @@
 - Note: CalciteNowLikeFunctionIT +1, CalcitePPLBuiltinFunctionIT -1, CalcitePPLPluginIT -1 are flaky test noise, not related to this change.
 - Blockers: The 7 remaining CalciteReplaceCommandIT failures are all error-handling tests where V4 mode throws exceptions client-side (SyntaxCheckException, IllegalArgumentException) instead of server-side (ResponseException). This is a systemic V4 test harness issue affecting all error tests, not specific to replace.
 - Next recommended task: CalciteSearchCommandIT (46 failures) — investigate actual failure modes (escaped quotes may not be the issue per explorer analysis). Or CalciteDateTimeFunctionIT (36 failures) or CalciteMultiValueStatsIT (31 failures). CalciteFieldsCommandIT (21 failures) and CalciteStatsCommandIT (21 failures) may also have quick wins.
+
+### Iteration 7 — Fix now-like datetime functions (now, curdate, curtime, sysdate, utc_*, etc.)
+- Date: 2026-03-10
+- Baseline rate: 54.6% (1237/2264, 144 skipped) — calculated from Iteration 5+6
+- Task: Fix all 12 now-like datetime functions in PPLToSqlTranspiler. Three issues: (1) SQL datetime keywords (CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, LOCALTIMESTAMP, LOCALTIME) were emitted with parentheses which Calcite rejects, (2) UTC and SYSDATE functions weren't mapped in FUNC_MAP, (3) Calcite's internal datetime representation doesn't serialize properly through the JDBC response path (returns garbled epoch-based values). Solution: generate UTC datetime string literals at transpile time since PPL's now-like functions are defined as constant within a query execution.
+- Files changed: api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (+19 lines, -3 lines)
+- Changes:
+  1. Added SQL_DATETIME_KEYWORDS static Set for keywords that must not have parentheses
+  2. Added FUNC_MAP entries: sysdate→CURRENT_TIMESTAMP, utc_date→CURRENT_DATE, utc_time→CURRENT_TIME, utc_timestamp→CURRENT_TIMESTAMP
+  3. Fixed localtime mapping: LOCALTIME→LOCALTIMESTAMP (PPL localtime returns datetime, not time)
+  4. Fixed buildWindowAggSql zero-arg branch to skip parens for SQL datetime keywords
+  5. Added now-like function handling in visitFunction: generates UTC string literals at transpile time for all 12 functions (now, current_timestamp, localtimestamp, localtime, utc_timestamp, sysdate, curdate, current_date, utc_date, curtime, current_time, utc_time)
+- New rate: 55.3% (1251/2264, 144 skipped)
+- Tests fixed: +14 net from Iteration 5 baseline (+12 CalciteNowLikeFunctionIT, +1 CalciteDateTimeFunctionIT, +1 CalcitePPLPluginIT flaky)
+- CalciteNowLikeFunctionIT: 0→12 passing (12→0 failures)
+- CalciteDateTimeFunctionIT: 27→28 passing (36→35 failures)
+- Per-class breakdown (full suite run):
+
+| Class | Total | Passed | Failed | Skipped | Delta |
+|-------|-------|--------|--------|---------|-------|
+| CalciteAddColTotalsCommandIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteAddTotalsCommandIT | 11 | 0 | 11 | 0 | 0 |
+| CalciteAliasFieldAggregationIT | 9 | 0 | 9 | 0 | 0 |
+| CalciteArrayFunctionIT | 60 | 0 | 60 | 0 | 0 |
+| CalciteBinCommandIT | 70 | 26 | 17 | 27 | 0 |
+| CalciteChartCommandIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteConvertTZFunctionIT | 14 | 2 | 12 | 0 | 0 |
+| CalciteCsvFormatIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteDataTypeIT | 6 | 3 | 3 | 0 | 0 |
+| CalciteDateTimeComparisonIT | 191 | 191 | 0 | 0 | 0 |
+| CalciteDateTimeFunctionIT | 65 | 28 | 35 | 2 | +1 |
+| CalciteDateTimeImplementationIT | 17 | 4 | 13 | 0 | 0 |
+| CalciteDedupCommandIT | 4 | 3 | 1 | 0 | 0 |
+| CalciteDescribeCommandIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteEvalCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteExpandCommandIT | 6 | 0 | 5 | 1 | 0 |
+| CalciteExplainIT | 236 | 163 | 0 | 73 | 0 |
+| CalciteFieldFormatCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteFieldsCommandIT | 39 | 18 | 21 | 0 | 0 |
+| CalciteFillNullCommandIT | 13 | 3 | 10 | 0 | 0 |
+| CalciteFlattenCommandIT | 5 | 0 | 4 | 1 | 0 |
+| CalciteFlattenDocValueIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteGeoIpFunctionsIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteGeoPointFormatsIT | 9 | 1 | 8 | 0 | 0 |
+| CalciteHeadCommandIT | 6 | 4 | 0 | 2 | 0 |
+| CalciteIPComparisonIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteIPFunctionsIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteInformationSchemaCommandIT | 3 | 0 | 0 | 3 | 0 |
+| CalciteJsonFunctionsIT | 5 | 0 | 0 | 5 | 0 |
+| CalciteLegacyAPICompatibilityIT | 6 | 6 | 0 | 0 | 0 |
+| CalciteLikeQueryIT | 11 | 5 | 5 | 1 | 0 |
+| CalciteMatchBoolPrefixIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteMatchIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteMatchPhrasePrefixIT | 8 | 0 | 8 | 0 | 0 |
+| CalciteMatchPhraseIT | 2 | 1 | 1 | 0 | 0 |
+| CalciteMathematicalFunctionIT | 62 | 52 | 10 | 0 | 0 |
+| CalciteMultiMatchIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteMultiValueStatsIT | 31 | 0 | 31 | 0 | 0 |
+| CalciteMultisearchCommandIT | 17 | 0 | 17 | 0 | 0 |
+| CalciteMVAppendFunctionIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteMvCombineCommandIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteMvExpandCommandIT | 16 | 0 | 16 | 0 | 0 |
+| CalciteNewAddedCommandsIT | 22 | 6 | 16 | 0 | 0 |
+| CalciteNoMvCommandIT | 20 | 1 | 19 | 0 | 0 |
+| CalciteNowLikeFunctionIT | 12 | 12 | 0 | 0 | +12 |
+| CalciteObjectFieldOperateIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteOperatorIT | 21 | 21 | 0 | 0 | 0 |
+| CalciteParseCommandIT | 7 | 3 | 4 | 0 | 0 |
+| CalcitePPLAggregationIT | 100 | 78 | 22 | 0 | 0 |
+| CalcitePPLAggregationPaginatingIT | 100 | 78 | 22 | 0 | 0 |
+| CalcitePPLAppendcolIT | 2 | 0 | 2 | 0 | 0 |
+| CalcitePPLAppendCommandIT | 8 | 0 | 8 | 0 | 0 |
+| CalcitePPLAppendPipeCommandIT | 4 | 1 | 3 | 0 | 0 |
+| CalcitePPLBasicIT | 42 | 34 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionIT | 26 | 18 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionsNullIT | 71 | 58 | 13 | 0 | 0 |
+| CalcitePPLCaseFunctionIT | 9 | 7 | 1 | 1 | 0 |
+| CalcitePPLCastFunctionIT | 21 | 10 | 11 | 0 | 0 |
+| CalcitePPLConditionBuiltinFunctionIT | 22 | 15 | 7 | 0 | 0 |
+| CalcitePPLCryptographicFunctionIT | 4 | 2 | 2 | 0 | 0 |
+| CalcitePPLDedupIT | 12 | 11 | 1 | 0 | 0 |
+| CalcitePPLEnhancedCoalesceIT | 15 | 11 | 4 | 0 | 0 |
+| CalcitePPLEvalMaxMinFunctionIT | 8 | 5 | 3 | 0 | 0 |
+| CalcitePPLEventstatsIT | 27 | 25 | 2 | 0 | 0 |
+| CalcitePPLExistsSubqueryIT | 19 | 16 | 3 | 0 | 0 |
+| CalcitePPLExplainIT | 4 | 4 | 0 | 0 | 0 |
+| CalcitePPLFillnullIT | 3 | 3 | 0 | 0 | 0 |
+| CalcitePPLGraphLookupIT | 22 | 0 | 22 | 0 | 0 |
+| CalcitePPLGrokIT | 3 | 0 | 3 | 0 | 0 |
+| CalcitePPLIPFunctionIT | 1 | 0 | 1 | 0 | 0 |
+| CalcitePPLInSubqueryIT | 18 | 14 | 3 | 1 | 0 |
+| CalcitePPLJoinIT | 39 | 21 | 18 | 0 | 0 |
+| CalcitePPLJsonBuiltinFunctionIT | 18 | 1 | 17 | 0 | 0 |
+| CalcitePPLLookupIT | 17 | 13 | 4 | 0 | 0 |
+| CalcitePPLNestedAggregationIT | 9 | 0 | 0 | 9 | 0 |
+| CalcitePPLParseIT | 6 | 6 | 0 | 0 | 0 |
+| CalcitePPLPatternsIT | 15 | 0 | 15 | 0 | 0 |
+| CalcitePPLPluginIT | 5 | 4 | 1 | 0 | 0 |
+| CalcitePPLRenameIT | 22 | 10 | 12 | 0 | 0 |
+| CalcitePPLScalarSubqueryIT | 14 | 13 | 1 | 0 | 0 |
+| CalcitePPLSortIT | 18 | 17 | 1 | 0 | 0 |
+| CalcitePPLSpathCommandIT | 14 | 0 | 14 | 0 | 0 |
+| CalcitePPLStringBuiltinFunctionIT | 27 | 21 | 6 | 0 | 0 |
+| CalcitePPLTrendlineIT | 7 | 7 | 0 | 0 | 0 |
+| CalcitePrometheusDataSourceCommandsIT | 11 | 0 | 0 | 11 | 0 |
+| CalciteQueryAnalysisIT | 14 | 9 | 5 | 0 | 0 |
+| CalciteQueryStringIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteRareCommandIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteRegexCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteRelevanceFunctionIT | 15 | 0 | 14 | 1 | 0 |
+| CalciteRenameCommandIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteReplaceCommandIT | 21 | 14 | 7 | 0 | 0 |
+| CalciteResourceMonitorIT | 1 | 1 | 0 | 0 | 0 |
+| CalciteReverseCommandIT | 7 | 0 | 7 | 0 | 0 |
+| CalciteRexCommandIT | 18 | 0 | 18 | 0 | 0 |
+| CalciteSQLJsonFunctionIT | 8 | 8 | 0 | 0 | 0 |
+| CalciteSearchCommandIT | 52 | 5 | 46 | 1 | 0 |
+| CalciteSettingsIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteShowDataSourcesCommandIT | 2 | 0 | 0 | 2 | 0 |
+| CalciteSimpleQueryStringIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteSortCommandIT | 30 | 16 | 14 | 0 | 0 |
+| CalciteStatsCommandIT | 63 | 42 | 21 | 0 | 0 |
+| CalciteStreamstatsCommandIT | 46 | 33 | 13 | 0 | 0 |
+| CalciteSystemFunctionIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteTextFunctionIT | 24 | 18 | 6 | 0 | 0 |
+| CalciteTimechartCommandIT | 18 | 0 | 18 | 0 | 0 |
+| CalciteTimechartPerFunctionIT | 12 | 0 | 12 | 0 | 0 |
+| CalciteTopCommandIT | 6 | 5 | 1 | 0 | 0 |
+| CalciteTransposeCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteTrendlineCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteWhereCommandIT | 37 | 30 | 4 | 3 | 0 |
+
+- Blockers: None for this iteration. The approach of generating UTC string literals at transpile time works because PPL's now-like functions are defined as constant within a query execution (same value for all rows). Calcite's internal CURRENT_TIMESTAMP returns epoch-based values that don't serialize properly through the JDBC response path.
+- Next recommended task: CalciteMathematicalFunctionIT (10 failures) — add/subtract/multiply/divide function mappings to arithmetic operators, expm1→(EXP(x)-1), conv→base conversion. Or CalciteSortCommandIT (14 failures) — sort count limit, str/num type casts, mixed prefix/suffix directions. Or CalciteSearchCommandIT (46 failures) — search command implementation (large scope, may need multiple iterations).

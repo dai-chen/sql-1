@@ -93,6 +93,8 @@ import org.opensearch.sql.ppl.parser.AstStatementBuilder;
 public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
 
   private static final Map<String, String> FUNC_MAP = new HashMap<>();
+  private static final java.util.Set<String> SQL_DATETIME_KEYWORDS =
+      java.util.Set.of("CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME", "LOCALTIMESTAMP", "LOCALTIME");
   private static int subqueryCounter = 0;
   private int evalCounter = 0;
   /** Current SelectBuilder — used by visitQualifiedName to check join context. */
@@ -198,8 +200,12 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     FUNC_MAP.put("curtime", "CURRENT_TIME");
     FUNC_MAP.put("current_time", "CURRENT_TIME");
     FUNC_MAP.put("current_timestamp", "CURRENT_TIMESTAMP");
-    FUNC_MAP.put("localtime", "LOCALTIME");
+    FUNC_MAP.put("localtime", "LOCALTIMESTAMP");
     FUNC_MAP.put("localtimestamp", "LOCALTIMESTAMP");
+    FUNC_MAP.put("sysdate", "CURRENT_TIMESTAMP");
+    FUNC_MAP.put("utc_date", "CURRENT_DATE");
+    FUNC_MAP.put("utc_time", "CURRENT_TIME");
+    FUNC_MAP.put("utc_timestamp", "CURRENT_TIMESTAMP");
   }
 
   /** Transpile a PPL query string to SQL. */
@@ -691,8 +697,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     }
 
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
-    if (args.isEmpty()) {
-      return sqlName + "()";
+    if (args.isEmpty() || ("sysdate".equals(name) && args.size() == 1)) {
+      return SQL_DATETIME_KEYWORDS.contains(sqlName) ? sqlName : sqlName + "()";
     }
     String argsSql = args.stream().map(this::visitExpr).collect(Collectors.joining(", "));
     return sqlName + "(" + argsSql + ")";
@@ -2157,6 +2163,16 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       return "CASE WHEN (" + args.get(0) + ") IS NULL OR (" + args.get(1) + ") IS NULL THEN NULL ELSE (" + args.get(0) + " + " + args.get(1) + ") END";
     if ("period_diff".equals(name))
       return "CASE WHEN (" + args.get(0) + ") IS NULL OR (" + args.get(1) + ") IS NULL THEN NULL ELSE (" + args.get(0) + " - " + args.get(1) + ") END";
+
+    // Now-like datetime functions: generate UTC literals at transpile time
+    // (Calcite's CURRENT_TIMESTAMP returns internal representation that doesn't serialize properly)
+    java.time.LocalDateTime utcNow = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
+    if (java.util.Set.of("now","current_timestamp","localtimestamp","localtime","utc_timestamp","sysdate").contains(name))
+      return "'" + utcNow.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "'";
+    if (java.util.Set.of("curdate","current_date","utc_date").contains(name))
+      return "'" + utcNow.toLocalDate() + "'";
+    if (java.util.Set.of("curtime","current_time","utc_time").contains(name))
+      return "'" + utcNow.toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")) + "'";
 
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     return sqlName + "(" + String.join(", ", args) + ")";
