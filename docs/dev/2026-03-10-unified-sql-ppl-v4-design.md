@@ -129,12 +129,50 @@ PPL string → PPLSyntaxParser → AST → PPLToSqlNodeConverter(SchemaPlus) →
 - `CalciteRelNodeVisitor` (V3, too complex, bypasses analysis)
 - `PPLToSqlTranspiler` (PoC, schema-unaware string manipulation)
 
+**Two-tier converter design:**
+
+| Tier | Class | Schema | Commands |
+|------|-------|--------|----------|
+| **Base (static)** | `PPLToSqlNodeConverter` | No — only uses what's explicitly in the PPL AST | where, sort, head, eval (add column), stats, dedup, join, lookup, subquery, append, top, rare, trendline, streamstats |
+| **Subclass (dynamic)** | `DynamicPPLToSqlNodeConverter` | Yes — resolves columns dynamically from `SchemaPlus` | All base commands + fields (include/exclude), eval (column override), rename (wildcard), fillnull (all-fields), replace, bin, appendcol, graphlookup TVF |
+
+```java
+// Base — no schema dependency, handles "static" commands
+public class PPLToSqlNodeConverter extends PPLAstVisitor<SqlNode> {
+    public SqlNode convert(Statement ast) { ... }
+    // Handles: where, sort, head, eval, stats, dedup, join, ...
+}
+
+// Subclass — adds commands that need dynamic column resolution
+public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
+    private final SchemaPlus schema;
+
+    public DynamicPPLToSqlNodeConverter(SchemaPlus schema) {
+        this.schema = schema;
+    }
+    // Overrides: visitProject (fields -), visitRename (wildcard),
+    //            visitFillNull (all-fields), visitGraphLookup (TVF), ...
+}
+```
+
+**Unified code path:**
+```
+PPL string → PPLSyntaxParser → AST
+    → (Dynamic)PPLToSqlNodeConverter → SqlNode
+    → UnifiedQueryPlanner → RelNode
+    → UnifiedQueryCompiler → execute
+    → UnifiedQueryTranspiler → SQL text (for Spark/Trino)
+```
+
+All PPL queries go through SqlNode. `UnifiedQueryTranspiler` consumes RelNode (downstream of the planner), never SqlNode directly. The converter choice (base vs dynamic) depends on whether schema is available:
+- **With OpenSearch cluster:** `DynamicPPLToSqlNodeConverter(schema)` — full command support
+- **Without cluster (SDK, testing):** `PPLToSqlNodeConverter` — static commands only, or provide an in-memory schema
+
 **Key properties:**
-- Takes `SchemaPlus` for field type resolution, wildcard expansion, coercion decisions
 - Produces `SqlNode` — feeds into Calcite's validate → rel pipeline
 - Lighter dependency than V3's `CalcitePlanContext` (no RelBuilder, no RexBuilder needed)
 - Does NOT need to track types or emit CASTs for coercion — that's handled by `PPLTypeCoercion` during Calcite validation (see 2.2)
-- Still needs `SchemaPlus` for column enumeration (`fields -`, rename wildcards, `fillnull` all-fields) and TVF parameter construction
+- `DynamicPPLToSqlNodeConverter` uses `SchemaPlus` only for column enumeration (`fields -`, rename wildcards, `fillnull` all-fields) and TVF parameter construction
 
 **Design principle: SqlNode DSL for clean, declarative translation.**
 
@@ -174,14 +212,14 @@ The DSL is a thin utility layer (static factory methods wrapping `SqlNode` const
 ```java
 class PplV4PlanningStrategy implements PlanningStrategy {
     private final UnifiedQueryParser parser;
-    private final PPLToSqlNodeConverter converter;
+    private final DynamicPPLToSqlNodeConverter converter;
 
     RelNode plan(String pplQuery) {
         // 1. PPL parse → AST
         Statement ast = parsePplToAst(pplQuery);
         // 2. AST → SqlNode (declarative, schema-aware)
         SqlNode sqlNode = converter.convert(ast);
-        // 3. SqlNode → validate (TypeCoercion injects CASTs) → RelNode
+        // 3. SqlNode → validate (PPLTypeCoercion injects CASTs) → RelNode
         SqlNode validated = planner.validate(sqlNode);
         RelRoot rel = planner.rel(validated);
         return optimize(rel.rel);
