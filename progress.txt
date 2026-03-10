@@ -322,3 +322,137 @@
   - Non-existent field (1): testBinWithNonExistentField — error message format mismatch
 - Blockers: CountBin/MinSpanBin/RangeBin need data-range window functions (MIN/MAX OVER()) to compute bin width dynamically. Aligntime needs time modifier parsing (@d+3h, epoch timestamps). Nested field REPLACE returns all struct siblings.
 - Next recommended task: CalciteStreamstatsCommandIT (46 failures, 0 passing) or CalciteArrayFunctionIT (60 failures, 0 passing) or CalciteDateTimeFunctionIT (36 remaining failures) — pick highest-impact next.
+
+### Iteration 5 — Implement streamstats command (StreamWindow)
+- Date: 2026-03-10
+- Baseline rate: 51.5% (1165/2264, 144 skipped)
+- Task: Implement StreamWindow (streamstats) support in PPLToSqlTranspiler. Added processStreamWindow() method that reads WindowFrame from each WindowFunction (set by AstBuilder based on current/window args), converts WindowBound subclasses to SQL ROWS BETWEEN clauses, handles PARTITION BY from groupList, and supports bucketNullable=false null checks. Also captures preceding ORDER BY (from sort pipe) and includes it in the OVER clause for correct row ordering in sliding windows.
+- Files changed: api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (+3 imports, +3 dispatch entries in transpilePlan/transpileSubPlan, +processStreamWindow method ~55 lines, +windowFrameToSql/windowBoundToSql helpers ~15 lines)
+- Changes:
+  1. Added imports: StreamWindow, WindowFrame, WindowBound
+  2. Added `else if (node instanceof StreamWindow)` dispatch in transpilePlan() (2 locations) and transpileSubPlan() (1 location)
+  3. Added processStreamWindow(): wraps as subquery if needed, captures ORDER BY before wrapping, builds PARTITION BY from groupList, reads WindowFrame from each WindowFunction, converts to SQL ROWS BETWEEN clause, handles bucketNullable null checks
+  4. Added windowFrameToSql(WindowFrame): converts frame type + bounds to SQL
+  5. Added windowBoundToSql(WindowBound): converts CurrentRowWindowBound/UnboundedWindowBound/OffSetWindowBound to SQL strings
+- New rate: 54.1% (1224/2264, 144 skipped)
+- Tests fixed: +59 net (CalciteStreamstatsCommandIT: 0→33 passing, 46→13 failures)
+- CalciteStreamstatsCommandIT passing tests (33): testStreamstats, testStreamstatsWithNull, testStreamstatsBy, testStreamstatsByWithNull, testStreamstatsByWithNullBucket, testStreamstatsBySpan, testStreamstatsBySpanWithNull, testStreamstatsByMultiplePartitions1, testStreamstatsByMultiplePartitions2, testStreamstatsByMultiplePartitionsWithNull1, testStreamstatsByMultiplePartitionsWithNull2, testStreamstatsCurrent, testStreamstatsCurrentWithNUll, testStreamstatsWindow, testStreamstatsWindowWithNull, testStreamstatsBigWindow, testStreamstatsCurrentAndWindow, testStreamstatsCurrentAndWindowWithNull, testStreamstatsAndEventstats, testStreamstatsAndSort, testLeftJoinWithStreamstats, testWhereInWithStreamstatsSubquery, testMultipleStreamstatsWithEval2, testStreamstatsEmptyRows, testStreamstatsVariance, testStreamstatsVarianceWithNull, testStreamstatsVarianceBy, testStreamstatsVarianceBySpan, testStreamstatsVarianceWithNullBy, testStreamstatsDistinctCount, testStreamstatsDistinctCountByCountry, testStreamstatsDistinctCountWithNull, testStreamstatsEarliestAndLatest
+- Remaining 13 CalciteStreamstatsCommandIT failures:
+  - Global semantics (3): testStreamstatsGlobal, testStreamstatsGlobalWithNull, testStreamstatsGlobalWithNullBucket — global=false requires per-partition row counting that standard SQL windows can't express
+  - Reset semantics (3): testStreamstatsReset, testStreamstatsResetWithNull, testStreamstatsResetWithNullBucket — reset_before/reset_after are stateful operations without SQL equivalents
+  - Multiple chained streamstats (4): testMultipleStreamstats, testMultipleStreamstatsWithNull1, testMultipleStreamstatsWithNull2, testMultipleStreamstatsWithEval — order-dependent chaining where subquery wrapping loses document order
+  - COUNT(DISTINCT) in window (1): testStreamstatsDistinctCountFunction — SQL doesn't support COUNT(DISTINCT x) OVER (ROWS ...)
+  - Error handling (2): testUnsupportedWindowFunctions, testStreamstatsWindowError — expect ResponseException but get IllegalArgumentException (validation at parse time, not server)
+- Per-class breakdown (full suite run):
+
+| Class | Total | Passed | Failed | Skipped | Delta |
+|-------|-------|--------|--------|---------|-------|
+| CalciteAddColTotalsCommandIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteAddTotalsCommandIT | 11 | 0 | 11 | 0 | 0 |
+| CalciteAliasFieldAggregationIT | 9 | 0 | 9 | 0 | 0 |
+| CalciteArrayFunctionIT | 60 | 0 | 60 | 0 | 0 |
+| CalciteBinCommandIT | 70 | 26 | 17 | 27 | 0 |
+| CalciteChartCommandIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteConvertTZFunctionIT | 14 | 2 | 12 | 0 | 0 |
+| CalciteCsvFormatIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteDataTypeIT | 6 | 3 | 3 | 0 | 0 |
+| CalciteDateTimeComparisonIT | 191 | 191 | 0 | 0 | 0 |
+| CalciteDateTimeFunctionIT | 65 | 27 | 36 | 2 | 0 |
+| CalciteDateTimeImplementationIT | 17 | 4 | 13 | 0 | 0 |
+| CalciteDedupCommandIT | 4 | 3 | 1 | 0 | 0 |
+| CalciteDescribeCommandIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteEvalCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteExpandCommandIT | 6 | 0 | 5 | 1 | 0 |
+| CalciteExplainIT | 236 | 163 | 0 | 73 | 0 |
+| CalciteFieldFormatCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteFieldsCommandIT | 39 | 18 | 21 | 0 | 0 |
+| CalciteFillNullCommandIT | 13 | 3 | 10 | 0 | 0 |
+| CalciteFlattenCommandIT | 5 | 0 | 4 | 1 | 0 |
+| CalciteFlattenDocValueIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteGeoIpFunctionsIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteGeoPointFormatsIT | 9 | 1 | 8 | 0 | 0 |
+| CalciteHeadCommandIT | 6 | 4 | 0 | 2 | 0 |
+| CalciteIPComparisonIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteIPFunctionsIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteInformationSchemaCommandIT | 3 | 0 | 0 | 3 | 0 |
+| CalciteJsonFunctionsIT | 5 | 0 | 0 | 5 | 0 |
+| CalciteLegacyAPICompatibilityIT | 6 | 6 | 0 | 0 | 0 |
+| CalciteLikeQueryIT | 11 | 5 | 5 | 1 | 0 |
+| CalciteMVAppendFunctionIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteMatchBoolPrefixIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteMatchIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteMatchPhrasePrefixIT | 8 | 0 | 8 | 0 | 0 |
+| CalciteMatchPhraseIT | 2 | 1 | 1 | 0 | 0 |
+| CalciteMathematicalFunctionIT | 62 | 52 | 10 | 0 | 0 |
+| CalciteMultiMatchIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteMultiValueStatsIT | 31 | 0 | 31 | 0 | 0 |
+| CalciteMultisearchCommandIT | 17 | 0 | 17 | 0 | 0 |
+| CalciteMvCombineCommandIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteMvExpandCommandIT | 16 | 0 | 16 | 0 | 0 |
+| CalciteNewAddedCommandsIT | 22 | 6 | 16 | 0 | 0 |
+| CalciteNoMvCommandIT | 20 | 1 | 19 | 0 | 0 |
+| CalciteNowLikeFunctionIT | 12 | 0 | 12 | 0 | 0 |
+| CalciteObjectFieldOperateIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteOperatorIT | 21 | 21 | 0 | 0 | 0 |
+| CalcitePPLAggregationIT | 100 | 78 | 22 | 0 | 0 |
+| CalcitePPLAggregationPaginatingIT | 100 | 78 | 22 | 0 | 0 |
+| CalcitePPLAppendCommandIT | 8 | 0 | 8 | 0 | 0 |
+| CalcitePPLAppendPipeCommandIT | 4 | 1 | 3 | 0 | 0 |
+| CalcitePPLAppendcolIT | 2 | 0 | 2 | 0 | 0 |
+| CalcitePPLBasicIT | 42 | 34 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionIT | 26 | 18 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionsNullIT | 71 | 58 | 13 | 0 | 0 |
+| CalcitePPLCaseFunctionIT | 9 | 7 | 1 | 1 | 0 |
+| CalcitePPLCastFunctionIT | 21 | 10 | 11 | 0 | 0 |
+| CalcitePPLConditionBuiltinFunctionIT | 22 | 15 | 7 | 0 | 0 |
+| CalcitePPLCryptographicFunctionIT | 4 | 2 | 2 | 0 | 0 |
+| CalcitePPLDedupIT | 12 | 11 | 1 | 0 | 0 |
+| CalcitePPLEnhancedCoalesceIT | 15 | 11 | 4 | 0 | 0 |
+| CalcitePPLEvalMaxMinFunctionIT | 8 | 5 | 3 | 0 | 0 |
+| CalcitePPLEventstatsIT | 27 | 25 | 2 | 0 | 0 |
+| CalcitePPLExistsSubqueryIT | 19 | 16 | 3 | 0 | 0 |
+| CalcitePPLExplainIT | 4 | 4 | 0 | 0 | 0 |
+| CalcitePPLFillnullIT | 3 | 3 | 0 | 0 | 0 |
+| CalcitePPLGraphLookupIT | 22 | 0 | 22 | 0 | 0 |
+| CalcitePPLGrokIT | 3 | 0 | 3 | 0 | 0 |
+| CalcitePPLIPFunctionIT | 1 | 0 | 1 | 0 | 0 |
+| CalcitePPLInSubqueryIT | 18 | 14 | 3 | 1 | 0 |
+| CalcitePPLJoinIT | 39 | 21 | 18 | 0 | 0 |
+| CalcitePPLJsonBuiltinFunctionIT | 18 | 1 | 17 | 0 | 0 |
+| CalcitePPLLookupIT | 17 | 13 | 4 | 0 | 0 |
+| CalcitePPLNestedAggregationIT | 9 | 0 | 0 | 9 | 0 |
+| CalcitePPLParseIT | 6 | 6 | 0 | 0 | 0 |
+| CalcitePPLPatternsIT | 15 | 0 | 15 | 0 | 0 |
+| CalcitePPLPluginIT | 5 | 4 | 1 | 0 | 0 |
+| CalcitePPLRenameIT | 22 | 10 | 12 | 0 | 0 |
+| CalcitePPLScalarSubqueryIT | 14 | 13 | 1 | 0 | 0 |
+| CalcitePPLSortIT | 18 | 17 | 1 | 0 | 0 |
+| CalcitePPLSpathCommandIT | 14 | 0 | 14 | 0 | 0 |
+| CalcitePPLStringBuiltinFunctionIT | 27 | 21 | 6 | 0 | 0 |
+| CalcitePPLTrendlineIT | 7 | 7 | 0 | 0 | 0 |
+| CalciteParseCommandIT | 7 | 3 | 4 | 0 | 0 |
+| CalcitePrometheusDataSourceCommandsIT | 11 | 0 | 0 | 11 | 0 |
+| CalciteQueryAnalysisIT | 14 | 9 | 5 | 0 | 0 |
+| CalciteQueryStringIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteRareCommandIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteRegexCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteRelevanceFunctionIT | 15 | 0 | 14 | 1 | 0 |
+| CalciteRenameCommandIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteReplaceCommandIT | 21 | 0 | 21 | 0 | 0 |
+| CalciteResourceMonitorIT | 1 | 1 | 0 | 0 | 0 |
+| CalciteReverseCommandIT | 7 | 0 | 7 | 0 | 0 |
+| CalciteRexCommandIT | 18 | 0 | 18 | 0 | 0 |
+| CalciteSQLJsonFunctionIT | 8 | 8 | 0 | 0 | 0 |
+| CalciteSearchCommandIT | 52 | 5 | 46 | 1 | 0 |
+| CalciteSettingsIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteShowDataSourcesCommandIT | 2 | 0 | 0 | 2 | 0 |
+| CalciteSimpleQueryStringIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteSortCommandIT | 30 | 16 | 14 | 0 | 0 |
+| CalciteStreamstatsCommandIT | 46 | 33 | 13 | 0 | +33 |
+| CalciteSystemFunctionIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteTopCommandIT | 6 | 5 | 1 | 0 | 0 |
+| CalciteTransposeCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteTrendlineCommandIT | 5 | 0 | 5 | 0 | 0 |
+
+- Blockers: Remaining 13 streamstats failures require either (a) complex stateful SQL constructs for global/reset semantics, (b) document-order preservation for chained streamstats, or (c) COUNT(DISTINCT) in window functions which SQL doesn't support.
+- Next recommended task: CalciteSearchCommandIT (46 failures — 25 are escaped-quote preprocessing fix in PPLIntegTestCase, 10 are nanosecond timestamp engine issue, 7 are earliest/latest time modifier resolution, 4 are relevance pushdown) or CalciteDateTimeFunctionIT (36 remaining failures) or CalciteMultiValueStatsIT (31 failures, 0 passing).

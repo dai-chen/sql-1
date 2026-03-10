@@ -74,6 +74,9 @@ import org.opensearch.sql.ast.tree.Sort;
 import org.opensearch.sql.ast.tree.SubqueryAlias;
 import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.Window;
+import org.opensearch.sql.ast.tree.StreamWindow;
+import org.opensearch.sql.ast.expression.WindowFrame;
+import org.opensearch.sql.ast.expression.WindowBound;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
@@ -249,6 +252,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         sb.tableAliases.add(alias.getAlias());
       } else if (node instanceof Join) {
         transpiler.processJoin((Join) node, sb);
+      } else if (node instanceof StreamWindow) {
+        transpiler.processStreamWindow((StreamWindow) node, sb);
       } else if (node instanceof Window) {
         transpiler.processWindow((Window) node, sb);
       } else if (node instanceof Trendline) {
@@ -428,6 +433,89 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     finalSelect.add("*");
     finalSelect.addAll(windowExprs);
     sb.select = finalSelect;
+  }
+
+  private void processStreamWindow(StreamWindow node, SelectBuilder sb) {
+    // Capture ORDER BY before wrapping — needed for window frame ordering
+    String orderByClause = "";
+    if (sb.orderBy != null && !sb.orderBy.isEmpty()) {
+      orderByClause = "ORDER BY " + String.join(", ", sb.orderBy) + " ";
+    }
+
+    boolean hasComputedColumns = sb.select.size() > 1
+        || (sb.select.size() == 1 && !"*".equals(sb.select.get(0)));
+    if (hasComputedColumns || sb.orderBy != null || sb.limit != null) {
+      sb.wrapAsSubquery();
+    }
+
+    // Build PARTITION BY from groupList
+    List<String> partitionCols = new ArrayList<>();
+    for (UnresolvedExpression expr : node.getGroupList()) {
+      if (expr instanceof Alias && ((Alias) expr).getDelegated() instanceof Span) {
+        partitionCols.add(visitExpr(((Alias) expr).getDelegated()));
+      } else if (expr instanceof Alias) {
+        partitionCols.add(visitExpr(((Alias) expr).getDelegated()));
+      } else {
+        partitionCols.add(visitExpr(expr));
+      }
+    }
+
+    String partitionClause = partitionCols.isEmpty() ? ""
+        : "PARTITION BY " + String.join(", ", partitionCols) + " ";
+
+    // Build null check for bucketNullable=false
+    String nullCheck = null;
+    if (!node.isBucketNullable() && !partitionCols.isEmpty()) {
+      List<String> checks = new ArrayList<>();
+      for (String col : partitionCols) {
+        checks.add(col + " IS NOT NULL");
+      }
+      nullCheck = String.join(" AND ", checks);
+    }
+
+    // Build window function expressions
+    List<String> windowExprs = new ArrayList<>();
+    for (UnresolvedExpression item : node.getWindowFunctionList()) {
+      Alias alias = (Alias) item;
+      String aliasName = alias.getName();
+      WindowFunction wf = (WindowFunction) alias.getDelegated();
+      String aggSql = buildWindowAggSql(wf.getFunction());
+
+      // Build frame clause from WindowFunction's frame
+      WindowFrame frame = wf.getWindowFrame();
+      String frameClause = windowFrameToSql(frame);
+      String overClause = " OVER (" + partitionClause + orderByClause + frameClause + ")";
+
+      String windowExpr = aggSql + overClause;
+      if (nullCheck != null) {
+        windowExpr = "CASE WHEN " + nullCheck + " THEN " + windowExpr + " ELSE NULL END";
+      }
+      windowExprs.add(windowExpr + " AS " + quoteId(aliasName));
+    }
+
+    List<String> finalSelect = new ArrayList<>();
+    finalSelect.add("*");
+    finalSelect.addAll(windowExprs);
+    sb.select = finalSelect;
+  }
+
+  private String windowFrameToSql(WindowFrame frame) {
+    String lower = windowBoundToSql(frame.getLower());
+    String upper = windowBoundToSql(frame.getUpper());
+    return frame.getType().name() + " BETWEEN " + lower + " AND " + upper;
+  }
+
+  private String windowBoundToSql(WindowBound bound) {
+    if (bound instanceof WindowBound.CurrentRowWindowBound) {
+      return "CURRENT ROW";
+    } else if (bound instanceof WindowBound.UnboundedWindowBound) {
+      return ((WindowBound.UnboundedWindowBound) bound).isPreceding()
+          ? "UNBOUNDED PRECEDING" : "UNBOUNDED FOLLOWING";
+    } else if (bound instanceof WindowBound.OffSetWindowBound) {
+      WindowBound.OffSetWindowBound ob = (WindowBound.OffSetWindowBound) bound;
+      return ob.getOffset() + (ob.isPreceding() ? " PRECEDING" : " FOLLOWING");
+    }
+    throw new UnsupportedOperationException("Unknown window bound: " + bound);
   }
 
   private void processTrendline(Trendline node, SelectBuilder sb) {
@@ -1426,6 +1514,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         sb.tableAliases.add(subAlias);
       } else if (node instanceof Join) {
         transpiler.processJoin((Join) node, sb);
+      } else if (node instanceof StreamWindow) {
+        transpiler.processStreamWindow((StreamWindow) node, sb);
       } else if (node instanceof Window) {
         transpiler.processWindow((Window) node, sb);
       } else if (node instanceof Trendline) {
@@ -1498,6 +1588,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         subTranspiler.processDedupe((Dedupe) subNode, subSb);
       } else if (subNode instanceof Join) {
         subTranspiler.processJoin((Join) subNode, subSb);
+      } else if (subNode instanceof StreamWindow) {
+        subTranspiler.processStreamWindow((StreamWindow) subNode, subSb);
       } else if (subNode instanceof Window) {
         subTranspiler.processWindow((Window) subNode, subSb);
       } else if (subNode instanceof Trendline) {
