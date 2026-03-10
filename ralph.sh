@@ -37,7 +37,7 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRD_FILE="$SCRIPT_DIR/prd.json"
-PROGRESS_FILE="$SCRIPT_DIR/progress-sqlnode-converter.txt"
+PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
 PROMPT_FILE="$SCRIPT_DIR/ralph-prompt.md"
 
 # Initialize progress file if missing
@@ -69,7 +69,7 @@ while [ ! -f "$SCRIPT_DIR/STOP_RALPH" ]; do
   echo "==============================================================="
 
   OUTPUT=$(kiro-cli chat --agent "$AGENT" --no-interactive --trust-all-tools \
-    "You are in the repo root directory. Read ralph-prompt.md, prd.json, and progress-sqlnode-converter.txt. Pick the next incomplete story, implement it, verify, commit, push, and update state. One task only." \
+    "You are in the repo root directory. Read ralph-prompt.md, prd.json, and progress.txt. Pick the next incomplete story, implement it, verify, commit, push, and update state. One task only." \
     2>&1 | tee /dev/stderr) || true
 
   if echo "$OUTPUT" | grep -q "RALPH_COMPLETE"; then
