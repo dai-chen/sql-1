@@ -57,6 +57,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
 
   protected JSONObject executeQuery(String query) throws IOException {
     if (V4_ENABLED) {
+      query = query.replace("\\\"", "\"");
       String sql = PPLToSqlTranspiler.transpile(query);
       LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
       Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
@@ -84,6 +85,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
         Assert.assertEquals(200, response.getStatusLine().getStatusCode());
         return getResponseBody(response, true);
       }
+      query = query.replace("\\\"", "\"");
       String sql = PPLToSqlTranspiler.transpile(query);
       LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
       Request request = new Request("POST", "/_plugins/_sql?format=jdbc");

@@ -2025,8 +2025,35 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if ("cot".equals(name)) {
       return "(1.0 / TAN(" + args.get(0) + "))";
     }
+    if ("add".equals(name) && args.size() == 2) {
+      return "(" + args.get(0) + " + " + args.get(1) + ")";
+    }
+    if ("subtract".equals(name) && args.size() == 2) {
+      return "(" + args.get(0) + " - " + args.get(1) + ")";
+    }
+    if ("multiply".equals(name) && args.size() == 2) {
+      return "(" + args.get(0) + " * " + args.get(1) + ")";
+    }
+    if ("divide".equals(name) && args.size() == 2) {
+      return "(" + args.get(0) + " / " + args.get(1) + ")";
+    }
+    if ("modulus".equals(name) && args.size() == 2) {
+      return "MOD(" + args.get(0) + ", " + args.get(1) + ")";
+    }
+    if ("atan".equals(name) && args.size() == 2) {
+      return "ATAN2(" + args.get(0) + ", " + args.get(1) + ")";
+    }
+    if ("expm1".equals(name)) {
+      return "(EXP(" + args.get(0) + ") - 1)";
+    }
+    if ("rint".equals(name)) {
+      return "ROUND(" + args.get(0) + ", 0)";
+    }
     if ("cbrt".equals(name)) {
-      return "POWER(" + args.get(0) + ", 1.0 / 3)";
+      return "POWER(" + args.get(0) + ", CAST(1 AS DOUBLE) / CAST(3 AS DOUBLE))";
+    }
+    if ("conv".equals(name)) {
+      return "CONV(" + String.join(", ", args) + ")";
     }
     if ("isnotnull".equals(name) || "is not null".equals(name)) {
       return "(" + args.get(0) + " IS NOT NULL)";

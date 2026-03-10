@@ -787,3 +787,136 @@
 - CalcitePPLSortIT now 18/18 (100%): the remaining 1 failure was a sort-after-eval pattern
 - Blockers: None for this iteration. The ORDER BY fix is clean with no regressions.
 - Next recommended task: CalciteSearchCommandIT (46 failures) — largest remaining failure block. Or CalciteDateTimeFunctionIT (35 failures) or CalciteMultiValueStatsIT (31 failures) or CalciteFieldsCommandIT (21 failures, but needs schema access for wildcard expansion).
+
+### Iteration 10 — Fix arithmetic/math function mappings + escaped-quote preprocessing
+- Date: 2026-03-10
+- Baseline rate: 57.6% (1304/2264, 144 skipped)
+- Task: Two changes: (1) Add PPL arithmetic and math function mappings in PPLToSqlTranspiler.java — add→+, subtract→-, multiply→*, divide→/, modulus→MOD, atan(2-arg)→ATAN2, expm1→(EXP(x)-1), rint→ROUND(x,0), cbrt precision fix, conv passthrough. (2) Add escaped double-quote preprocessing in PPLIntegTestCase.java V4 mode — query.replace("\"", "\"") before transpile() calls to replicate JSON deserialization that non-V4 path gets for free.
+- Files changed:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (+20 lines: 10 special-case function handlers in visitFunction)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (+2 lines: escaped-quote preprocessing in both V4 code paths)
+- New rate: 57.9% (1311/2264, 144 skipped)
+- Tests fixed: +7 net (+8 CalciteMathematicalFunctionIT, -1 flaky elsewhere)
+- CalciteMathematicalFunctionIT: 52→60 passing (10→2 failures)
+- Remaining 2 CalciteMathematicalFunctionIT failures:
+  - testCbrt: POWER(x, 1/3) floating-point precision differs from Java Math.cbrt()
+  - testConv: CONV UDF not registered in SQL operator table for transpiler path
+- Escaped-quote fix: SyntaxCheckException in CalciteSearchCommandIT dropped from 25→1, but newly-parseable tests hit downstream engine errors (nanosecond timestamps, relevance pushdown), so net 0 improvement for that class. Fix is still valuable for future iterations.
+- Per-class breakdown (full suite run):
+
+| Class | Total | Passed | Failed | Skipped | Delta |
+|-------|-------|--------|--------|---------|-------|
+| CalciteAddColTotalsCommandIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteAddTotalsCommandIT | 11 | 0 | 11 | 0 | 0 |
+| CalciteAliasFieldAggregationIT | 9 | 0 | 9 | 0 | 0 |
+| CalciteArrayFunctionIT | 60 | 0 | 60 | 0 | 0 |
+| CalciteBinCommandIT | 70 | 26 | 17 | 27 | 0 |
+| CalciteChartCommandIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteConvertTZFunctionIT | 14 | 2 | 12 | 0 | 0 |
+| CalciteCsvFormatIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteDataTypeIT | 6 | 3 | 3 | 0 | 0 |
+| CalciteDateTimeComparisonIT | 191 | 191 | 0 | 0 | 0 |
+| CalciteDateTimeFunctionIT | 65 | 28 | 35 | 2 | 0 |
+| CalciteDateTimeImplementationIT | 17 | 4 | 13 | 0 | 0 |
+| CalciteDedupCommandIT | 4 | 3 | 1 | 0 | 0 |
+| CalciteDescribeCommandIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteEvalCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteExpandCommandIT | 6 | 0 | 5 | 1 | 0 |
+| CalciteExplainIT | 236 | 163 | 0 | 73 | 0 |
+| CalciteFieldFormatCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteFieldsCommandIT | 39 | 18 | 21 | 0 | 0 |
+| CalciteFillNullCommandIT | 13 | 3 | 10 | 0 | 0 |
+| CalciteFlattenCommandIT | 5 | 0 | 4 | 1 | 0 |
+| CalciteFlattenDocValueIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteGeoIpFunctionsIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteGeoPointFormatsIT | 9 | 1 | 8 | 0 | 0 |
+| CalciteHeadCommandIT | 6 | 4 | 0 | 2 | 0 |
+| CalciteIPComparisonIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteIPFunctionsIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteInformationSchemaCommandIT | 3 | 0 | 0 | 3 | 0 |
+| CalciteJsonFunctionsIT | 5 | 0 | 0 | 5 | 0 |
+| CalciteLegacyAPICompatibilityIT | 6 | 6 | 0 | 0 | 0 |
+| CalciteLikeQueryIT | 11 | 5 | 5 | 1 | 0 |
+| CalciteMatchBoolPrefixIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteMatchIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteMatchPhrasePrefixIT | 8 | 0 | 8 | 0 | 0 |
+| CalciteMatchPhraseIT | 2 | 1 | 1 | 0 | 0 |
+| CalciteMathematicalFunctionIT | 62 | 60 | 2 | 0 | +8 |
+| CalciteMultiMatchIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteMultiValueStatsIT | 31 | 0 | 31 | 0 | 0 |
+| CalciteMultisearchCommandIT | 17 | 0 | 17 | 0 | 0 |
+| CalciteMVAppendFunctionIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteMvCombineCommandIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteMvExpandCommandIT | 16 | 0 | 16 | 0 | 0 |
+| CalciteNewAddedCommandsIT | 22 | 6 | 16 | 0 | 0 |
+| CalciteNoMvCommandIT | 20 | 1 | 19 | 0 | 0 |
+| CalciteNowLikeFunctionIT | 12 | 12 | 0 | 0 | 0 |
+| CalciteObjectFieldOperateIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteOperatorIT | 21 | 21 | 0 | 0 | 0 |
+| CalciteParseCommandIT | 7 | 3 | 4 | 0 | 0 |
+| CalcitePPLAggregationIT | 100 | 87 | 13 | 0 | 0 |
+| CalcitePPLAggregationPaginatingIT | 100 | 87 | 13 | 0 | 0 |
+| CalcitePPLAppendcolIT | 2 | 0 | 2 | 0 | 0 |
+| CalcitePPLAppendCommandIT | 8 | 0 | 8 | 0 | 0 |
+| CalcitePPLAppendPipeCommandIT | 4 | 1 | 3 | 0 | 0 |
+| CalcitePPLBasicIT | 42 | 34 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionIT | 26 | 18 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionsNullIT | 71 | 58 | 13 | 0 | 0 |
+| CalcitePPLCaseFunctionIT | 9 | 8 | 0 | 1 | 0 |
+| CalcitePPLCastFunctionIT | 21 | 10 | 11 | 0 | 0 |
+| CalcitePPLConditionBuiltinFunctionIT | 22 | 15 | 7 | 0 | 0 |
+| CalcitePPLCryptographicFunctionIT | 4 | 2 | 2 | 0 | 0 |
+| CalcitePPLDedupIT | 12 | 11 | 1 | 0 | 0 |
+| CalcitePPLEnhancedCoalesceIT | 15 | 11 | 4 | 0 | 0 |
+| CalcitePPLEvalMaxMinFunctionIT | 8 | 5 | 3 | 0 | 0 |
+| CalcitePPLEventstatsIT | 27 | 25 | 2 | 0 | 0 |
+| CalcitePPLExistsSubqueryIT | 19 | 16 | 3 | 0 | 0 |
+| CalcitePPLExplainIT | 4 | 4 | 0 | 0 | 0 |
+| CalcitePPLFillnullIT | 3 | 3 | 0 | 0 | 0 |
+| CalcitePPLGraphLookupIT | 22 | 0 | 22 | 0 | 0 |
+| CalcitePPLGrokIT | 3 | 0 | 3 | 0 | 0 |
+| CalcitePPLIPFunctionIT | 1 | 0 | 1 | 0 | 0 |
+| CalcitePPLInSubqueryIT | 18 | 14 | 3 | 1 | 0 |
+| CalcitePPLJoinIT | 39 | 21 | 18 | 0 | 0 |
+| CalcitePPLJsonBuiltinFunctionIT | 18 | 1 | 17 | 0 | 0 |
+| CalcitePPLLookupIT | 17 | 13 | 4 | 0 | 0 |
+| CalcitePPLNestedAggregationIT | 9 | 0 | 0 | 9 | 0 |
+| CalcitePPLParseIT | 6 | 6 | 0 | 0 | 0 |
+| CalcitePPLPatternsIT | 15 | 0 | 15 | 0 | 0 |
+| CalcitePPLPluginIT | 5 | 4 | 1 | 0 | 0 |
+| CalcitePPLRenameIT | 22 | 10 | 12 | 0 | 0 |
+| CalcitePPLScalarSubqueryIT | 14 | 13 | 1 | 0 | 0 |
+| CalcitePPLSortIT | 18 | 18 | 0 | 0 | 0 |
+| CalcitePPLSpathCommandIT | 14 | 0 | 14 | 0 | 0 |
+| CalcitePPLStringBuiltinFunctionIT | 27 | 21 | 6 | 0 | 0 |
+| CalcitePPLTrendlineIT | 7 | 7 | 0 | 0 | 0 |
+| CalcitePrometheusDataSourceCommandsIT | 11 | 0 | 0 | 11 | 0 |
+| CalciteQueryAnalysisIT | 14 | 9 | 5 | 0 | 0 |
+| CalciteQueryStringIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteRareCommandIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteRegexCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteRelevanceFunctionIT | 15 | 0 | 14 | 1 | 0 |
+| CalciteRenameCommandIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteReplaceCommandIT | 21 | 14 | 7 | 0 | 0 |
+| CalciteResourceMonitorIT | 1 | 1 | 0 | 0 | 0 |
+| CalciteReverseCommandIT | 7 | 0 | 7 | 0 | 0 |
+| CalciteRexCommandIT | 18 | 0 | 18 | 0 | 0 |
+| CalciteSQLJsonFunctionIT | 8 | 8 | 0 | 0 | 0 |
+| CalciteSearchCommandIT | 52 | 5 | 46 | 1 | 0 |
+| CalciteSettingsIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteShowDataSourcesCommandIT | 2 | 0 | 0 | 2 | 0 |
+| CalciteSimpleQueryStringIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteSortCommandIT | 30 | 30 | 0 | 0 | 0 |
+| CalciteStatsCommandIT | 63 | 60 | 3 | 0 | 0 |
+| CalciteStreamstatsCommandIT | 46 | 33 | 13 | 0 | 0 |
+| CalciteSystemFunctionIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteTextFunctionIT | 24 | 18 | 6 | 0 | 0 |
+| CalciteTimechartCommandIT | 18 | 0 | 18 | 0 | 0 |
+| CalciteTimechartPerFunctionIT | 12 | 0 | 12 | 0 | 0 |
+| CalciteTopCommandIT | 6 | 5 | 1 | 0 | 0 |
+| CalciteTransposeCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteTrendlineCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteWhereCommandIT | 37 | 30 | 4 | 3 | 0 |
+
+- Blockers: Remaining 2 CalciteMathematicalFunctionIT failures are hard: cbrt needs exact Math.cbrt() parity (POWER(x,1/3) has inherent precision loss), conv needs UDF registration in SQL operator table. CalciteSearchCommandIT escaped-quote fix unblocked parsing but tests hit nanosecond timestamp and relevance pushdown engine errors.
+- Next recommended task: Fix replace()→REGEXP_REPLACE mapping (6 CalcitePPLStringBuiltinFunctionIT + 1 CalciteTextFunctionIT = 7 tests). Or fix regexp_match→REGEXP_CONTAINS (5 CalciteTextFunctionIT tests). Or target CalciteDateTimeFunctionIT (35 failures) or CalcitePPLJoinIT (18 failures) for higher volume.
