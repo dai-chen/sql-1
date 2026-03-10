@@ -4,7 +4,7 @@
 # Previous progress archived to: progress-archived-2026-03-09.txt
 
 ## Current State
-- Current rate: 46.1% (1044/2264, 144 skipped)
+- Current rate: 51.5% (1165/2264, 144 skipped)
 - V4 transpiler: IMPLEMENTED (api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java)
 - Test wiring: IMPLEMENTED (PPLIntegTestCase.java V4 routing via -Dppl.engine.v4=true)
 
@@ -153,3 +153,131 @@
 
 - Blockers: None for this iteration. The regex-based TIME literal extraction only handles `CAST('HH:MM:SS' AS TIME)` patterns (literal time values). Non-literal TIME expressions in cross-type comparisons fall back to simple CAST(... AS TIMESTAMP) which uses epoch date — acceptable since non-literal TIME cross-type comparisons are rare in practice.
 - Next recommended task: CalciteDateTimeFunctionIT (60 failures) or CalciteArrayFunctionIT (60 failures) or CalciteStreamstatsCommandIT (46 failures) or CalciteSearchCommandIT (46 failures) — pick highest-impact next.
+
+### Iteration 3 — Auto-cast string literals to datetime types in datetime functions
+- Date: 2026-03-10
+- Baseline rate: 50.4% (1141/2264, 144 skipped)
+- Task: Fix "EXTRACT on CHAR" failures by auto-casting string literal arguments to appropriate datetime types (TIMESTAMP or TIME) in all datetime extraction/arithmetic functions. Also fixed NOW()→CURRENT_TIMESTAMP mapping and applied ensureTimestamp to the extract() function.
+- Files changed: api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java
+- Changes:
+  1. Fixed FUNC_MAP: now→CURRENT_TIMESTAMP (Calcite has no NOW() function)
+  2. Added ensureTimestamp() helper: detects string literals and casts to TIMESTAMP (or TIME for HH:MM:SS patterns)
+  3. Applied ensureTimestamp() to all datetime extraction functions (year, month, day, hour, minute, second, dayofweek, dayofyear, dayofmonth, weekofyear, hour_of_day, minute_of_hour, second_of_minute, month_of_year, quarter, microsecond, minute_of_day)
+  4. Applied ensureTimestamp() to dayname, monthname, weekday, yearweek, last_day, time_to_sec
+  5. Applied ensureTimestamp() to timestampadd, timestampdiff, datediff, date_add/adddate, date_sub/subdate
+  6. Applied ensureTimestamp() to extract() function (was missing)
+- New rate: 51.5% (1165/2264, 144 skipped)
+- Tests fixed: +24 overall, CalciteDateTimeFunctionIT: 3→27 passing (60→36 failures)
+- Per-class breakdown (full suite run):
+
+| Class | Total | Passed | Failed | Skipped | Delta |
+|-------|-------|--------|--------|---------|-------|
+| CalciteAddColTotalsCommandIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteAddTotalsCommandIT | 11 | 0 | 11 | 0 | 0 |
+| CalciteAliasFieldAggregationIT | 9 | 0 | 9 | 0 | 0 |
+| CalciteArrayFunctionIT | 60 | 0 | 60 | 0 | 0 |
+| CalciteBinCommandIT | 70 | 0 | 43 | 27 | 0 |
+| CalciteChartCommandIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteConvertTZFunctionIT | 14 | 2 | 12 | 0 | 0 |
+| CalciteCsvFormatIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteDataTypeIT | 6 | 3 | 3 | 0 | 0 |
+| CalciteDateTimeComparisonIT | 191 | 191 | 0 | 0 | 0 |
+| CalciteDateTimeFunctionIT | 65 | 27 | 36 | 2 | +24 |
+| CalciteDateTimeImplementationIT | 17 | 4 | 13 | 0 | 0 |
+| CalciteDedupCommandIT | 4 | 3 | 1 | 0 | 0 |
+| CalciteDescribeCommandIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteEvalCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteExpandCommandIT | 6 | 0 | 5 | 1 | 0 |
+| CalciteExplainIT | 236 | 163 | 0 | 73 | 0 |
+| CalciteFieldFormatCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteFieldsCommandIT | 39 | 18 | 21 | 0 | 0 |
+| CalciteFillNullCommandIT | 13 | 3 | 10 | 0 | 0 |
+| CalciteFlattenCommandIT | 5 | 0 | 4 | 1 | 0 |
+| CalciteFlattenDocValueIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteGeoIpFunctionsIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteGeoPointFormatsIT | 9 | 1 | 8 | 0 | 0 |
+| CalciteHeadCommandIT | 6 | 4 | 0 | 2 | 0 |
+| CalciteIPComparisonIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteIPFunctionsIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteInformationSchemaCommandIT | 3 | 0 | 0 | 3 | 0 |
+| CalciteJsonFunctionsIT | 5 | 0 | 0 | 5 | 0 |
+| CalciteLegacyAPICompatibilityIT | 6 | 6 | 0 | 0 | 0 |
+| CalciteLikeQueryIT | 11 | 5 | 5 | 1 | 0 |
+| CalciteMVAppendFunctionIT | 15 | 0 | 15 | 0 | 0 |
+| CalciteMatchBoolPrefixIT | 3 | 0 | 3 | 0 | 0 |
+| CalciteMatchIT | 1 | 0 | 1 | 0 | 0 |
+| CalciteMatchPhrasePrefixIT | 8 | 0 | 8 | 0 | 0 |
+| CalciteMatchPhraseIT | 2 | 1 | 1 | 0 | 0 |
+| CalciteMathematicalFunctionIT | 62 | 52 | 10 | 0 | 0 |
+| CalciteMultiMatchIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteMultiValueStatsIT | 31 | 0 | 31 | 0 | 0 |
+| CalciteMultisearchCommandIT | 17 | 0 | 17 | 0 | 0 |
+| CalciteMvCombineCommandIT | 7 | 1 | 6 | 0 | 0 |
+| CalciteMvExpandCommandIT | 16 | 0 | 16 | 0 | 0 |
+| CalciteNewAddedCommandsIT | 22 | 6 | 16 | 0 | 0 |
+| CalciteNoMvCommandIT | 20 | 1 | 19 | 0 | 0 |
+| CalciteNowLikeFunctionIT | 12 | 0 | 12 | 0 | 0 |
+| CalciteObjectFieldOperateIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteOperatorIT | 21 | 21 | 0 | 0 | 0 |
+| CalcitePPLAggregationIT | 100 | 78 | 22 | 0 | 0 |
+| CalcitePPLAggregationPaginatingIT | 100 | 78 | 22 | 0 | 0 |
+| CalcitePPLAppendCommandIT | 8 | 0 | 8 | 0 | 0 |
+| CalcitePPLAppendPipeCommandIT | 4 | 1 | 3 | 0 | 0 |
+| CalcitePPLAppendcolIT | 2 | 0 | 2 | 0 | 0 |
+| CalcitePPLBasicIT | 42 | 34 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionIT | 26 | 18 | 8 | 0 | 0 |
+| CalcitePPLBuiltinFunctionsNullIT | 71 | 58 | 13 | 0 | 0 |
+| CalcitePPLCaseFunctionIT | 9 | 7 | 1 | 1 | 0 |
+| CalcitePPLCastFunctionIT | 21 | 10 | 11 | 0 | 0 |
+| CalcitePPLConditionBuiltinFunctionIT | 22 | 15 | 7 | 0 | 0 |
+| CalcitePPLCryptographicFunctionIT | 4 | 2 | 2 | 0 | 0 |
+| CalcitePPLDedupIT | 12 | 11 | 1 | 0 | 0 |
+| CalcitePPLEnhancedCoalesceIT | 15 | 11 | 4 | 0 | 0 |
+| CalcitePPLEvalMaxMinFunctionIT | 8 | 5 | 3 | 0 | 0 |
+| CalcitePPLEventstatsIT | 27 | 25 | 2 | 0 | 0 |
+| CalcitePPLExistsSubqueryIT | 19 | 16 | 3 | 0 | 0 |
+| CalcitePPLExplainIT | 4 | 4 | 0 | 0 | 0 |
+| CalcitePPLFillnullIT | 3 | 3 | 0 | 0 | 0 |
+| CalcitePPLGraphLookupIT | 22 | 0 | 22 | 0 | 0 |
+| CalcitePPLGrokIT | 3 | 0 | 3 | 0 | 0 |
+| CalcitePPLIPFunctionIT | 1 | 0 | 1 | 0 | 0 |
+| CalcitePPLInSubqueryIT | 18 | 14 | 3 | 1 | 0 |
+| CalcitePPLJoinIT | 39 | 21 | 18 | 0 | 0 |
+| CalcitePPLJsonBuiltinFunctionIT | 18 | 1 | 17 | 0 | 0 |
+| CalcitePPLLookupIT | 17 | 13 | 4 | 0 | 0 |
+| CalcitePPLNestedAggregationIT | 9 | 0 | 0 | 9 | 0 |
+| CalcitePPLParseIT | 6 | 6 | 0 | 0 | 0 |
+| CalcitePPLPatternsIT | 15 | 0 | 15 | 0 | 0 |
+| CalcitePPLPluginIT | 5 | 4 | 1 | 0 | +1 |
+| CalcitePPLRenameIT | 22 | 10 | 12 | 0 | 0 |
+| CalcitePPLScalarSubqueryIT | 14 | 13 | 1 | 0 | 0 |
+| CalcitePPLSortIT | 18 | 17 | 1 | 0 | 0 |
+| CalcitePPLSpathCommandIT | 14 | 0 | 14 | 0 | 0 |
+| CalcitePPLStringBuiltinFunctionIT | 27 | 21 | 6 | 0 | 0 |
+| CalcitePPLTrendlineIT | 7 | 7 | 0 | 0 | 0 |
+| CalciteParseCommandIT | 7 | 3 | 4 | 0 | 0 |
+| CalcitePrometheusDataSourceCommandsIT | 11 | 0 | 0 | 11 | 0 |
+| CalciteQueryAnalysisIT | 14 | 9 | 5 | 0 | 0 |
+| CalciteQueryStringIT | 6 | 0 | 6 | 0 | 0 |
+| CalciteRareCommandIT | 5 | 4 | 1 | 0 | 0 |
+| CalciteRegexCommandIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteRelevanceFunctionIT | 15 | 0 | 14 | 1 | 0 |
+| CalciteRenameCommandIT | 2 | 2 | 0 | 0 | 0 |
+| CalciteReplaceCommandIT | 21 | 0 | 21 | 0 | 0 |
+| CalciteResourceMonitorIT | 1 | 1 | 0 | 0 | 0 |
+| CalciteReverseCommandIT | 7 | 0 | 7 | 0 | 0 |
+| CalciteRexCommandIT | 18 | 0 | 18 | 0 | 0 |
+| CalciteSQLJsonFunctionIT | 8 | 8 | 0 | 0 | 0 |
+| CalciteSearchCommandIT | 52 | 5 | 46 | 1 | 0 |
+| CalciteSettingsIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteShowDataSourcesCommandIT | 2 | 0 | 0 | 2 | 0 |
+| CalciteSimpleQueryStringIT | 5 | 0 | 5 | 0 | 0 |
+| CalciteSortCommandIT | 30 | 16 | 14 | 0 | 0 |
+| CalciteStreamstatsCommandIT | 46 | 0 | 46 | 0 | 0 |
+| CalciteSystemFunctionIT | 2 | 0 | 2 | 0 | 0 |
+| CalciteTopCommandIT | 6 | 5 | 1 | 0 | 0 |
+| CalciteTransposeCommandIT | 4 | 0 | 4 | 0 | 0 |
+| CalciteTrendlineCommandIT | 5 | 0 | 5 | 0 | 0 |
+
+- Blockers: Remaining 36 CalciteDateTimeFunctionIT failures fall into: (a) strftime not implemented (6 tests), (b) date_format/get_format stubs returning wrong values (3 tests), (c) wrong computation logic in period_add/period_diff/datediff/makedate/maketime/microsecond (10 tests), (d) convert_tz/datetime timezone not applied (2 tests), (e) addtime/subtime/from_unixtime return wrong type (5 tests), (f) adddate/date_add/date_sub/subdate interval arithmetic overflow (4 tests), (g) week off-by-one (2 tests), (h) dayname/monthname abbreviated vs full (2 tests), (i) str_to_date/unix_timestamp errors (2 tests).
+- Next recommended task: CalciteArrayFunctionIT (60 failures, 0 passing) or CalciteSearchCommandIT (46 failures) or CalciteStreamstatsCommandIT (46 failures) — these are the largest remaining failure blocks. CalciteNowLikeFunctionIT (12 failures) may be quick wins since NOW() was just fixed to CURRENT_TIMESTAMP.

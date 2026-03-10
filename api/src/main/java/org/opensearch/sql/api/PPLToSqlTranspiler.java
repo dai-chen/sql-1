@@ -183,7 +183,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     FUNC_MAP.put("nullif", "NULLIF");
     FUNC_MAP.put("typeof", "TYPEOF");
     // Date/time functions
-    FUNC_MAP.put("now", "NOW");
+    FUNC_MAP.put("now", "CURRENT_TIMESTAMP");
     FUNC_MAP.put("curdate", "CURRENT_DATE");
     FUNC_MAP.put("current_date", "CURRENT_DATE");
     FUNC_MAP.put("curtime", "CURRENT_TIME");
@@ -1628,6 +1628,18 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     return expr;
   }
 
+  /** Wrap a SQL string literal in CAST to an appropriate datetime type. */
+  private String ensureTimestamp(String arg) {
+    if (arg.startsWith("'") && arg.endsWith("'")) {
+      String val = arg.substring(1, arg.length() - 1);
+      if (val.matches("\\d{2}:\\d{2}:\\d{2}.*")) {
+        return "CAST(" + arg + " AS TIME)";
+      }
+      return "CAST(" + arg + " AS TIMESTAMP)";
+    }
+    return arg;
+  }
+
   private String castInt(String expr) { return "CAST(" + expr + " AS INTEGER)"; }
 
   public String visitFunction(Function node, Void ctx) {
@@ -1770,49 +1782,49 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     }
     if ("extract".equals(name)) {
       String part = args.get(0).replace("'", "");
-      return "EXTRACT(" + part + " FROM " + args.get(1) + ")";
+      return "EXTRACT(" + part + " FROM " + ensureTimestamp(args.get(1)) + ")";
     }
-    if ("year".equals(name)) return castInt("EXTRACT(YEAR FROM " + args.get(0) + ")");
-    if ("month".equals(name)) return castInt("EXTRACT(MONTH FROM " + args.get(0) + ")");
-    if ("day".equals(name)) return castInt("EXTRACT(DAY FROM " + args.get(0) + ")");
-    if ("hour".equals(name)) return castInt("EXTRACT(HOUR FROM " + args.get(0) + ")");
-    if ("minute".equals(name)) return castInt("EXTRACT(MINUTE FROM " + args.get(0) + ")");
-    if ("second".equals(name)) return castInt("EXTRACT(SECOND FROM " + args.get(0) + ")");
-    if ("dayofweek".equals(name) || "day_of_week".equals(name)) return castInt("DAYOFWEEK(" + args.get(0) + ")");
-    if ("dayofyear".equals(name) || "day_of_year".equals(name)) return castInt("DAYOFYEAR(" + args.get(0) + ")");
-    if ("dayofmonth".equals(name) || "day_of_month".equals(name)) return castInt("EXTRACT(DAY FROM " + args.get(0) + ")");
-    if ("weekofyear".equals(name) || "week_of_year".equals(name) || "week".equals(name)) return castInt("EXTRACT(WEEK FROM " + args.get(0) + ")");
-    if ("hour_of_day".equals(name)) return castInt("EXTRACT(HOUR FROM " + args.get(0) + ")");
-    if ("minute_of_hour".equals(name)) return castInt("EXTRACT(MINUTE FROM " + args.get(0) + ")");
-    if ("second_of_minute".equals(name)) return castInt("EXTRACT(SECOND FROM " + args.get(0) + ")");
-    if ("month_of_year".equals(name)) return castInt("EXTRACT(MONTH FROM " + args.get(0) + ")");
-    if ("quarter".equals(name)) return castInt("EXTRACT(QUARTER FROM " + args.get(0) + ")");
-    if ("microsecond".equals(name)) return castInt("EXTRACT(MICROSECOND FROM " + args.get(0) + ")");
-    if ("minute_of_day".equals(name)) return castInt("(EXTRACT(HOUR FROM " + args.get(0) + ") * 60 + EXTRACT(MINUTE FROM " + args.get(0) + "))");
+    if ("year".equals(name)) return castInt("EXTRACT(YEAR FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("month".equals(name)) return castInt("EXTRACT(MONTH FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("day".equals(name)) return castInt("EXTRACT(DAY FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("hour".equals(name)) return castInt("EXTRACT(HOUR FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("minute".equals(name)) return castInt("EXTRACT(MINUTE FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("second".equals(name)) return castInt("EXTRACT(SECOND FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("dayofweek".equals(name) || "day_of_week".equals(name)) return castInt("DAYOFWEEK(" + ensureTimestamp(args.get(0)) + ")");
+    if ("dayofyear".equals(name) || "day_of_year".equals(name)) return castInt("DAYOFYEAR(" + ensureTimestamp(args.get(0)) + ")");
+    if ("dayofmonth".equals(name) || "day_of_month".equals(name)) return castInt("EXTRACT(DAY FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("weekofyear".equals(name) || "week_of_year".equals(name) || "week".equals(name)) return castInt("EXTRACT(WEEK FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("hour_of_day".equals(name)) return castInt("EXTRACT(HOUR FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("minute_of_hour".equals(name)) return castInt("EXTRACT(MINUTE FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("second_of_minute".equals(name)) return castInt("EXTRACT(SECOND FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("month_of_year".equals(name)) return castInt("EXTRACT(MONTH FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("quarter".equals(name)) return castInt("EXTRACT(QUARTER FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("microsecond".equals(name)) return castInt("EXTRACT(MICROSECOND FROM " + ensureTimestamp(args.get(0)) + ")");
+    if ("minute_of_day".equals(name)) return castInt("(EXTRACT(HOUR FROM " + ensureTimestamp(args.get(0)) + ") * 60 + EXTRACT(MINUTE FROM " + ensureTimestamp(args.get(0)) + "))");
     if ("date_add".equals(name) || "adddate".equals(name)) {
       if (args.get(1).startsWith("INTERVAL")) {
         String[] parts = args.get(1).split("\\s+");
-        return "CAST(TIMESTAMPADD(" + parts[parts.length - 1] + ", " + parts[1] + ", " + args.get(0) + ") AS TIMESTAMP)";
+        return "CAST(TIMESTAMPADD(" + parts[parts.length - 1] + ", " + parts[1] + ", " + ensureTimestamp(args.get(0)) + ") AS TIMESTAMP)";
       }
-      return "TIMESTAMPADD(DAY, " + args.get(1) + ", " + args.get(0) + ")";
+      return "TIMESTAMPADD(DAY, " + args.get(1) + ", " + ensureTimestamp(args.get(0)) + ")";
     }
     if ("date_sub".equals(name) || "subdate".equals(name)) {
       if (args.get(1).startsWith("INTERVAL")) {
         String[] parts = args.get(1).split("\\s+");
-        return "CAST(TIMESTAMPADD(" + parts[parts.length - 1] + ", -" + parts[1] + ", " + args.get(0) + ") AS TIMESTAMP)";
+        return "CAST(TIMESTAMPADD(" + parts[parts.length - 1] + ", -" + parts[1] + ", " + ensureTimestamp(args.get(0)) + ") AS TIMESTAMP)";
       }
-      return "TIMESTAMPADD(DAY, -" + args.get(1) + ", " + args.get(0) + ")";
+      return "TIMESTAMPADD(DAY, -" + args.get(1) + ", " + ensureTimestamp(args.get(0)) + ")";
     }
     if ("datediff".equals(name)) {
-      return "CAST(TIMESTAMPDIFF(DAY, " + args.get(1) + ", " + args.get(0) + ") AS BIGINT)";
+      return "CAST(TIMESTAMPDIFF(DAY, " + ensureTimestamp(args.get(1)) + ", " + ensureTimestamp(args.get(0)) + ") AS BIGINT)";
     }
     if ("timestampdiff".equals(name)) {
       String unit = args.get(0).replace("'", "");
-      return "CAST(TIMESTAMPDIFF(" + unit + ", " + args.get(1) + ", " + args.get(2) + ") AS BIGINT)";
+      return "CAST(TIMESTAMPDIFF(" + unit + ", " + ensureTimestamp(args.get(1)) + ", " + ensureTimestamp(args.get(2)) + ") AS BIGINT)";
     }
     if ("timestampadd".equals(name)) {
       String unit = args.get(0).replace("'", "");
-      return "CAST(TIMESTAMPADD(" + unit + ", " + args.get(1) + ", " + args.get(2) + ") AS TIMESTAMP)";
+      return "CAST(TIMESTAMPADD(" + unit + ", " + args.get(1) + ", " + ensureTimestamp(args.get(2)) + ") AS TIMESTAMP)";
     }
     if ("date".equals(name)) return "CAST(" + args.get(0) + " AS DATE)";
     if ("time".equals(name)) return "CAST(" + args.get(0) + " AS TIME)";
@@ -1824,12 +1836,12 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       if (args.size() == 1) return "CAST(" + args.get(0) + " AS TIMESTAMP)";
       return "CAST(NULL AS TIMESTAMP)";
     }
-    if ("dayname".equals(name)) return "DAYNAME(" + args.get(0) + ")";
-    if ("monthname".equals(name)) return "MONTHNAME(" + args.get(0) + ")";
+    if ("dayname".equals(name)) return "DAYNAME(" + ensureTimestamp(args.get(0)) + ")";
+    if ("monthname".equals(name)) return "MONTHNAME(" + ensureTimestamp(args.get(0)) + ")";
     if ("weekday".equals(name))
-      return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE " + castInt("MOD(DAYOFWEEK(" + args.get(0) + ") + 5, 7)") + " END";
+      return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE " + castInt("MOD(DAYOFWEEK(" + ensureTimestamp(args.get(0)) + ") + 5, 7)") + " END";
     if ("yearweek".equals(name))
-      return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE " + castInt("(EXTRACT(YEAR FROM " + args.get(0) + ") * 100 + EXTRACT(WEEK FROM " + args.get(0) + "))") + " END";
+      return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE " + castInt("(EXTRACT(YEAR FROM " + ensureTimestamp(args.get(0)) + ") * 100 + EXTRACT(WEEK FROM " + ensureTimestamp(args.get(0)) + "))") + " END";
     if ("unix_timestamp".equals(name)) {
       if (args.isEmpty()) return "CAST(TIMESTAMPDIFF(SECOND, TIMESTAMP '1970-01-01 00:00:00', CURRENT_TIMESTAMP) AS DOUBLE)";
       return "CAST(TIMESTAMPDIFF(SECOND, TIMESTAMP '1970-01-01 00:00:00', CAST(" + args.get(0) + " AS TIMESTAMP)) AS DOUBLE)";
@@ -1842,9 +1854,9 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE CAST(TIMESTAMPADD(DAY, CAST(" + args.get(0) + " AS INTEGER) - 366, DATE '0001-01-01') AS DATE) END";
     if ("to_seconds".equals(name))
       return "CASE WHEN " + args.get(0) + " IS NULL THEN NULL ELSE CAST((TIMESTAMPDIFF(DAY, DATE '0001-01-01', CAST(" + args.get(0) + " AS DATE)) + 366) * 86400 AS BIGINT) END";
-    if ("last_day".equals(name)) return "CAST(LAST_DAY(" + args.get(0) + ") AS DATE)";
+    if ("last_day".equals(name)) return "CAST(LAST_DAY(" + ensureTimestamp(args.get(0)) + ") AS DATE)";
     if ("time_to_sec".equals(name))
-      return "CAST((EXTRACT(HOUR FROM " + args.get(0) + ") * 3600 + EXTRACT(MINUTE FROM " + args.get(0) + ") * 60 + EXTRACT(SECOND FROM " + args.get(0) + ")) AS BIGINT)";
+      return "CAST((EXTRACT(HOUR FROM " + ensureTimestamp(args.get(0)) + ") * 3600 + EXTRACT(MINUTE FROM " + ensureTimestamp(args.get(0)) + ") * 60 + EXTRACT(SECOND FROM " + ensureTimestamp(args.get(0)) + ")) AS BIGINT)";
     if ("sec_to_time".equals(name))
       return "CAST(TIMESTAMPADD(SECOND, CAST(" + args.get(0) + " AS INTEGER), TIME '00:00:00') AS TIME)";
     if ("timediff".equals(name))
