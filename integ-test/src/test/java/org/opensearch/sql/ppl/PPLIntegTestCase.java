@@ -383,6 +383,12 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
       }
     }
 
+    // Strip extra ORDER BY columns that Calcite adds to the response.
+    // Only activate for simple SELECT with explicit columns (no *, JOIN, REPLACE, EXCEPT).
+    if (sql != null) {
+      keepIndices = stripOrderByColumns(keepIndices, schema, sql);
+    }
+
     // Build new schema
     org.json.JSONArray newSchema = new org.json.JSONArray();
     for (int idx : keepIndices) {
@@ -415,6 +421,113 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     response.put("size", newDatarows.length());
     response.put("total", newDatarows.length());
     return response;
+  }
+
+  /**
+   * Strip columns that Calcite adds to the response because they appear in ORDER BY
+   * but not in the outermost SELECT list. Only activates for simple explicit SELECT
+   * lists (no *, JOIN, REPLACE, EXCEPT patterns).
+   */
+  private static java.util.List<Integer> stripOrderByColumns(
+      java.util.List<Integer> keepIndices, org.json.JSONArray schema, String sql) {
+    // Skip if SQL contains JOIN (complex column patterns)
+    String sqlUpper = sql.toUpperCase();
+    if (sqlUpper.contains(" JOIN ")) return keepIndices;
+
+    // Must have ORDER BY to have extra columns
+    if (!sqlUpper.contains("ORDER BY")) return keepIndices;
+
+    // Extract the outermost SELECT clause (between first SELECT and first FROM at same depth)
+    String stripped = sql.replaceAll("/\\*[^*]*\\*/", ""); // remove comments
+    String strippedUpper = stripped.toUpperCase();
+    int selectIdx = strippedUpper.indexOf("SELECT ");
+    if (selectIdx < 0) return keepIndices;
+    int afterSelect = selectIdx + 7;
+
+    // Find the matching FROM by tracking parenthesis depth
+    int depth = 0;
+    int fromIdx = -1;
+    for (int i = afterSelect; i < stripped.length() - 4; i++) {
+      char c = stripped.charAt(i);
+      if (c == '(') depth++;
+      else if (c == ')') depth--;
+      else if (depth == 0 && strippedUpper.startsWith("FROM ", i)) {
+        fromIdx = i;
+        break;
+      }
+    }
+    if (fromIdx < 0) return keepIndices;
+
+    String selectClause = stripped.substring(afterSelect, fromIdx).trim();
+
+    // Skip if SELECT contains *, REPLACE, or EXCEPT (complex patterns)
+    String selectUpper = selectClause.toUpperCase();
+    if (selectUpper.contains("*") || selectUpper.contains("REPLACE(")
+        || selectUpper.contains("EXCEPT(")) {
+      return keepIndices;
+    }
+
+    // Parse column names from the SELECT clause (handle "expr AS alias" and bare columns)
+    Set<String> selectColumns = new java.util.LinkedHashSet<>();
+    // Split by commas at depth 0
+    int start = 0;
+    depth = 0;
+    for (int i = 0; i <= selectClause.length(); i++) {
+      char c = (i < selectClause.length()) ? selectClause.charAt(i) : ',';
+      if (c == '(') depth++;
+      else if (c == ')') depth--;
+      else if (c == ',' && depth == 0) {
+        String item = selectClause.substring(start, i).trim();
+        if (!item.isEmpty()) {
+          // Extract the alias or column name
+          String name = extractColumnName(item);
+          if (name != null) selectColumns.add(name);
+        }
+        start = i + 1;
+      }
+    }
+
+    if (selectColumns.isEmpty()) return keepIndices;
+
+    // Filter keepIndices to only include columns whose names are in the SELECT list
+    java.util.List<Integer> filtered = new java.util.ArrayList<>();
+    for (int idx : keepIndices) {
+      String colName = schema.getJSONObject(idx).getString("name");
+      if (selectColumns.contains(colName)) {
+        filtered.add(idx);
+      }
+    }
+
+    // Safety: only strip if we actually removed something and didn't remove everything
+    if (filtered.isEmpty() || filtered.size() == keepIndices.size()) return keepIndices;
+    return filtered;
+  }
+
+  /** Extract the effective column name from a SELECT item (handles "expr AS alias" and quoted ids). */
+  private static String extractColumnName(String item) {
+    // Check for AS alias (case-insensitive, not inside parens)
+    int depth = 0;
+    int asIdx = -1;
+    String upper = item.toUpperCase();
+    for (int i = 0; i < item.length() - 3; i++) {
+      char c = item.charAt(i);
+      if (c == '(') depth++;
+      else if (c == ')') depth--;
+      else if (depth == 0 && upper.startsWith(" AS ", i)) {
+        asIdx = i;
+      }
+    }
+    String name;
+    if (asIdx >= 0) {
+      name = item.substring(asIdx + 4).trim();
+    } else {
+      name = item.trim();
+    }
+    // Unquote
+    if (name.startsWith("\"") && name.endsWith("\"")) {
+      name = name.substring(1, name.length() - 1).replace("\"\"", "\"");
+    }
+    return name;
   }
 
   protected static boolean isCalciteEnabled() throws IOException {

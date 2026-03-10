@@ -758,3 +758,32 @@
 - Known issue: PercentileApproxFunction.init() uses intValue() for percentile which truncates fractional values (e.g., 25.5→25). Pre-existing bug, not introduced by this change.
 - Blockers: Remaining aggregation failures are mostly time-based span edge cases (DATE_TRUNC on TIME type, nanosecond timestamps) and array serialization for TAKE.
 - Next recommended task: CalciteSearchCommandIT (46 failures, 5 passing) — largest remaining failure block. Or CalciteSortCommandIT (14 failures) — subquery ORDER BY preservation. Or CalciteFieldsCommandIT (21 failures) — wildcard field expansion.
+
+### Iteration 9 — Fix ORDER BY lost in subquery wrapping + head-then-sort semantics
+- Date: 2026-03-10
+- Baseline rate: 56.9% (1288/2264, 144 skipped)
+- Task: Fix two sort-related bugs in PPLToSqlTranspiler and add ORDER BY column stripping in PPLIntegTestCase:
+  1. ORDER BY lost in subquery wrapping: When processProject() detected computed columns (from eval), it called wrapAsSubquery() which cleared orderBy. Fix: save orderBy and limit before wrapping, clear them so they don't get baked into the subquery, then restore after wrapping. ORDER BY now appears on the outer query.
+  2. head-then-sort wrong semantics: When head set sb.limit and then sort set sb.orderBy, both ended up at the same query level (ORDER BY + LIMIT = sort-then-limit). Fix: in processSort(), if sb.limit is already set (from a prior head), call wrapAsSubquery() first to snapshot the LIMIT into a subquery.
+  3. ORDER BY column stripping: The Calcite SQL endpoint adds ORDER BY columns to the response even when they're not in the SELECT list. Added stripOrderByColumns() in PPLIntegTestCase to filter extra columns from the response when the SQL has explicit column names in SELECT and ORDER BY references columns not in SELECT. Skips for JOIN queries and wildcard SELECTs.
+- Files changed:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (+14 lines: save/restore orderBy+limit around wrapAsSubquery in processProject, wrap-before-sort in processSort)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (+113 lines: stripOrderByColumns + extractColumnName helper methods)
+- New rate: 57.6% (1303/2264, 144 skipped)
+- Tests fixed: +15 net
+  - CalciteSortCommandIT: 16→30 (+14)
+  - CalcitePPLSortIT: 17→18 (+1)
+- Per-class breakdown (full suite run, only classes with changes):
+
+| Class | Before | After | Delta |
+|-------|--------|-------|-------|
+| CalciteSortCommandIT | 16/30 | 30/30 | +14 |
+| CalcitePPLSortIT | 17/18 | 18/18 | +1 |
+| CalcitePPLJoinIT | 21/39 | 21/39 | 0 |
+| CalcitePPLLookupIT | 13/17 | 13/17 | 0 |
+| CalciteStatsCommandIT | 60/63 | 60/63 | 0 |
+
+- CalciteSortCommandIT now 30/30 (100%): all sort tests pass including eval→sort→fields, head→sort, IP field sort, str/num cast sort, complex expression sort
+- CalcitePPLSortIT now 18/18 (100%): the remaining 1 failure was a sort-after-eval pattern
+- Blockers: None for this iteration. The ORDER BY fix is clean with no regressions.
+- Next recommended task: CalciteSearchCommandIT (46 failures) — largest remaining failure block. Or CalciteDateTimeFunctionIT (35 failures) or CalciteMultiValueStatsIT (31 failures) or CalciteFieldsCommandIT (21 failures, but needs schema access for wildcard expansion).

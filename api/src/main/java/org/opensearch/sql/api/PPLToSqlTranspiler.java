@@ -763,9 +763,18 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if (hasComputedColumns) {
       Map<String, String> savedComputed = new HashMap<>(sb.computedColumns);
       java.util.LinkedHashMap<String, String> savedRenames = new java.util.LinkedHashMap<>(sb.renames);
+      // Save and clear pending ORDER BY and sort-count LIMIT before wrapping —
+      // they belong on the outer query, not trapped inside the subquery
+      List<String> savedOrderBy = sb.orderBy;
+      String savedLimit = sb.limit;
+      sb.orderBy = null;
+      sb.limit = null;
       sb.wrapAsSubquery();
       sb.computedColumns.putAll(savedComputed);
       sb.renames.putAll(savedRenames);
+      // Restore ORDER BY (and sort-count LIMIT) to the outer query
+      sb.orderBy = savedOrderBy;
+      sb.limit = savedLimit;
     }
 
     // Collect all simple column names to detect duplicates
@@ -821,6 +830,11 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
   }
 
   private void processSort(Sort node, SelectBuilder sb) {
+    // If there's already a LIMIT from a prior head command, wrap as subquery first
+    // so the LIMIT applies before the sort (head-then-sort semantics).
+    if (sb.limit != null) {
+      sb.wrapAsSubquery();
+    }
     // Sort count > 0 means return only that many rows
     if (node.getCount() != null && node.getCount() > 0) {
       sb.limit = String.valueOf(node.getCount());
