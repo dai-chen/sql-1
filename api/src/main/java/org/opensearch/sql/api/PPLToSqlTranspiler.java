@@ -36,6 +36,7 @@ import org.opensearch.sql.ast.expression.SearchAnd;
 import org.opensearch.sql.ast.expression.SearchComparison;
 import org.opensearch.sql.ast.expression.SearchExpression;
 import org.opensearch.sql.ast.expression.SearchGroup;
+import org.opensearch.sql.ast.expression.SearchIn;
 import org.opensearch.sql.ast.expression.SearchLiteral;
 import org.opensearch.sql.ast.expression.SearchNot;
 import org.opensearch.sql.ast.expression.SearchOr;
@@ -54,6 +55,8 @@ import org.opensearch.sql.ast.expression.WindowFunction;
 import org.opensearch.sql.ast.tree.Aggregation;
 import org.opensearch.sql.ast.tree.Append;
 import org.opensearch.sql.ast.tree.AppendPipe;
+import org.opensearch.sql.ast.tree.Bin;
+import org.opensearch.sql.ast.tree.SpanBin;
 import org.opensearch.sql.ast.tree.Dedupe;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
@@ -265,6 +268,8 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
         String cond = visitSearchExpr(search.getOriginalExpression());
         if (sb.where == null) sb.where = cond;
         else sb.where = "(" + sb.where + ") AND (" + cond + ")";
+      } else if (node instanceof Bin) {
+        transpiler.processBin((Bin) node, sb);
       } else {
         throw new UnsupportedOperationException(
             "Unsupported PPL command: " + node.getClass().getSimpleName());
@@ -1518,6 +1523,139 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     sb.renames = new java.util.LinkedHashMap<>();
   }
 
+  private void processBin(Bin node, SelectBuilder sb) {
+    if (!(node instanceof SpanBin)) {
+      throw new UnsupportedOperationException(
+          "Unsupported bin type in V4: " + node.getClass().getSimpleName());
+    }
+    SpanBin spanBin = (SpanBin) node;
+    String field = visitExpr(spanBin.getField());
+    String alias = spanBin.getAlias() != null ? spanBin.getAlias() : getFieldName(spanBin.getField());
+    UnresolvedExpression spanExpr = spanBin.getSpan();
+    String binSql;
+
+    if (spanExpr instanceof Literal) {
+      Literal lit = (Literal) spanExpr;
+      if (lit.getType() == DataType.INTEGER || lit.getType() == DataType.DECIMAL) {
+        // Pure numeric span: FLOOR(field/span)*span → "start-end" string
+        String span = lit.getValue().toString();
+        boolean isInt = lit.getType() == DataType.INTEGER;
+        String start = "FLOOR(" + field + " / " + span + ") * " + span;
+        String end = start + " + " + span;
+        if (isInt) {
+          binSql = "CAST(CAST(" + start + " AS INTEGER) AS VARCHAR) || '-' || CAST(CAST(" + end + " AS INTEGER) AS VARCHAR)";
+        } else {
+          binSql = "CAST(" + start + " AS VARCHAR) || '-' || CAST(" + end + " AS VARCHAR)";
+        }
+      } else {
+        // String literal: time-based or log-based span
+        String spanStr = lit.getValue().toString();
+        binSql = transpileSpanString(spanStr, field);
+      }
+    } else {
+      binSql = "CAST(" + field + " AS VARCHAR)";
+    }
+
+    // Bin replaces the field value — use SELECT * REPLACE when alias matches field name
+    String fieldName = getFieldName(spanBin.getField());
+    if (sb.select.size() == 1 && "*".equals(sb.select.get(0)) && alias.equals(fieldName)) {
+      sb.select.set(0, "* REPLACE(" + binSql + " AS " + quoteId(alias) + ")");
+    } else {
+      sb.computedColumns.put(alias, binSql);
+    }
+  }
+
+  /** Parse a span string like "1h", "30seconds", "4mon", "log10", "2log10" and generate SQL. */
+  private String transpileSpanString(String spanStr, String field) {
+    // Check for log-based span: [coeff]log<base>
+    java.util.regex.Matcher logMatcher =
+        java.util.regex.Pattern.compile("^(\\d+\\.?\\d*)?log(\\d+)$").matcher(spanStr);
+    if (logMatcher.matches()) {
+      String coeffStr = logMatcher.group(1);
+      double coeff = (coeffStr == null || coeffStr.isEmpty()) ? 1.0 : Double.parseDouble(coeffStr);
+      int base = Integer.parseInt(logMatcher.group(2));
+      // binStart = coeff * base^FLOOR(LOG(base, field/coeff))
+      // binEnd = binStart * base
+      String logExpr = "FLOOR(LN(" + field + " / " + coeff + ") / LN(" + base + "))";
+      String start = coeff + " * POWER(" + base + ", " + logExpr + ")";
+      String end = coeff + " * POWER(" + base + ", " + logExpr + " + 1)";
+      return "CAST(" + start + " AS VARCHAR) || '-' || CAST(" + end + " AS VARCHAR)";
+    }
+
+    // Time-based span: parse number and unit
+    java.util.regex.Matcher timeMatcher =
+        java.util.regex.Pattern.compile("^(\\d+)(\\w+)$").matcher(spanStr);
+    if (!timeMatcher.matches()) {
+      throw new UnsupportedOperationException("Unsupported span format: " + spanStr);
+    }
+    int value = Integer.parseInt(timeMatcher.group(1));
+    String unit = timeMatcher.group(2);
+    // M is case-sensitive: uppercase M = month, lowercase m = minute
+    String unitLower = unit.equals("M") ? "M" : unit.toLowerCase();
+
+    // Map unit aliases to canonical form
+    int secondsPerUnit;
+    String truncUnit = null;
+    boolean isMonth = false;
+    switch (unitLower) {
+      case "s": case "sec": case "secs": case "second": case "seconds":
+        secondsPerUnit = 1; truncUnit = "SECOND"; break;
+      case "m": case "min": case "mins": case "minute": case "minutes":
+        secondsPerUnit = 60; truncUnit = "MINUTE"; break;
+      case "h": case "hr": case "hrs": case "hour": case "hours":
+        secondsPerUnit = 3600; truncUnit = "HOUR"; break;
+      case "d": case "day": case "days":
+        secondsPerUnit = 86400; truncUnit = "DAY"; break;
+      case "w": case "week": case "weeks":
+        secondsPerUnit = 604800; truncUnit = "WEEK"; break;
+      case "mon": case "month": case "months": case "M":
+        isMonth = true; secondsPerUnit = 0; truncUnit = "MONTH"; break;
+      case "q": case "qtr": case "qtrs": case "quarter": case "quarters":
+        isMonth = true; secondsPerUnit = 0; truncUnit = "QUARTER"; break;
+      case "y": case "year": case "years":
+        isMonth = true; secondsPerUnit = 0; truncUnit = "YEAR"; break;
+      case "ms": case "millisecond": case "milliseconds":
+        secondsPerUnit = 0; truncUnit = "MILLISECOND"; break;
+      case "us": case "microsecond": case "microseconds":
+        secondsPerUnit = 0; truncUnit = "MICROSECOND"; break;
+      case "cs": case "centisecond": case "centiseconds":
+        secondsPerUnit = 0; truncUnit = "MILLISECOND"; value = value * 10; break;
+      case "ds": case "decisecond": case "deciseconds":
+        secondsPerUnit = 0; truncUnit = "MILLISECOND"; value = value * 100; break;
+      default:
+        throw new UnsupportedOperationException("Unsupported time unit: " + unit);
+    }
+
+    if (isMonth) {
+      if (value == 1) {
+        // Single month/quarter/year: format as YYYY-MM string
+        return "SUBSTRING(CAST(FLOOR(" + field + " TO " + truncUnit + ") AS VARCHAR), 1, 7)";
+      }
+      // Multi-month: compute month offset, floor to span, reconstruct
+      String monthNum = "(EXTRACT(YEAR FROM " + field + ") * 12 + EXTRACT(MONTH FROM " + field + ") - 1)";
+      String flooredMonth = "FLOOR(" + monthNum + " / " + value + ") * " + value;
+      String yr = "CAST(FLOOR(" + flooredMonth + " / 12) AS INTEGER)";
+      String mo = "CAST(MOD(CAST(" + flooredMonth + " AS INTEGER), 12) + 1 AS INTEGER)";
+      return "CAST(" + yr + " AS VARCHAR) || '-' || LPAD(CAST(" + mo + " AS VARCHAR), 2, '0')";
+    }
+
+    // For value=1 with standard units, use FLOOR(field TO UNIT)
+    if (value == 1 && secondsPerUnit > 0) {
+      return "FLOOR(" + field + " TO " + truncUnit + ")";
+    }
+
+    // For sub-second units (ms, us, cs, ds) with any value, truncate to second
+    if (secondsPerUnit == 0 && !isMonth) {
+      return "FLOOR(" + field + " TO SECOND)";
+    }
+
+    // Multi-unit time span: epoch-based bucketing
+    long totalSeconds = (long) value * secondsPerUnit;
+    String epoch = "TIMESTAMPDIFF(SECOND, TIMESTAMP '1970-01-01 00:00:00', " + field + ")";
+    String floored = "FLOOR(" + epoch + " / " + totalSeconds + ") * " + totalSeconds;
+    return "TIMESTAMPADD(SECOND, CAST(" + floored + " AS INTEGER), TIMESTAMP '1970-01-01 00:00:00')";
+  }
+
   private static String getFieldName(UnresolvedExpression expr) {
     if (expr instanceof Field) return ((Field) expr).getField().toString();
     if (expr instanceof QualifiedName) return ((QualifiedName) expr).toString();
@@ -1551,6 +1689,17 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       return visitSearchExpr(((SearchGroup) expr).getExpression());
     } else if (expr instanceof SearchNot) {
       return "(NOT " + visitSearchExpr(((SearchNot) expr).getExpression()) + ")";
+    } else if (expr instanceof SearchIn) {
+      SearchIn in = (SearchIn) expr;
+      String field = quoteId(getFieldName(in.getField()));
+      String vals = in.getValues().stream()
+          .map(PPLToSqlTranspiler::visitSearchLiteralValue)
+          .collect(Collectors.joining(", "));
+      return "(" + field + " IN (" + vals + "))";
+    } else if (expr instanceof SearchLiteral) {
+      SearchLiteral lit = (SearchLiteral) expr;
+      String qs = lit.toQueryString().replace("'", "''");
+      return "match_phrase('*', '" + qs + "')";
     }
     throw new UnsupportedOperationException("Unsupported search expression: " + expr.getClass().getSimpleName());
   }

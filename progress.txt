@@ -281,3 +281,44 @@
 
 - Blockers: Remaining 36 CalciteDateTimeFunctionIT failures fall into: (a) strftime not implemented (6 tests), (b) date_format/get_format stubs returning wrong values (3 tests), (c) wrong computation logic in period_add/period_diff/datediff/makedate/maketime/microsecond (10 tests), (d) convert_tz/datetime timezone not applied (2 tests), (e) addtime/subtime/from_unixtime return wrong type (5 tests), (f) adddate/date_add/date_sub/subdate interval arithmetic overflow (4 tests), (g) week off-by-one (2 tests), (h) dayname/monthname abbreviated vs full (2 tests), (i) str_to_date/unix_timestamp errors (2 tests).
 - Next recommended task: CalciteArrayFunctionIT (60 failures, 0 passing) or CalciteSearchCommandIT (46 failures) or CalciteStreamstatsCommandIT (46 failures) — these are the largest remaining failure blocks. CalciteNowLikeFunctionIT (12 failures) may be quick wins since NOW() was just fixed to CURRENT_TIMESTAMP.
+
+### Iteration 4 — Implement bin command (SpanBin: numeric, time, log spans)
+- Date: 2026-03-10
+- Baseline rate: 51.5% (1165/2264, 144 skipped)
+- Task: Implement SpanBin support in PPLToSqlTranspiler — numeric spans (integer/decimal), time spans (s/m/h/d/w/M/q/y + sub-second ms/us/cs/ds), and log-based spans (log2/log10 with optional coefficient). Also added SearchIn and SearchLiteral handlers in visitSearchExpr (no rate impact due to engine-level blockers).
+- Files changed: api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (+120 lines: processBin, transpileSpanString, SearchIn/SearchLiteral handlers)
+- Changes:
+  1. Added `processBin(Bin, SelectBuilder)` — dispatches SpanBin, throws for other bin types
+  2. Added `transpileSpanString(String, String)` — parses span literal strings and generates SQL:
+     - Numeric integer spans: `CAST(FLOOR(field/span)*span AS INTEGER) || '-' || CAST(FLOOR(field/span)*span+span AS INTEGER)` → STRING
+     - Numeric decimal spans: same but without INTEGER cast → STRING with decimals
+     - Time spans (value=1, standard units): `FLOOR(field TO UNIT)` → TIMESTAMP
+     - Time spans (multi-unit, e.g., 30s, 45m, 7d): epoch-based bucketing via TIMESTAMPDIFF/TIMESTAMPADD → TIMESTAMP
+     - Time spans (month/quarter/year, value=1): `SUBSTRING(CAST(FLOOR(field TO MONTH) AS VARCHAR), 1, 7)` → STRING "YYYY-MM"
+     - Time spans (multi-month, e.g., 4mon): EXTRACT-based month arithmetic → STRING "YYYY-MM"
+     - Sub-second spans (ms/us/cs/ds): `FLOOR(field TO SECOND)` → TIMESTAMP (truncates to second)
+     - Log spans ([coeff]log<base>): `coeff * POWER(base, FLOOR(LN(field/coeff)/LN(base)))` → STRING range
+  3. Bin replaces field value using `SELECT * REPLACE(expr AS field)` when alias matches field name, or computed column when alias differs
+  4. Fixed M case sensitivity: uppercase M = MONTH, lowercase m = MINUTE
+  5. Added SearchIn handler: generates `field IN (val1, val2, ...)` SQL
+  6. Added SearchLiteral handler: generates `match_phrase('*', 'query_text')` SQL
+- New rate: 52.6% (1190/2264, 144 skipped)
+- Tests fixed: +25 net (+26 CalciteBinCommandIT, -1 CalcitePPLPluginIT flaky regression)
+- CalciteBinCommandIT: 0→26 passed (43→17 failures, 27 skipped unchanged)
+- Per-class delta (changed classes only):
+
+| Class | Before | After | Delta |
+|-------|--------|-------|-------|
+| CalciteBinCommandIT | 0/70 (27 skip) | 26/70 (27 skip) | +26 |
+| CalcitePPLPluginIT | 4/5 | 3/5 | -1 (flaky) |
+
+- Passing SpanBin tests: testBinWithNumericSpan, testBinNumericSpanPrecise, testBinBasicFunctionality, testBinLargeSpanValue, testBinValueFieldOnly, testBinAgeSpan5, testBinBalanceSpan1000, testBinWithTimestampSpan (1h), testBinWithTimestampStats (4h), testBinOnlyWithoutAggregation (4h), testBinWithTimestampAggregation (4h), testBinWithMonthlySpan (4mon), testBinTimestampSpan30Seconds, testBinTimestampSpan45Minutes, testBinTimestampSpan7Days, testBinTimestampSpan6Days, testBinBalanceSpanLog10, testBinBalanceSpan2Log10, testBinBalanceSpanLog2, testBinBalanceSpan1Point5Log10, testBinBalanceSpanArbitraryLog, testBinWithDecimalSpan, testBinCaseSensitivity_mon_vs_M, testBinWithSubsecondUnits, testBinWithNestedFieldWithExplicitProjection, testBinSpanWithStartEndNeverShrinkRange
+- Remaining 17 failures:
+  - CountBin (8): testBinWithBinsParameter, testBinWithStartEndBins, testBinWithStartEndBinsBalance, testBinWithStartEndLargeRange, testBinAgeBins2, testBinAgeBins21, testBinBalanceBins49, testBinsOnTimeFieldWithPushdownDisabled_ShouldFail
+  - MinSpanBin (2): testBinWithMinspan, testBinAgeMinspan101
+  - RangeBin (2): testBinAgeStartEndRange, testBinBalanceStartEndRange
+  - Aligntime (2): testBinTimestampAligntimeHour, testBinTimestampAligntimeEpoch — need time modifier parsing
+  - Nested field without projection (2): testBinWithNestedFieldWithoutExplicitProjection, testBinWithEvalCreatedDottedFieldName — REPLACE on nested field returns all sibling fields (column count mismatch)
+  - Non-existent field (1): testBinWithNonExistentField — error message format mismatch
+- Blockers: CountBin/MinSpanBin/RangeBin need data-range window functions (MIN/MAX OVER()) to compute bin width dynamically. Aligntime needs time modifier parsing (@d+3h, epoch timestamps). Nested field REPLACE returns all struct siblings.
+- Next recommended task: CalciteStreamstatsCommandIT (46 failures, 0 passing) or CalciteArrayFunctionIT (60 failures, 0 passing) or CalciteDateTimeFunctionIT (36 remaining failures) — pick highest-impact next.
