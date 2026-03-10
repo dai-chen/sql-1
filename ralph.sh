@@ -69,7 +69,7 @@ while [ ! -f "$SCRIPT_DIR/STOP_RALPH" ]; do
   echo "==============================================================="
 
   OUTPUT=$(kiro-cli chat --agent "$AGENT" --no-interactive --trust-all-tools \
-    "Read ralph-prompt.md, prd.json, and progress-sqlnode-converter.txt. Pick the next incomplete story, implement it, verify, update state. One task only." \
+    "You are in the repo root directory. Read ralph-prompt.md, prd.json, and progress-sqlnode-converter.txt. Pick the next incomplete story, implement it, verify, commit, push, and update state. One task only." \
     2>&1 | tee /dev/stderr) || true
 
   if echo "$OUTPUT" | grep -q "RALPH_COMPLETE"; then

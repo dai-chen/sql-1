@@ -2,8 +2,8 @@
   "project": "PPL-to-SqlNode Converter + PPLTypeCoercion",
   "branchName": "poc/ppl-to-sqlnode-unified-api",
   "description": "Refactor PPL-to-SQL translation from string-based PPLToSqlTranspiler to SqlNode-based PPLToSqlNodeConverter with a two-tier design (base static + DynamicPPLToSqlNodeConverter with schema). Add PPLTypeCoercion extending Calcite TypeCoercionImpl for PPL implicit type conversion rules. Goal: zero regressions against the string transpiler baseline.",
-  "buildCommand": "cd /Users/daichen/Temp/my-sql-repo-agent-explore && ./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20",
-  "testCommand": "cd /Users/daichen/Temp/my-sql-repo-agent-explore && ./gradlew :api:test 2>&1 | tail -30",
+  "buildCommand": "./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20",
+  "testCommand": "./gradlew :api:test 2>&1 | tail -30",
   "verifyCommand": "",
   "userStories": [
     {

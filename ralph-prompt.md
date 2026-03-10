@@ -11,10 +11,11 @@ You are an autonomous coding agent migrating the PPL-to-SQL translation from a s
 5. Check you're on branch `poc/ppl-to-sqlnode-unified-api`
 6. Pick the **highest priority** user story where `passes: false`
 7. Implement that single user story
-8. Run build: `cd /Users/daichen/Temp/my-sql-repo-agent-explore && ./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20`
-9. Run tests: `cd /Users/daichen/Temp/my-sql-repo-agent-explore && ./gradlew :api:test 2>&1 | tail -30`
+8. Run build: `./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20`
+9. Run tests: `./gradlew :api:test 2>&1 | tail -30`
 10. If checks pass, commit ALL changes with message: `feat: [{story.id}] {story.title}`
-11. Update `prd.json` — set `passes: true` for the completed story
+11. Push the commit: `git push`
+12. Update `prd.json` — set `passes: true` for the completed story
 12. Append your progress to `progress.txt`
 13. If you discover reusable patterns, consolidate them into the Codebase Patterns section at the top of `progress.txt`
 
