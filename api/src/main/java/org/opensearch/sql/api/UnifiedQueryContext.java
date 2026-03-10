@@ -41,8 +41,11 @@ import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl;
 import org.opensearch.sql.calcite.udf.udaf.FirstAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.LastAggFunction;
+import org.opensearch.sql.calcite.udf.udaf.PercentileApproxFunction;
+import org.opensearch.sql.calcite.udf.udaf.TakeAggFunction;
 import static org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils.createUserDefinedAggFunction;
 import org.opensearch.sql.calcite.utils.PPLOperandTypes;
+import org.opensearch.sql.calcite.utils.PPLReturnTypes;
 import org.opensearch.sql.calcite.SysLimit;
 
 import org.opensearch.sql.common.setting.Settings;
@@ -246,6 +249,14 @@ public class UnifiedQueryContext implements AutoCloseable {
       SqlAggFunction pplLast = createUserDefinedAggFunction(
           LastAggFunction.class, "PPL_LAST", ReturnTypes.ARG0,
           PPLOperandTypes.ANY_OPTIONAL_INTEGER);
+      SqlAggFunction percentileApprox = createUserDefinedAggFunction(
+          PercentileApproxFunction.class, "percentile_approx",
+          ReturnTypes.ARG0_FORCE_NULLABLE,
+          PPLOperandTypes.NUMERIC_NUMERIC_OPTIONAL_NUMERIC);
+      SqlAggFunction take = createUserDefinedAggFunction(
+          TakeAggFunction.class, "TAKE",
+          PPLReturnTypes.ARG0_ARRAY,
+          PPLOperandTypes.ANY_OPTIONAL_INTEGER);
 
       return Frameworks.newConfigBuilder()
           .parserConfig(parserConfig)
@@ -259,7 +270,7 @@ public class UnifiedQueryContext implements AutoCloseable {
                       SqlLibrary.SPARK,
                       SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
-                      pplFirst, pplLast)))
+                      pplFirst, pplLast, percentileApprox, take)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .build();

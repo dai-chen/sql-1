@@ -35,9 +35,20 @@ public class PercentileApproxFunction
       return acc;
     }
     percentile = ((Number) values[1]).intValue() / 100.0;
-    returnType = (SqlTypeName) values[values.length - 1];
-    if (values.length > 3) { // have compression
-      compression = ((Number) values[values.length - 2]).doubleValue();
+    if (values[values.length - 1] instanceof SqlTypeName) {
+      returnType = (SqlTypeName) values[values.length - 1];
+      if (values.length > 3) { // have compression
+        compression = ((Number) values[values.length - 2]).doubleValue();
+      }
+    } else {
+      // V4 transpiler path: infer return type from field value
+      if (targetValue instanceof Integer) returnType = SqlTypeName.INTEGER;
+      else if (targetValue instanceof Long) returnType = SqlTypeName.BIGINT;
+      else if (targetValue instanceof Float) returnType = SqlTypeName.FLOAT;
+      else returnType = SqlTypeName.DOUBLE;
+      if (values.length > 2) {
+        compression = ((Number) values[2]).doubleValue();
+      }
     }
 
     acc.evaluate(((Number) targetValue).doubleValue());

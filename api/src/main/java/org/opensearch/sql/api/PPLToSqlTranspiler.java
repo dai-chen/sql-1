@@ -382,6 +382,16 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if (!groupBy.isEmpty()) {
       sb.groupBy = groupBy;
       sb.hasGroupBy = true;
+      // bucket_nullable=false: filter out null group-by keys
+      boolean bucketNullable = node.getArgExprList().stream()
+          .noneMatch(a -> "bucket_nullable".equals(a.getArgName())
+              && Boolean.FALSE.equals(a.getValue().getValue()));
+      if (!bucketNullable) {
+        String nullFilter = groupBy.stream()
+            .map(col -> col + " IS NOT NULL")
+            .collect(java.util.stream.Collectors.joining(" AND "));
+        sb.where = (sb.where == null) ? nullFilter : sb.where + " AND " + nullFilter;
+      }
     }
   }
 
@@ -2199,9 +2209,14 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if ("latest".equals(name)) {
       return "ARG_MAX(" + visitExpr(node.getField()) + ", " + quoteId("@timestamp") + ")";
     }
-    if ("take".equals(name)) { return "PPL_FIRST(" + visitExpr(node.getField()) + ")"; }
+    if ("take".equals(name)) {
+      String f = visitExpr(node.getField());
+      List<UnresolvedExpression> args = node.getArgList();
+      String size = (args != null && !args.isEmpty()) ? visitExpr(args.get(0)) : "10";
+      return "TAKE(" + f + ", " + size + ")";
+    }
     if ("median".equals(name)) {
-      return "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY " + visitExpr(node.getField()) + ")";
+      return "percentile_approx(" + visitExpr(node.getField()) + ", 50)";
     }
     if ("count_distinct_approx".equals(name) || "approx_count_distinct".equals(name)
         || "distinct_count_approx".equals(name)) {
@@ -2212,14 +2227,13 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       List<UnresolvedExpression> funcArgs = node.getArgList();
       if (funcArgs != null && !funcArgs.isEmpty()) {
         String pct = visitExpr(funcArgs.get(0));
-        try {
-          double pctLiteral = Double.parseDouble(pct) / 100.0;
-          return "PERCENTILE_CONT(" + pctLiteral + ") WITHIN GROUP (ORDER BY " + fieldSql + ")";
-        } catch (NumberFormatException e) {
-          return "PERCENTILE_CONT(" + pct + " / 100.0) WITHIN GROUP (ORDER BY " + fieldSql + ")";
+        if (funcArgs.size() >= 2) {
+          String compression = visitExpr(funcArgs.get(1));
+          return "percentile_approx(" + fieldSql + ", " + pct + ", " + compression + ")";
         }
+        return "percentile_approx(" + fieldSql + ", " + pct + ")";
       }
-      return "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY " + fieldSql + ")";
+      return "percentile_approx(" + fieldSql + ", 50)";
     }
 
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
@@ -2402,7 +2416,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
       case "y": sqlUnit = "YEAR"; break;
       default: sqlUnit = "DAY"; break;
     }
-    return "DATE_TRUNC('" + sqlUnit + "', " + field + ")";
+    return "DATE_TRUNC(" + field + ", " + sqlUnit + ")";
   }
 
   @Override
