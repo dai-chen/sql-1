@@ -1,0 +1,13 @@
+# Codebase Patterns
+- PPL AST uses AbstractNodeVisitor<T, C> pattern — extend with <SqlNode, Void> for the new converter
+- Pipe chaining in PPL = subquery wrapping in SQL: each command wraps prior result as `(SELECT ... FROM ...) AS _tN`
+- PPLToSqlTranspiler.FUNC_MAP maps ~60 PPL function names to SQL equivalents — port to SqlNodeDSL.call() invocations
+- Calcite SqlNode.toSqlString(SqlDialect.DatabaseProduct.CALCITE.getDialect()) produces readable SQL for debugging
+- SqlConformanceEnum.MYSQL_5 enables BOOLEAN↔NUMBER coercion via allowLenientCoercion()
+- Calcite TypeCoercion physically mutates SqlNode tree by injecting CAST nodes via call.setOperand() — CASTs propagate to RelNode
+- Calcite's default commonTypeForBinaryComparison already handles STRING→NUMERIC and DATE→TIMESTAMP comparisons
+- StarExceptReplaceRewriter is the existing pattern for a pre-validate SqlShuttle that accesses SchemaPlus
+- PPLIntegTestCase V4 routing: when ppl.engine.v4=true, transpile PPL→SQL and send to /_plugins/_sql endpoint
+- Test measurement: scripts/ppl_it_rate.sh runs all Calcite*IT with -Dppl.engine.v4=true and parses JUnit XML
+
+# Iteration Log

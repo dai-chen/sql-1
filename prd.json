@@ -1,0 +1,243 @@
+{
+  "project": "PPL-to-SqlNode Converter + PPLTypeCoercion",
+  "branchName": "poc/ppl-to-sqlnode-unified-api",
+  "description": "Refactor PPL-to-SQL translation from string-based PPLToSqlTranspiler to SqlNode-based PPLToSqlNodeConverter with a two-tier design (base static + DynamicPPLToSqlNodeConverter with schema). Add PPLTypeCoercion extending Calcite TypeCoercionImpl for PPL implicit type conversion rules. Goal: zero regressions against the string transpiler baseline.",
+  "buildCommand": "cd /Users/daichen/Temp/my-sql-repo-agent-explore && ./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20",
+  "testCommand": "cd /Users/daichen/Temp/my-sql-repo-agent-explore && ./gradlew :api:test 2>&1 | tail -30",
+  "verifyCommand": "",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Snapshot string-transpiler baseline",
+      "description": "As a developer, I want to record the current PPLToSqlTranspiler pass rate so that I have a regression target for the new converter.",
+      "acceptanceCriteria": [
+        "Run scripts/ppl_it_rate.sh with current string transpiler",
+        "Save summary.json to docs/dev/baseline-string-transpiler.json",
+        "Save per-class.csv to docs/dev/baseline-string-transpiler-per-class.csv",
+        "Save failures.txt to docs/dev/baseline-string-transpiler-failures.txt",
+        "Commit baseline files"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Create SqlNodeDSL utility class",
+      "description": "As a developer, I want a thin SqlNode builder DSL so that PPL-to-SqlNode conversion reads as declarative SQL construction.",
+      "acceptanceCriteria": [
+        "Create api/src/main/java/org/opensearch/sql/calcite/utils/SqlNodeDSL.java",
+        "Implement: select, from, where, groupBy, orderBy, limit, offset returning SqlSelect",
+        "Implement: star, identifier, literal, table, subquery, asList helpers",
+        "Implement: comparison operators (gt, lt, eq, neq, gte, lte)",
+        "Implement: arithmetic operators (plus, minus, times, divide, mod)",
+        "Implement: call, agg, cast, as, between, in, caseWhen, window helpers",
+        "Implement: and, or, not logical operators",
+        "Unit test: select(star()).from(table('t')).build() produces valid SqlSelect",
+        "Unit test: nested subquery wrapping produces correct SQL text",
+        "Build passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Create base PPLToSqlNodeConverter with 5 core commands",
+      "description": "As a developer, I want a base converter that handles source, where, fields (include-only), sort, and head so that the architecture is proven.",
+      "acceptanceCriteria": [
+        "Create api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java extending AbstractNodeVisitor<SqlNode, Void>",
+        "Entry point: public SqlNode convert(Statement statement)",
+        "Flatten AST chain and iterate via visitor dispatch (no if/else-if chain)",
+        "visitRelation: SELECT * FROM table",
+        "visitFilter: wrap as subquery + WHERE condition",
+        "visitProject: SELECT col1, col2 (include-only, no exclude)",
+        "visitSort: ORDER BY",
+        "visitHead: LIMIT",
+        "Pipe chaining via subquery wrapping works for multi-command queries",
+        "Unit test: source=t | where a > 1 | fields b, c | sort b | head 10",
+        "Build passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Port expression visitors and FUNC_MAP",
+      "description": "As a developer, I want all PPL expression types converted to SqlNode so that commands can reference any PPL expression.",
+      "acceptanceCriteria": [
+        "visitLiteral: NULL, integer, long, float, double, string, boolean, date, time, timestamp",
+        "visitQualifiedName/visitField: SqlIdentifier",
+        "visitAlias: SqlBasicCall(AS)",
+        "visitCompare: all comparison operators",
+        "visitAnd/Or/Not/Xor: logical operators",
+        "visitFunction: FUNC_MAP lookup (~60 entries) + special cases (if→CASE, log→LN, division→zero-guard)",
+        "visitAggregateFunction: COUNT, SUM, AVG, MIN, MAX, etc.",
+        "visitIn/Between/Case/Cast/Span/Interval: corresponding SqlNode types",
+        "visitAllFields: SqlIdentifier.star()",
+        "visitWindowFunction: SqlWindow node",
+        "visitInSubquery/ScalarSubquery/ExistsSubquery: subquery expressions",
+        "Unit tests for each expression type",
+        "Build passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Add stats (aggregation) command",
+      "description": "As a developer, I want the stats command converted to SqlNode so that GROUP BY queries work.",
+      "acceptanceCriteria": [
+        "visitAggregation: SELECT agg_exprs, group_exprs FROM (...) GROUP BY group_exprs",
+        "Handle span expressions in GROUP BY",
+        "Handle bucket_nullable=false via WHERE field IS NOT NULL",
+        "Handle multiple aggregation functions in one stats command",
+        "Unit test: source=t | stats avg(a) by b",
+        "Unit test: source=t | stats count() as cnt, sum(a) as total by b, span(c, 10)",
+        "Build passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add eval command",
+      "description": "As a developer, I want the eval command converted to SqlNode so that computed columns work.",
+      "acceptanceCriteria": [
+        "visitEval: wrap as subquery, SELECT *, expr AS alias",
+        "Handle forward-reference inlining within same eval batch",
+        "Handle self-referencing eval (column override) with SELECT *, expr AS col (let validator handle duplicate)",
+        "Unit test: source=t | eval x = a + 1",
+        "Unit test: source=t | eval x = a + 1, y = x * 2 (forward reference)",
+        "Build passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add dedup command",
+      "description": "As a developer, I want the dedup command converted to SqlNode so that deduplication works.",
+      "acceptanceCriteria": [
+        "Standard dedup: ROW_NUMBER() OVER (PARTITION BY fields) + wrap + WHERE _rn <= N",
+        "Handle keepempty=true via OR field IS NULL",
+        "Consecutive dedup: LAG-based comparison",
+        "Unit test: source=t | dedup a",
+        "Unit test: source=t | dedup 2 a, b keepempty=true",
+        "Build passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Add join and lookup commands",
+      "description": "As a developer, I want join and lookup commands converted to SqlNode.",
+      "acceptanceCriteria": [
+        "visitJoin: INNER, LEFT, RIGHT, FULL, CROSS join types",
+        "SEMI/ANTI join rewrite to WHERE EXISTS/NOT EXISTS",
+        "visitLookup: LEFT JOIN with REPLACE/APPEND output strategies",
+        "Handle join aliases (left=l, right=r)",
+        "Unit test: source=t1 | join left=l right=r ON l.id = r.id t2",
+        "Unit test: source=t1 | lookup t2 id AS id",
+        "Build passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Add subquery, window, and remaining core commands",
+      "description": "As a developer, I want all remaining core commands ported so that the converter has feature parity with the string transpiler.",
+      "acceptanceCriteria": [
+        "visitRareTopN: aggregate + ROW_NUMBER + filter",
+        "visitTrendline: SMA/WMA via window functions",
+        "visitWindow (eventstats): SELECT *, agg OVER (...)",
+        "visitStreamWindow (streamstats): running window with frame spec",
+        "visitAppend: UNION ALL",
+        "visitBin: CASE WHEN or FLOOR-based bucketing",
+        "visitReplace: REGEXP_REPLACE",
+        "visitRename: SELECT col AS new_name (non-wildcard)",
+        "visitFillNull: COALESCE(col, value)",
+        "visitParse/Rex/Regex: REGEXP_EXTRACT / REGEXP_CONTAINS",
+        "Build passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Create PPLTypeCoercion with MYSQL_5 conformance",
+      "description": "As a developer, I want PPL implicit type coercion rules injected into Calcite validation so that cross-type comparisons produce explicit CASTs.",
+      "acceptanceCriteria": [
+        "Create core/src/main/java/org/opensearch/sql/calcite/type/PPLTypeCoercion.java extending TypeCoercionImpl",
+        "Override binaryComparisonCoercion: add DATE + TIME → TIMESTAMP rule",
+        "Evaluate if builtinFunctionCoercion override is needed (Calcite defaults may suffice)",
+        "Register via TypeCoercionFactory in UnifiedQueryContext.buildFrameworkConfig()",
+        "Use SqlConformanceEnum.MYSQL_5 as base conformance for BOOLEAN↔NUMBER coercion",
+        "Unit test: WHERE date_field > time_field → both cast to TIMESTAMP",
+        "Unit test: WHERE int_field > '25' → string cast to numeric (verify Calcite default handles this)",
+        "Build passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Create DynamicPPLToSqlNodeConverter with schema-dependent commands",
+      "description": "As a developer, I want schema-dependent commands (fields -, wildcard rename, fillnull all-fields) to resolve columns from SchemaPlus.",
+      "acceptanceCriteria": [
+        "Create api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java extending PPLToSqlNodeConverter",
+        "Constructor takes SchemaPlus schema",
+        "Helper: resolveColumns(String tableName) → List<String>",
+        "Override visitProject: handle fields - (exclude) by enumerating columns from schema",
+        "Override visitRename: handle wildcard rename by resolving matching columns",
+        "Override visitFillNull: handle all-fields mode by enumerating columns",
+        "Override visitEval: handle column override with explicit column enumeration",
+        "Unit test with in-memory schema: source=t | fields - a (where t has columns a, b, c)",
+        "Build passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Wire converter into PPLIntegTestCase V4 routing",
+      "description": "As a developer, I want the integration tests to use the new SqlNode converter so that I can measure regression.",
+      "acceptanceCriteria": [
+        "Update PPLIntegTestCase V4 routing to use DynamicPPLToSqlNodeConverter",
+        "Convert AST → SqlNode → SqlNode.toSqlString() → send to /_plugins/_sql endpoint",
+        "Alternatively: convert → validate → rel → execute via full pipeline",
+        "Verify at least one simple PPL query works end-to-end: source=index | head 5",
+        "Build passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Regression comparison: zero regressions vs baseline",
+      "description": "As a developer, I want to verify the SqlNode converter passes every test the string transpiler passed.",
+      "acceptanceCriteria": [
+        "Run scripts/ppl_it_rate.sh with new converter",
+        "Diff failures against docs/dev/baseline-string-transpiler-failures.txt",
+        "Zero regressions: every test that passed with string transpiler also passes with SqlNode converter",
+        "Document any new passes (bonus from PPLTypeCoercion) in progress.txt",
+        "If regressions exist, fix them in the converter and re-run until zero regressions"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "This is the final gate. The Ralph loop iterates on this story until zero regressions."
+    }
+  ]
+}
