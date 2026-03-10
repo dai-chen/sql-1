@@ -8,7 +8,7 @@ You are an autonomous coding agent migrating the PPL-to-SQL translation from a s
 2. Read the progress log at `progress.txt` (check **Codebase Patterns** section FIRST)
 3. Read the design doc at `docs/dev/2026-03-10-unified-sql-ppl-v4-design.md` for architecture context
 4. Read the implementation plan at `docs/dev/2026-03-10-impl-plan-2.1-2.2.md` for task details
-5. Check you're on branch `poc/ppl-to-sqlnode-unified-api`
+5. Check you're on the correct branch specified in `prd.json` field `branchName`
 6. Pick the **highest priority** user story where `passes: false`
 7. Implement that single user story
 8. Run build: `./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20`
