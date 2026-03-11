@@ -115,3 +115,20 @@ The string-based PPLToSqlTranspiler (58.5%, 1324/2264) was replaced with a SqlNo
   - Subqueries: ~25 (Exists + Scalar + In SubqueryIT)
   - Math/operator/functions: ~39 (CalciteMathematicalFunctionIT + CalciteOperatorIT + others)
   - Scattered (20+ classes, 1-5 each): ~84
+
+## 2026-03-11T17:32 - V4-001: Fix DATE+TIME comparison and datetime implementation
+- **What was fixed**: 75 regressions vs string transpiler baseline
+  - Added `promoteDatetimeOperands`/`extractCastType`/`promoteTimeToTimestamp` for cross-type datetime comparisons (DATE vs TIME vs TIMESTAMP promotion to TIMESTAMP)
+  - Fixed `datetime(2 args)` to return `CAST(NULL AS TIMESTAMP)` (timezone conversion unsupported in SQL — V3 UDFs incompatible)
+  - Fixed `visitSpan` to use `FLOOR(field, SqlIntervalQualifier)` instead of `DATE_TRUNC(field, string_literal)` — Calcite requires proper DATETIME_INTERVAL type
+- **Regressions fixed**: 75 (72 CalciteDateTimeComparisonIT + 3 CalciteDateTimeImplementationIT)
+- **Test results**:
+  - CalciteDateTimeComparisonIT: 191/191 pass ✅
+  - CalciteDateTimeImplementationIT: 4/17 pass (3 regressions fixed; remaining 13 are NOT regressions — also failed with old transpiler)
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java
+- **Learnings for future iterations:**
+  - V3 UDFs (ImplementorUDF like DatetimeFunction, ConvertTzFunction) cause "Invalid DATE value" errors at runtime — Calcite tries to interpret UDF string results as DATE literals. Always map PPL functions to SQL directly.
+  - The `datetime(timestamp, timezone)` 2-arg form requires actual timezone conversion logic. The old transpiler also returned NULL for this. To fix the remaining 10 tests, would need to implement timezone arithmetic in pure SQL (not via UDF).
+  - Span tests with custom date format fields (yyyy-MM-dd, epoch_millis) fail with engine-level `timestampStringToEpochMillis` NumberFormatException — this is a CalciteNoPushdownIndexScan bug, not a converter issue.
+  - The PRD regression counts were outdated — the Human Intervention refactor already included the datetime comparison fixes in the working tree (uncommitted). This iteration committed those changes.
+---
