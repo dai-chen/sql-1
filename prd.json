@@ -18,8 +18,8 @@
         "Commit baseline files"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Baseline captured: 2264 total, 1325 passed, 795 failed, 144 skipped, 58.5% rate"
     },
     {
       "id": "US-002",
@@ -38,8 +38,8 @@
         "Build passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "SqlNodeDSL.java (327 lines) with SelectBuilder fluent API + 30 static factory methods. SqlNodeDSLTest.java with 5 tests covering select/subquery/orderBy/aggregation/expressions."
     },
     {
       "id": "US-003",
@@ -59,8 +59,8 @@
         "Build passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "PPLToSqlNodeConverter.java (253 lines) with 5 core commands + minimal expression visitors (Compare, And, Or, Not, QualifiedName, Field, Literal, AllFields). PPLToSqlNodeConverterTest.java with 6 tests. Commit: d89fb0596"
     },
     {
       "id": "US-004",
@@ -82,8 +82,8 @@
         "Build passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added 16 expression visitors: visitAlias, visitEqualTo, visitXor, visitFunction (with arithmetic ops, if/ifnull/isnull/log/like special cases + FUNC_MAP fallback), visitAggregateFunction (COUNT DISTINCT, countStar), visitIn, visitBetween, visitCase, visitCast, visitSpan, visitInterval, visitWindowFunction, visitLet, visitInSubquery, visitScalarSubquery, visitExistsSubquery. Enhanced visitLiteral for DATE/TIME/TIMESTAMP/DOUBLE/FLOAT/LONG. Enhanced visitCompare for REGEXP. Added notLike/exists/inSub to SqlNodeDSL. 17 unit tests all pass."
     },
     {
       "id": "US-005",

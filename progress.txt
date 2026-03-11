@@ -11,3 +11,71 @@
 - Test measurement: scripts/ppl_it_rate.sh runs all Calcite*IT with -Dppl.engine.v4=true and parses JUnit XML
 
 # Iteration Log
+
+## [2026-03-10T21:43Z] - US-001: Snapshot string-transpiler baseline
+- Captured baseline from existing test run in `build/ppl-v4-reports/`
+- Copied to `docs/dev/baseline-string-transpiler.json`, `docs/dev/baseline-string-transpiler-per-class.csv`, `docs/dev/baseline-string-transpiler-failures.txt`
+- Baseline: 2264 total, 1325 passed (58.5%), 795 failed, 144 skipped
+- Commit: 607eab057 `feat: [US-001] Snapshot string-transpiler baseline`
+- **Learnings for future iterations:**
+  - The test suite requires a running OpenSearch cluster (`integ-test:integTest`)
+  - 58.5% is the regression target — new converter must pass all 1325 tests that currently pass
+  - Highest failure classes: CalciteArrayFunctionIT (60/60 fail), CalciteSearchCommandIT (46/52 fail), CalciteDateTimeFunctionIT (35/65 fail)
+---
+
+## [2026-03-10T21:58Z] - US-002: Create SqlNodeDSL utility class
+- SqlNodeDSL.java (327 lines) already existed as untracked file — verified all acceptance criteria met
+- SelectBuilder fluent API: select().from().where().groupBy().having().orderBy().limit().offset().build()
+- 30+ static factory methods: star, identifier, literal, table, subquery, asList, gt/lt/gte/lte/eq/neq, plus/minus/times/divide/mod, and/or/not, call, agg, cast, as, between, in, caseWhen, window, isNull/isNotNull, desc/nullsFirst/nullsLast, like, count/countStar/sum/avg/min/max
+- SqlNodeDSLTest.java with 5 tests: selectStarFromTable, nestedSubquery, orderByWithLimit, aggregationWithGroupBy, expressionHelpers
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: `SqlNodeDSLTest` all 5 pass
+- Files: api/src/main/java/org/opensearch/sql/calcite/utils/SqlNodeDSL.java, api/src/test/java/org/opensearch/sql/calcite/utils/SqlNodeDSLTest.java
+- Commit: 5d8706c5c `feat: [US-002] Create SqlNodeDSL utility class`
+- **Learnings for future iterations:**
+  - SqlNodeDSL uses SqlParserPos.ZERO for all positions — no source location tracking needed
+  - call() and agg() both use SqlUnresolvedFunction with USER_DEFINED_FUNCTION category — Calcite validator resolves them against the operator table
+  - SelectBuilder.build() wraps in SqlOrderBy only when orderBy/offset/fetch are set, otherwise returns plain SqlSelect
+  - CalciteSqlDialect.DEFAULT quotes identifiers with double-quotes
+---
+
+## [2026-03-10T22:06Z] - US-003: Create base PPLToSqlNodeConverter with 5 core commands
+- Created PPLToSqlNodeConverter.java (253 lines) extending AbstractNodeVisitor<SqlNode, Void>
+- Architecture: flatten AST chain → iterate → visitor dispatch (no if/else-if chain)
+- 5 core commands: visitRelation (SELECT * FROM table), visitFilter (wrap + WHERE), visitProject (SELECT cols), visitSort (ORDER BY), visitHead (LIMIT/OFFSET)
+- Pipe chaining: each command wraps prior result as subquery via SqlNodeDSL.subquery()
+- Minimal expression visitors: visitCompare, visitAnd, visitOr, visitNot, visitQualifiedName, visitField, visitLiteral, visitAllFields
+- Static parse() helper reuses PPLSyntaxParser + AstBuilder + AstStatementBuilder (same as PPLToSqlTranspiler)
+- PPLToSqlNodeConverterTest.java with 6 tests: testSource, testWhereFilter, testFieldsProject, testSortOrderBy, testHeadLimit, testFullPipeline
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: all 6 pass, full `:api:test` suite passes
+- Files: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java, api/src/test/java/org/opensearch/sql/api/PPLToSqlNodeConverterTest.java
+- Commit: d89fb0596 `feat: [US-003] Create base PPLToSqlNodeConverter with 5 core commands`
+- **Learnings for future iterations:**
+  - SqlNodeDSL.SelectBuilder is the fluent builder type (not SqlNode.SelectBuilder)
+  - Calcite uses ANSI SQL syntax: OFFSET n ROWS FETCH NEXT n ROWS ONLY (not MySQL LIMIT/OFFSET)
+  - The `pipe` field tracks the current SqlNode state across visitor calls — each visitXxx wraps it as subquery
+  - AllFields passthrough in visitProject avoids unnecessary subquery wrapping
+  - Sort field args use "asc" (boolean) and "nullFirst" (boolean) argument names
+  - Head has getSize() for LIMIT and getFrom() for OFFSET
+---
+
+## [2026-03-11T00:10Z] - US-004: Port expression visitors and FUNC_MAP
+- Added 16 new expression visitor methods to PPLToSqlNodeConverter.java
+- Enhanced visitLiteral: DATE/TIME/TIMESTAMP → CAST('value' AS TYPE), DOUBLE/FLOAT/LONG → CAST(value AS TYPE)
+- Enhanced visitCompare: added REGEXP → REGEXP_CONTAINS
+- New visitors: visitAlias, visitEqualTo, visitXor, visitFunction, visitAggregateFunction, visitIn, visitBetween, visitCase, visitCast, visitSpan, visitInterval, visitWindowFunction, visitLet, visitInSubquery, visitScalarSubquery, visitExistsSubquery
+- visitFunction handles: arithmetic ops (+,-,*,/,%), if→CASE WHEN, ifnull→COALESCE, isnull→IS NULL, log→LN, log2→LN/LN(2), like/not like, FUNC_MAP fallback with SQL_DATETIME_KEYWORDS
+- visitAggregateFunction handles: distinct_count/dc→COUNT(DISTINCT), count(*)→COUNT(*), DISTINCT support
+- Added notLike, exists, inSub helpers to SqlNodeDSL.java
+- Added convertSubPlan() helper for subquery expression visitors
+- 17 unit tests all pass, full :api:test suite passes
+- Files: PPLToSqlNodeConverter.java (640 lines), SqlNodeDSL.java (+26 lines), PPLToSqlNodeConverterTest.java (+72 lines)
+- Commit: 9e8d78e36 `feat: [US-004] Port expression visitors and FUNC_MAP`
+- **Learnings for future iterations:**
+  - PPL case() syntax is different from SQL CASE — conditions are positional pairs, not SQL-style WHEN/THEN
+  - eval command (US-006) is needed to test expression visitors in computed column context
+  - WindowFunction.getSortList() returns List<Pair<SortOption, UnresolvedExpression>>, not List<UnresolvedExpression>
+  - SqlSelectKeyword.DISTINCT + field as SqlBasicCall args to SqlStdOperatorTable.COUNT creates COUNT(DISTINCT field)
+  - SQL_DATETIME_KEYWORDS (CURRENT_TIMESTAMP etc.) need special handling — call with no args, not as identifier
+---
