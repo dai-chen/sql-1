@@ -56,6 +56,7 @@ import org.opensearch.sql.ast.expression.subquery.InSubquery;
 import org.opensearch.sql.ast.expression.subquery.ScalarSubquery;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
+import org.opensearch.sql.ast.tree.Aggregation;
 import org.opensearch.sql.ast.tree.Filter;
 import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Project;
@@ -305,6 +306,56 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (node.getFrom() != null && node.getFrom() > 0) {
       builder = builder.offset(intLiteral(node.getFrom()));
     }
+    pipe = builder.build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitAggregation(Aggregation node, Void ctx) {
+    // Build SELECT items: aggregates first, then span (if any), then group-by fields
+    List<SqlNode> selectItems = new ArrayList<>();
+    for (UnresolvedExpression expr : node.getAggExprList()) {
+      selectItems.add(expr.accept(this, null));
+    }
+
+    List<SqlNode> groupByItems = new ArrayList<>();
+    // Handle span — stored separately from groupExprList
+    if (node.getSpan() != null) {
+      selectItems.add(node.getSpan().accept(this, null));
+      Alias spanAlias = (Alias) node.getSpan();
+      groupByItems.add(spanAlias.getDelegated().accept(this, null));
+    }
+    // Handle group-by fields
+    for (UnresolvedExpression expr : node.getGroupExprList()) {
+      selectItems.add(expr.accept(this, null));
+      if (expr instanceof Alias) {
+        groupByItems.add(((Alias) expr).getDelegated().accept(this, null));
+      } else {
+        groupByItems.add(expr.accept(this, null));
+      }
+    }
+
+    SqlNodeDSL.SelectBuilder builder =
+        select(selectItems.toArray(new SqlNode[0])).from(wrapAsSubquery());
+    if (!groupByItems.isEmpty()) {
+      builder = builder.groupBy(groupByItems.toArray(new SqlNode[0]));
+    }
+
+    // bucket_nullable=false: filter out null group-by keys
+    boolean bucketNullable =
+        node.getArgExprList().stream()
+            .noneMatch(
+                a ->
+                    "bucket_nullable".equals(a.getArgName())
+                        && Boolean.FALSE.equals(a.getValue().getValue()));
+    if (!bucketNullable && !groupByItems.isEmpty()) {
+      SqlNode nullFilter = groupByItems.stream()
+          .map(col -> isNotNull(col))
+          .reduce((a, b) -> and(a, b))
+          .get();
+      builder = builder.where(nullFilter);
+    }
+
     pipe = builder.build();
     return pipe;
   }

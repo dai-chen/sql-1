@@ -139,4 +139,36 @@ public class PPLToSqlNodeConverterTest {
     String sql = convert("source=t | where log(a) > 1");
     assertTrue(sql.contains("LN"));
   }
+
+  // -- US-005: Stats (aggregation) command tests --
+
+  @Test
+  public void testStatsCount() {
+    String sql = convert("source=t | stats count() as cnt");
+    assertTrue(sql, sql.contains("COUNT(*)"));
+    assertTrue(sql, sql.contains("\"cnt\""));
+  }
+
+  @Test
+  public void testStatsGroupBy() {
+    String sql = convert("source=t | stats avg(a) as avg_a by b");
+    assertTrue(sql, sql.contains("AVG"));
+    assertTrue(sql, sql.contains("GROUP BY"));
+  }
+
+  @Test
+  public void testStatsMultipleAggs() {
+    String sql = convert("source=t | stats count() as cnt, sum(a) as total by b");
+    assertTrue(sql, sql.contains("COUNT(*)"));
+    assertTrue(sql, sql.contains("SUM"));
+    assertTrue(sql, sql.contains("GROUP BY"));
+  }
+
+  @Test
+  public void testStatsWithSpan() {
+    String sql = convert("source=t | stats count() as cnt by span(a, 10)");
+    assertTrue(sql, sql.contains("COUNT(*)"));
+    assertTrue(sql, sql.contains("FLOOR"));
+    assertTrue(sql, sql.contains("GROUP BY"));
+  }
 }
