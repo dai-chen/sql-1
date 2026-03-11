@@ -247,3 +247,47 @@ The string-based PPLToSqlTranspiler (58.5%, 1324/2264) was replaced with a SqlNo
   - CountBin/MinSpanBin/RangeBin use window functions (MIN/MAX OVER()) which can't be inlined into expressions — must use subquery wrapping
   - The `binReplacements` map tracks field-to-expression mappings for downstream pipe stages to resolve bin aliases
 ---
+
+## Round Summary (max iterations reached, iteration 6)
+
+### Progress
+- **Completed this round**: V4-001 (datetime comparison, +75 regressions), V4-002 (stats/aggregation, +71 regressions), V4-003 (datetime functions, +22 regressions), V4-004 (bin/chart/timechart, +253 tests). Total: 4 stories passed, rate 41.3% → 52.4% (+11.1pp, +253 net new passing tests).
+- **Remaining**: 8 stories still incomplete (V4-005 through V4-012):
+  - V4-005: Search/relevance (~82 failures) — not started
+  - V4-006: Array/MV functions (~107 failures) — not started
+  - V4-007: Null handling/builtin functions (~76 failures) — not started
+  - V4-008: Join/lookup/subquery (~72 failures) — not started
+  - V4-009: Fields/rename/replace/basic/eval (~105 failures) — not started
+  - V4-010: Streamstats/graph lookup/new commands (~96 failures) — not started
+  - V4-011: Math/string/text/operator/JSON functions (~60 failures) — not started
+  - V4-012: Long-tail cleanup (~150+ failures across 40+ classes)
+- **Blockers**:
+  - Engine-level TIME handling bug: `CAST('17:30:00' AS TIME)` fails at runtime with "Invalid DATE value" — blocks 9 datetime regressions (V4-003 leftovers). This is a CalciteNoPushdownIndexScan issue, not converter-fixable.
+  - `LIST`/`VALUES` aggregate functions not registered in engine — blocks all 31 CalciteMultiValueStatsIT tests (V4-006 scope).
+  - Nanosecond timestamp parsing failures in engine — blocks ~7 aggregation tests.
+  - V4 error handling path returns client-side exceptions (SyntaxCheckException) instead of server-side ResponseException — systematically fails all error-handling tests across many classes.
+
+### PoC Direction Check
+- **Approach validation**: SqlNode-based converter is proving viable. The 41.3%→52.4% jump in one round shows the architecture works well for translating PPL pipe semantics into nested SQL subqueries. The SqlNodeDSL + PPLTypeCoercion layering is clean — converter stays focused on structural translation while type coercion is handled at validation time.
+- **Surprises**:
+  - Easier than expected: Bin/chart/timechart implementation went smoothly once the FLOOR-with-SqlIntervalQualifier pattern was discovered (+253 tests from V4-004 alone).
+  - Harder than expected: Engine-level runtime bugs (TIME casting, nanosecond parsing) create a hard ceiling that the converter cannot fix. These are downstream of the SqlNode→RelNode→execution path.
+  - Assumption invalidated: Now-like SQL keywords (CURRENT_TIMESTAMP etc.) don't serialize properly through the Calcite JSON response path — had to generate UTC string literals instead.
+- **Alternative approaches**: No fundamental pivot needed. The subquery-wrapping pattern for pipe stages is working. The main alternative consideration is whether some remaining stories (V4-005 search/relevance, V4-010 new commands) need new visitor methods vs. function mappings — likely a mix of both.
+- **Risk areas**:
+  - V4-005 (search/relevance): Full-text search functions (match, query_string) may need special SqlNode patterns that don't map to standard SQL — could require custom operators or passthrough mechanisms.
+  - V4-008 (join/lookup/subquery): Join scoping and subquery correlation are structurally complex — "Column is ambiguous" errors suggest scope resolution issues.
+  - V4-009 (fields/rename/replace): These rely heavily on DynamicPPLToSqlNodeConverter's schema-aware SELECT * EXCEPT/REPLACE — bugs here affect many downstream commands.
+  - V4-012 (long-tail): 150+ failures across 40+ classes means many small fixes with diminishing returns — may be hard to reach 85% without addressing engine-level bugs.
+- **Open questions**:
+  - Should the engine-level TIME casting bug be fixed separately (outside Ralph loop scope)? It blocks ~9 regressions permanently.
+  - Should error-handling test failures be excluded from the 85% target since they're architectural (V4 returns different exception types)?
+  - Is LIST/VALUES aggregate registration worth doing as a side fix (like PERCENTILE_APPROX uppercase was)?
+
+### Recommended Next Steps
+1. Resume with V4-005 (search/relevance) — highest priority remaining. Run CalciteSearchCommandIT and CalciteRelevanceFunctionIT first to categorize failures.
+2. V4-009 (fields/rename/replace/basic) is likely high-ROI since these are fundamental commands affecting many test classes — consider prioritizing if V4-005 proves blocked by engine limitations.
+3. V4-007 (null handling/builtins) and V4-011 (math/string/functions) are likely quick wins — mostly function mapping additions similar to V4-003.
+4. Consider a human intervention to fix the engine-level TIME casting bug before the next round — it's a permanent blocker for ~9 tests and may affect other stories.
+5. Target: reach ~65-70% by end of next round (need ~290-400 more tests passing from current 1187/2264).
+---
