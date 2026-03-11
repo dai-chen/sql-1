@@ -316,6 +316,24 @@ public final class SqlNodeDSL {
     return new SqlBasicCall(SqlStdOperatorTable.OVER, new SqlNode[] {agg, win}, POS);
   }
 
+  /** Window with explicit frame bounds (ROWS/RANGE BETWEEN lower AND upper). */
+  public static SqlNode windowWithFrame(
+      SqlNode agg, SqlNodeList partitionBy, SqlNodeList orderBy,
+      boolean isRows, SqlNode lowerBound, SqlNode upperBound) {
+    SqlWindow win =
+        SqlWindow.create(
+            null, null, partitionBy, orderBy,
+            SqlLiteral.createBoolean(isRows, POS),
+            lowerBound, upperBound, null, POS);
+    return new SqlBasicCall(SqlStdOperatorTable.OVER, new SqlNode[] {agg, win}, POS);
+  }
+
+  /** UNION ALL of two queries. */
+  public static SqlNode unionAll(SqlNode left, SqlNode right) {
+    return new SqlBasicCall(
+        SqlStdOperatorTable.UNION_ALL, new SqlNode[] {left, right}, POS);
+  }
+
   // ---- Join helper ----
 
   public static SqlNode join(SqlNode left, JoinType joinType, SqlNode right, SqlNode condition) {

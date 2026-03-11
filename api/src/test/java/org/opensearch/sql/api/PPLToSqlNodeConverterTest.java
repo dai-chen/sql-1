@@ -262,4 +262,61 @@ public class PPLToSqlNodeConverterTest {
     String sql = convert("source=t1 | lookup t2 id AS id replace salary");
     assertTrue("Should contain LEFT JOIN: " + sql, sql.toUpperCase().contains("LEFT"));
   }
+
+  // -- US-009: remaining core commands --
+
+  @Test
+  public void testRareTopN() {
+    String sql = convert("source=t | top 3 a");
+    assertTrue("Should contain COUNT: " + sql, sql.toUpperCase().contains("COUNT"));
+    assertTrue("Should contain ROW_NUMBER: " + sql, sql.toUpperCase().contains("ROW_NUMBER"));
+    assertTrue("Should contain GROUP BY: " + sql, sql.toUpperCase().contains("GROUP BY"));
+  }
+
+  @Test
+  public void testRare() {
+    String sql = convert("source=t | rare a");
+    assertTrue("Should contain COUNT: " + sql, sql.toUpperCase().contains("COUNT"));
+    assertTrue("Should contain ROW_NUMBER: " + sql, sql.toUpperCase().contains("ROW_NUMBER"));
+  }
+
+  @Test
+  public void testWindow() {
+    String sql = convert("source=t | eventstats avg(a) as avg_a by b");
+    assertTrue("Should contain AVG: " + sql, sql.toUpperCase().contains("AVG"));
+    assertTrue("Should contain OVER: " + sql, sql.toUpperCase().contains("OVER"));
+    assertTrue("Should contain PARTITION BY: " + sql, sql.toUpperCase().contains("PARTITION BY"));
+  }
+
+  @Test
+  public void testAppend() {
+    String sql = convert("source=t1 | append [source=t2]");
+    assertTrue("Should contain UNION ALL: " + sql, sql.toUpperCase().contains("UNION ALL"));
+  }
+
+  @Test
+  public void testRename() {
+    String sql = convert("source=t | rename a as b");
+    assertTrue("Should contain AS: " + sql, sql.toUpperCase().contains(" AS "));
+    assertTrue("Should reference a: " + sql, sql.contains("\"a\""));
+    assertTrue("Should reference b: " + sql, sql.contains("\"b\""));
+  }
+
+  @Test
+  public void testFillNull() {
+    String sql = convert("source=t | fillnull value=0 a, b");
+    assertTrue("Should contain COALESCE: " + sql, sql.toUpperCase().contains("COALESCE"));
+  }
+
+  @Test
+  public void testParse() {
+    String sql = convert("source=t | parse msg '(?<year>\\d{4})-(?<month>\\d{2})'");
+    assertTrue("Should contain REGEXP_EXTRACT: " + sql, sql.toUpperCase().contains("REGEXP_EXTRACT"));
+  }
+
+  @Test
+  public void testReplace() {
+    String sql = convert("source=t | replace 'foo' with 'bar' in a");
+    assertTrue("Should contain REPLACE: " + sql, sql.toUpperCase().contains("REPLACE"));
+  }
 }

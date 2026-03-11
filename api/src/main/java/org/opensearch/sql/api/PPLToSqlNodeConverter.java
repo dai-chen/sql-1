@@ -9,6 +9,7 @@ import static org.opensearch.sql.calcite.utils.SqlNodeDSL.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,11 +47,14 @@ import org.opensearch.sql.ast.expression.In;
 import org.opensearch.sql.ast.expression.Interval;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.Literal;
+import org.opensearch.sql.ast.expression.ParseMethod;
 import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.ast.expression.Span;
 import org.opensearch.sql.ast.expression.SpanUnit;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.expression.When;
+import org.opensearch.sql.ast.expression.WindowBound;
+import org.opensearch.sql.ast.expression.WindowFrame;
 import org.opensearch.sql.ast.expression.WindowFunction;
 import org.opensearch.sql.ast.expression.Xor;
 import org.opensearch.sql.ast.expression.subquery.ExistsSubquery;
@@ -59,18 +63,31 @@ import org.opensearch.sql.ast.expression.subquery.ScalarSubquery;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.Aggregation;
+import org.opensearch.sql.ast.tree.Append;
+import org.opensearch.sql.ast.tree.Bin;
 import org.opensearch.sql.ast.tree.Dedupe;
 import org.opensearch.sql.ast.tree.Eval;
+import org.opensearch.sql.ast.tree.FillNull;
 import org.opensearch.sql.ast.tree.Filter;
 import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
+import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Project;
+import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
+import org.opensearch.sql.ast.tree.Rename;
+import org.opensearch.sql.ast.tree.Replace;
+import org.opensearch.sql.ast.tree.ReplacePair;
 import org.opensearch.sql.ast.tree.Sort;
+import org.opensearch.sql.ast.tree.SpanBin;
+import org.opensearch.sql.ast.tree.StreamWindow;
 import org.opensearch.sql.ast.tree.SubqueryAlias;
+import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
+import org.opensearch.sql.ast.tree.Window;
 import org.opensearch.sql.calcite.utils.SqlNodeDSL;
+import org.opensearch.sql.calcite.utils.WildcardUtils;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
 import org.opensearch.sql.ppl.parser.AstBuilder;
@@ -552,6 +569,551 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
     }
     return pipe;
+  }
+
+  // -- US-009: remaining core commands --
+
+  @Override
+  public SqlNode visitRareTopN(RareTopN node, Void ctx) {
+    Argument.ArgumentMap args = Argument.ArgumentMap.of(node.getArguments());
+    String countFieldName = (String) args.get(RareTopN.Option.countField.name()).getValue();
+    boolean showCount = (Boolean) args.get(RareTopN.Option.showCount.name()).getValue();
+    boolean useNull = (Boolean) args.get(RareTopN.Option.useNull.name()).getValue();
+    int k = node.getNoOfResults();
+    boolean isTop = node.getCommandType() == RareTopN.CommandType.TOP;
+
+    List<SqlNode> fieldNodes = node.getFields().stream()
+        .map(f -> f.accept(this, null)).collect(Collectors.toList());
+    List<SqlNode> groupNodes = node.getGroupExprList().stream()
+        .map(e -> e.accept(this, null)).collect(Collectors.toList());
+
+    // Step 0: wrap + optional null filter
+    pipe = wrapAsSubquery();
+    if (!useNull) {
+      List<SqlNode> allCols = new ArrayList<>(groupNodes);
+      allCols.addAll(fieldNodes);
+      SqlNode nullCheck = allCols.stream().map(c -> isNotNull(c))
+          .reduce((a, b) -> and(a, b)).orElse(null);
+      if (nullCheck != null) {
+        pipe = select(star()).from(pipe).where(nullCheck).build();
+      }
+    }
+
+    // Step 1: GROUP BY with COUNT(*)
+    pipe = wrapAsSubquery();
+    List<SqlNode> allGroupBy = new ArrayList<>(groupNodes);
+    allGroupBy.addAll(fieldNodes);
+    List<SqlNode> sel1 = new ArrayList<>(allGroupBy);
+    sel1.add(as(countStar(), countFieldName));
+    pipe = select(sel1.toArray(new SqlNode[0]))
+        .from(pipe).groupBy(allGroupBy.toArray(new SqlNode[0])).build();
+
+    // Step 2: ROW_NUMBER window
+    pipe = wrapAsSubquery();
+    SqlNode orderDir = isTop ? desc(identifier(countFieldName)) : identifier(countFieldName);
+    SqlNodeList partBy = groupNodes.isEmpty() ? SqlNodeList.EMPTY
+        : new SqlNodeList(groupNodes, POS);
+    SqlNode rn = as(
+        window(call("ROW_NUMBER"), partBy, new SqlNodeList(List.of(orderDir), POS)),
+        "_rn");
+    pipe = select(star(), rn).from(pipe).build();
+
+    // Step 3: filter _rn <= k
+    pipe = wrapAsSubquery();
+    pipe = select(star()).from(pipe).where(lte(identifier("_rn"), intLiteral(k))).build();
+
+    // Step 4: project final columns
+    pipe = wrapAsSubquery();
+    List<SqlNode> finalCols = new ArrayList<>(groupNodes);
+    finalCols.addAll(fieldNodes);
+    if (showCount) finalCols.add(identifier(countFieldName));
+    pipe = select(finalCols.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitTrendline(Trendline node, Void ctx) {
+    // Build ORDER BY for window frame
+    SqlNodeList overOrderBy = SqlNodeList.EMPTY;
+    if (node.getSortByField().isPresent()) {
+      Field sortField = node.getSortByField().get();
+      SqlNode col = sortField.accept(this, null);
+      boolean asc = true;
+      for (Argument arg : sortField.getFieldArgs()) {
+        if ("asc".equals(arg.getArgName())) {
+          asc = Boolean.TRUE.equals(((Literal) arg.getValue()).getValue());
+        }
+      }
+      if (!asc) col = desc(col);
+      overOrderBy = new SqlNodeList(List.of(col), POS);
+    }
+
+    // Build trendline computations as window expressions
+    List<SqlNode> windowExprs = new ArrayList<>();
+    for (Trendline.TrendlineComputation comp : node.getComputations()) {
+      int n = comp.getNumberOfDataPoints();
+      SqlNode field = comp.getDataField().accept(this, null);
+      SqlNode preceding = SqlWindow.createPreceding(
+          SqlLiteral.createExactNumeric(String.valueOf(n - 1), POS), POS);
+      SqlNode currentRow = SqlWindow.createCurrentRow(POS);
+
+      SqlNode countCheck = gt(
+          windowWithFrame(call("COUNT", star()), SqlNodeList.EMPTY, overOrderBy,
+              true, preceding, currentRow),
+          intLiteral(n - 1));
+
+      SqlNode expr;
+      if (comp.getComputationType() == Trendline.TrendlineType.SMA) {
+        SqlNode castField = cast(field, typeSpec(SqlTypeName.DOUBLE));
+        SqlNode sumWin = windowWithFrame(call("SUM", castField), SqlNodeList.EMPTY, overOrderBy,
+            true, preceding, currentRow);
+        SqlNode countWin = cast(
+            windowWithFrame(call("COUNT", field), SqlNodeList.EMPTY, overOrderBy,
+                true, preceding, currentRow),
+            typeSpec(SqlTypeName.DOUBLE));
+        expr = caseWhen(List.of(countCheck), List.of(divide(sumWin, countWin)), literal(null));
+      } else {
+        // WMA: sum(value_i * i) / (n*(n+1)/2)
+        List<SqlNode> weightedTerms = new ArrayList<>();
+        for (int i = 1; i <= n; i++) {
+          SqlNode nthVal = windowWithFrame(
+              call("NTH_VALUE", field, intLiteral(i)), SqlNodeList.EMPTY, overOrderBy,
+              true, preceding, currentRow);
+          weightedTerms.add(times(cast(nthVal, typeSpec(SqlTypeName.DOUBLE)), intLiteral(i)));
+        }
+        SqlNode wmaSum = weightedTerms.stream().reduce((a, b) -> plus(a, b)).get();
+        int denom = n * (n + 1) / 2;
+        expr = caseWhen(List.of(countCheck),
+            List.of(divide(wmaSum, literal(denom + ".0"))), literal(null));
+      }
+      windowExprs.add(as(expr, comp.getAlias()));
+    }
+
+    // Add null filter for data fields
+    List<SqlNode> nullChecks = node.getComputations().stream()
+        .map(c -> isNotNull(c.getDataField().accept(this, null)))
+        .collect(Collectors.toList());
+    SqlNode nullFilter = nullChecks.stream().reduce((a, b) -> and(a, b)).orElse(null);
+    if (nullFilter != null) {
+      pipe = select(star()).from(wrapAsSubquery()).where(nullFilter).build();
+    }
+
+    // SELECT *, trendline_exprs
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(star());
+    selectItems.addAll(windowExprs);
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitWindow(Window node, Void ctx) {
+    pipe = wrapAsSubquery();
+
+    // Build PARTITION BY
+    List<SqlNode> partCols = new ArrayList<>();
+    for (UnresolvedExpression expr : node.getGroupList()) {
+      if (expr instanceof Alias && ((Alias) expr).getDelegated() instanceof Span) {
+        partCols.add(((Alias) expr).getDelegated().accept(this, null));
+      } else if (expr instanceof Alias) {
+        partCols.add(((Alias) expr).getDelegated().accept(this, null));
+      } else {
+        partCols.add(expr.accept(this, null));
+      }
+    }
+    SqlNodeList partBy = partCols.isEmpty() ? SqlNodeList.EMPTY
+        : new SqlNodeList(partCols, POS);
+
+    // Null check for bucketNullable=false
+    SqlNode nullCheck = null;
+    if (!node.isBucketNullable() && !partCols.isEmpty()) {
+      nullCheck = partCols.stream().map(c -> isNotNull(c))
+          .reduce((a, b) -> and(a, b)).orElse(null);
+    }
+
+    // RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    SqlNode unboundedPreceding = SqlWindow.createUnboundedPreceding(POS);
+    SqlNode unboundedFollowing = SqlWindow.createUnboundedFollowing(POS);
+
+    List<SqlNode> windowExprs = new ArrayList<>();
+    for (UnresolvedExpression item : node.getWindowFunctionList()) {
+      Alias alias = (Alias) item;
+      WindowFunction wf = (WindowFunction) alias.getDelegated();
+      SqlNode aggSql = buildWindowAggSql(wf.getFunction());
+      SqlNode winExpr = windowWithFrame(aggSql, partBy, SqlNodeList.EMPTY,
+          false, unboundedPreceding, unboundedFollowing);
+      if (nullCheck != null) {
+        winExpr = caseWhen(List.of(nullCheck), List.of(winExpr), literal(null));
+      }
+      windowExprs.add(as(winExpr, alias.getName()));
+    }
+
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(star());
+    selectItems.addAll(windowExprs);
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitStreamWindow(StreamWindow node, Void ctx) {
+    pipe = wrapAsSubquery();
+
+    // Build PARTITION BY
+    List<SqlNode> partCols = new ArrayList<>();
+    for (UnresolvedExpression expr : node.getGroupList()) {
+      if (expr instanceof Alias && ((Alias) expr).getDelegated() instanceof Span) {
+        partCols.add(((Alias) expr).getDelegated().accept(this, null));
+      } else if (expr instanceof Alias) {
+        partCols.add(((Alias) expr).getDelegated().accept(this, null));
+      } else {
+        partCols.add(expr.accept(this, null));
+      }
+    }
+    SqlNodeList partBy = partCols.isEmpty() ? SqlNodeList.EMPTY
+        : new SqlNodeList(partCols, POS);
+
+    // Null check for bucketNullable=false
+    SqlNode nullCheck = null;
+    if (!node.isBucketNullable() && !partCols.isEmpty()) {
+      nullCheck = partCols.stream().map(c -> isNotNull(c))
+          .reduce((a, b) -> and(a, b)).orElse(null);
+    }
+
+    List<SqlNode> windowExprs = new ArrayList<>();
+    for (UnresolvedExpression item : node.getWindowFunctionList()) {
+      Alias alias = (Alias) item;
+      WindowFunction wf = (WindowFunction) alias.getDelegated();
+      SqlNode aggSql = buildWindowAggSql(wf.getFunction());
+
+      // Build frame from WindowFunction's frame
+      WindowFrame frame = wf.getWindowFrame();
+      SqlNode lower = windowBoundToSqlNode(frame.getLower());
+      SqlNode upper = windowBoundToSqlNode(frame.getUpper());
+      boolean isRows = frame.getType() == WindowFrame.FrameType.ROWS;
+
+      // Build ORDER BY from sort list if present
+      List<SqlNode> ordItems = new ArrayList<>();
+      for (org.apache.commons.lang3.tuple.Pair<Sort.SortOption, UnresolvedExpression> p
+          : wf.getSortList()) {
+        SqlNode col = p.getRight().accept(this, null);
+        if (p.getLeft() == Sort.SortOption.DEFAULT_DESC) col = desc(col);
+        ordItems.add(col);
+      }
+      SqlNodeList ordBy = ordItems.isEmpty() ? SqlNodeList.EMPTY
+          : new SqlNodeList(ordItems, POS);
+
+      SqlNode winExpr = windowWithFrame(aggSql, partBy, ordBy, isRows, lower, upper);
+      if (nullCheck != null) {
+        winExpr = caseWhen(List.of(nullCheck), List.of(winExpr), literal(null));
+      }
+      windowExprs.add(as(winExpr, alias.getName()));
+    }
+
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(star());
+    selectItems.addAll(windowExprs);
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  private SqlNode windowBoundToSqlNode(WindowBound bound) {
+    if (bound instanceof WindowBound.CurrentRowWindowBound) {
+      return SqlWindow.createCurrentRow(POS);
+    } else if (bound instanceof WindowBound.UnboundedWindowBound) {
+      return ((WindowBound.UnboundedWindowBound) bound).isPreceding()
+          ? SqlWindow.createUnboundedPreceding(POS) : SqlWindow.createUnboundedFollowing(POS);
+    } else if (bound instanceof WindowBound.OffSetWindowBound) {
+      WindowBound.OffSetWindowBound ob = (WindowBound.OffSetWindowBound) bound;
+      SqlNode offset = SqlLiteral.createExactNumeric(String.valueOf(ob.getOffset()), POS);
+      return ob.isPreceding()
+          ? SqlWindow.createPreceding(offset, POS) : SqlWindow.createFollowing(offset, POS);
+    }
+    throw new UnsupportedOperationException("Unknown window bound: " + bound);
+  }
+
+  @Override
+  public SqlNode visitAppend(Append node, Void ctx) {
+    SqlNode mainSql = pipe;
+    SqlNode subSql = convertSubPlan(node.getSubSearch());
+    pipe = select(star()).from(subquery(unionAll(mainSql, subSql), nextAlias())).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitBin(Bin node, Void ctx) {
+    if (!(node instanceof SpanBin)) {
+      throw new UnsupportedOperationException(
+          "Unsupported bin type in V4: " + node.getClass().getSimpleName());
+    }
+    SpanBin spanBin = (SpanBin) node;
+    SqlNode field = spanBin.getField().accept(this, null);
+    String alias = spanBin.getAlias() != null ? spanBin.getAlias()
+        : getFieldName(spanBin.getField());
+    UnresolvedExpression spanExpr = spanBin.getSpan();
+
+    SqlNode binSql;
+    if (spanExpr instanceof Literal) {
+      Literal lit = (Literal) spanExpr;
+      if (lit.getType() == DataType.INTEGER || lit.getType() == DataType.DECIMAL) {
+        SqlNode span = literal(lit.getValue());
+        boolean isInt = lit.getType() == DataType.INTEGER;
+        SqlNode start = times(call("FLOOR", divide(field, span)), span);
+        SqlNode end = plus(start, span);
+        SqlDataTypeSpec intType = typeSpec(SqlTypeName.INTEGER);
+        SqlDataTypeSpec varcharType = typeSpec(SqlTypeName.VARCHAR);
+        if (isInt) {
+          binSql = call("CONCAT",
+              call("CONCAT", cast(cast(start, intType), varcharType), literal("-")),
+              cast(cast(end, intType), varcharType));
+        } else {
+          binSql = call("CONCAT",
+              call("CONCAT", cast(start, varcharType), literal("-")),
+              cast(end, varcharType));
+        }
+      } else {
+        // String literal: time-based or log-based span — delegate to string transpiler approach
+        String spanStr = lit.getValue().toString();
+        String fieldStr = field.toSqlString(
+            org.apache.calcite.sql.dialect.CalciteSqlDialect.DEFAULT).getSql();
+        binSql = SqlLiteral.createCharString(
+            "UNSUPPORTED_SPAN:" + spanStr, POS); // fallback
+        // Use transpileSpanToSqlNode for time/log spans
+        binSql = transpileSpanToSqlNode(spanStr, field);
+      }
+    } else {
+      binSql = cast(field, typeSpec(SqlTypeName.VARCHAR));
+    }
+
+    // Emit as SELECT *, binSql AS alias
+    pipe = select(star(), as(binSql, alias)).from(wrapAsSubquery()).build();
+    return pipe;
+  }
+
+  private SqlNode transpileSpanToSqlNode(String spanStr, SqlNode field) {
+    // Log-based span
+    java.util.regex.Matcher logMatcher =
+        java.util.regex.Pattern.compile("^(\\d+\\.?\\d*)?log(\\d+)$").matcher(spanStr);
+    if (logMatcher.matches()) {
+      String coeffStr = logMatcher.group(1);
+      double coeff = (coeffStr == null || coeffStr.isEmpty()) ? 1.0 : Double.parseDouble(coeffStr);
+      int base = Integer.parseInt(logMatcher.group(2));
+      SqlNode logExpr = call("FLOOR",
+          divide(call("LN", divide(field, literal(coeff))), call("LN", literal(base))));
+      SqlNode start = times(literal(coeff), call("POWER", literal(base), logExpr));
+      SqlNode end = times(literal(coeff), call("POWER", literal(base), plus(logExpr, intLiteral(1))));
+      SqlDataTypeSpec vc = typeSpec(SqlTypeName.VARCHAR);
+      return call("CONCAT", call("CONCAT", cast(start, vc), literal("-")), cast(end, vc));
+    }
+
+    // Time-based span
+    java.util.regex.Matcher timeMatcher =
+        java.util.regex.Pattern.compile("^(\\d+)(\\w+)$").matcher(spanStr);
+    if (!timeMatcher.matches()) {
+      throw new UnsupportedOperationException("Unsupported span format: " + spanStr);
+    }
+    int value = Integer.parseInt(timeMatcher.group(1));
+    String unit = timeMatcher.group(2);
+    String unitLower = unit.equals("M") ? "M" : unit.toLowerCase();
+
+    boolean isMonth = false;
+    int secondsPerUnit = 0;
+    String truncUnit = null;
+    switch (unitLower) {
+      case "s": case "sec": case "secs": case "second": case "seconds":
+        secondsPerUnit = 1; truncUnit = "SECOND"; break;
+      case "m": case "min": case "mins": case "minute": case "minutes":
+        secondsPerUnit = 60; truncUnit = "MINUTE"; break;
+      case "h": case "hr": case "hrs": case "hour": case "hours":
+        secondsPerUnit = 3600; truncUnit = "HOUR"; break;
+      case "d": case "day": case "days":
+        secondsPerUnit = 86400; truncUnit = "DAY"; break;
+      case "w": case "week": case "weeks":
+        secondsPerUnit = 604800; truncUnit = "WEEK"; break;
+      case "mon": case "month": case "months": case "M":
+        isMonth = true; truncUnit = "MONTH"; break;
+      case "q": case "qtr": case "qtrs": case "quarter": case "quarters":
+        isMonth = true; truncUnit = "QUARTER"; break;
+      case "y": case "year": case "years":
+        isMonth = true; truncUnit = "YEAR"; break;
+      default:
+        truncUnit = "SECOND"; break;
+    }
+
+    if (isMonth && value == 1) {
+      return call("SUBSTRING",
+          cast(call("FLOOR", field, identifier(truncUnit)), typeSpec(SqlTypeName.VARCHAR)),
+          intLiteral(1), intLiteral(7));
+    }
+    if (value == 1 && secondsPerUnit > 0) {
+      return call("FLOOR", field, identifier(truncUnit));
+    }
+    if (secondsPerUnit > 0) {
+      long totalSeconds = (long) value * secondsPerUnit;
+      SqlNode epoch = call("TIMESTAMPDIFF",
+          identifier("SECOND"), literal("1970-01-01 00:00:00"), field);
+      SqlNode floored = times(call("FLOOR",
+          divide(epoch, literal(totalSeconds))), literal(totalSeconds));
+      return call("TIMESTAMPADD",
+          identifier("SECOND"), cast(floored, typeSpec(SqlTypeName.INTEGER)),
+          literal("1970-01-01 00:00:00"));
+    }
+    // Fallback for sub-second or multi-month
+    return call("FLOOR", field, identifier("SECOND"));
+  }
+
+  @Override
+  public SqlNode visitReplace(Replace node, Void ctx) {
+    pipe = wrapAsSubquery();
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(star());
+    for (Field field : node.getFieldList()) {
+      String fieldName = field.getField().toString();
+      SqlNode expr = identifier(fieldName);
+      for (ReplacePair pair : node.getReplacePairs()) {
+        String pattern = pair.getPattern().getValue().toString();
+        String replacement = pair.getReplacement().getValue().toString();
+        if (WildcardUtils.containsWildcard(pattern) || WildcardUtils.containsWildcard(replacement)) {
+          WildcardUtils.validateWildcardSymmetry(pattern, replacement);
+          String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
+          String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
+          expr = call("REGEXP_REPLACE", expr, literal(regexPattern), literal(regexReplacement));
+        } else {
+          expr = call("REPLACE", expr, literal(pattern), literal(replacement));
+        }
+      }
+      selectItems.add(as(expr, fieldName));
+    }
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitRename(Rename node, Void ctx) {
+    pipe = wrapAsSubquery();
+    LinkedHashMap<String, String> mappings = new LinkedHashMap<>();
+    for (org.opensearch.sql.ast.expression.Map mapping : node.getRenameList()) {
+      String origin = getFieldName(mapping.getOrigin());
+      String target = getFieldName(mapping.getTarget());
+      // Handle chained renames
+      String realOrigin = null;
+      for (Map.Entry<String, String> prev : mappings.entrySet()) {
+        if (prev.getValue().equals(origin)) { realOrigin = prev.getKey(); break; }
+      }
+      if (realOrigin != null) mappings.put(realOrigin, target);
+      else mappings.put(origin, target);
+    }
+    mappings.entrySet().removeIf(e -> e.getKey().equals(e.getValue()));
+    if (mappings.isEmpty()) return pipe;
+
+    // Wildcard case: SELECT *, old AS new
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(star());
+    for (Map.Entry<String, String> e : mappings.entrySet()) {
+      selectItems.add(as(identifier(e.getKey()), e.getValue()));
+    }
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitFillNull(FillNull node, Void ctx) {
+    pipe = wrapAsSubquery();
+    List<org.apache.commons.lang3.tuple.Pair<Field, UnresolvedExpression>> pairs =
+        node.getReplacementPairs();
+    if (!pairs.isEmpty()) {
+      List<SqlNode> selectItems = new ArrayList<>();
+      selectItems.add(star());
+      for (org.apache.commons.lang3.tuple.Pair<Field, UnresolvedExpression> pair : pairs) {
+        String fieldName = pair.getLeft().getField().toString();
+        SqlNode value = pair.getRight().accept(this, null);
+        selectItems.add(as(call("COALESCE", identifier(fieldName), value), fieldName));
+      }
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    }
+    // replacementForAll case is handled by DynamicPPLToSqlNodeConverter (needs schema)
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitParse(Parse node, Void ctx) {
+    if (node.getParseMethod() != ParseMethod.REGEX) {
+      throw new UnsupportedOperationException(
+          "Unsupported PPL command: Parse (" + node.getParseMethod() + ")");
+    }
+    SqlNode sourceField = node.getSourceField().accept(this, null);
+    String pattern = ((Literal) node.getPattern()).getValue().toString();
+
+    // Extract named group names
+    java.util.regex.Pattern namedGroupPattern =
+        java.util.regex.Pattern.compile("\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>");
+    java.util.regex.Matcher matcher = namedGroupPattern.matcher(pattern);
+    List<String> groupNames = new ArrayList<>();
+    while (matcher.find()) groupNames.add(matcher.group(1));
+
+    pipe = wrapAsSubquery();
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(star());
+    for (int i = 0; i < groupNames.size(); i++) {
+      // Build pattern with only target group as capturing, others as non-capturing
+      String singleGroupPattern = pattern;
+      for (int j = 0; j < groupNames.size(); j++) {
+        String gn = groupNames.get(j);
+        if (j == i) {
+          singleGroupPattern = singleGroupPattern.replace("(?<" + gn + ">", "(");
+        } else {
+          singleGroupPattern = singleGroupPattern.replace("(?<" + gn + ">", "(?:");
+        }
+      }
+      SqlNode regexExpr = call("COALESCE",
+          call("REGEXP_EXTRACT", sourceField, literal(singleGroupPattern)),
+          literal(""));
+      selectItems.add(as(regexExpr, groupNames.get(i)));
+    }
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  /** Build SQL for an aggregate function inside a window expression (eventstats/streamstats). */
+  private SqlNode buildWindowAggSql(UnresolvedExpression func) {
+    if (func instanceof AggregateFunction) return func.accept(this, null);
+    if (!(func instanceof Function)) return func.accept(this, null);
+    Function f = (Function) func;
+    String name = f.getFuncName().toLowerCase();
+    List<UnresolvedExpression> args = f.getFuncArgs();
+
+    if ("count".equals(name)) {
+      if (args.isEmpty() || (args.size() == 1 && args.get(0) instanceof AllFields))
+        return countStar();
+      return count(args.get(0).accept(this, null));
+    }
+    if ("dc".equals(name) || "distinct_count".equals(name))
+      return count(distinct(args.get(0).accept(this, null)));
+    if ("avg".equals(name))
+      return agg("AVG", cast(args.get(0).accept(this, null), typeSpec(SqlTypeName.DOUBLE)));
+    if ("var_samp".equals(name))
+      return agg("VAR_SAMP", cast(args.get(0).accept(this, null), typeSpec(SqlTypeName.DOUBLE)));
+    if ("var_pop".equals(name))
+      return agg("VAR_POP", cast(args.get(0).accept(this, null), typeSpec(SqlTypeName.DOUBLE)));
+    if ("stddev_samp".equals(name))
+      return agg("STDDEV_SAMP", cast(args.get(0).accept(this, null), typeSpec(SqlTypeName.DOUBLE)));
+    if ("stddev_pop".equals(name))
+      return agg("STDDEV_POP", cast(args.get(0).accept(this, null), typeSpec(SqlTypeName.DOUBLE)));
+    if ("first".equals(name)) return call("PPL_FIRST", args.get(0).accept(this, null));
+    if ("last".equals(name)) return call("PPL_LAST", args.get(0).accept(this, null));
+
+    String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
+    if (args.isEmpty()) {
+      return SQL_DATETIME_KEYWORDS.contains(sqlName) ? identifier(sqlName) : call(sqlName);
+    }
+    SqlNode[] sqlArgs = args.stream().map(a -> a.accept(this, null)).toArray(SqlNode[]::new);
+    return call(sqlName, sqlArgs);
+  }
+
+  private static String getFieldName(UnresolvedExpression expr) {
+    if (expr instanceof Field) return ((Field) expr).getField().toString();
+    if (expr instanceof QualifiedName) return ((QualifiedName) expr).toString();
+    return expr.toString();
   }
 
   private SqlNode resolveJoinRight(UnresolvedPlan plan, String alias) {
