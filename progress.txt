@@ -132,3 +132,33 @@ The string-based PPLToSqlTranspiler (58.5%, 1324/2264) was replaced with a SqlNo
   - Span tests with custom date format fields (yyyy-MM-dd, epoch_millis) fail with engine-level `timestampStringToEpochMillis` NumberFormatException — this is a CalciteNoPushdownIndexScan bug, not a converter issue.
   - The PRD regression counts were outdated — the Human Intervention refactor already included the datetime comparison fixes in the working tree (uncommitted). This iteration committed those changes.
 ---
+
+## 2026-03-11T18:35 - V4-002: Fix stats/aggregation and multi-value stats
+- **What was fixed**: 71 regressions across 3 test classes
+  - **COUNT DISTINCT parse error**: Changed from putting `SqlSelectKeyword.DISTINCT` as an operand (which serialized as `COUNT(DISTINCT, field)` with invalid comma) to using the 4-arg `SqlBasicCall` constructor with `functionQuantifier` parameter. Fixed 4 locations: dc/distinct_count, count with distinct flag, count_distinct_approx, generic distinct fallback.
+  - **AVG returns integer instead of double**: Added special case for `avg` in `visitAggregateFunction` that wraps both input and output in CAST to DOUBLE: `CAST(AVG(CAST(field AS DOUBLE)) AS DOUBLE)`.
+  - **PERCENTILE_APPROX function not found**: The UDF was registered as lowercase `percentile_approx` but `SqlPrettyWriter.keyword()` uppercases function names to `PERCENTILE_APPROX`. Added uppercase registration alongside existing lowercase in `UnifiedQueryContext.java` (same pattern as matchPhrase upper/lower).
+- **Test results**:
+  - CalcitePPLAggregationIT: 100 tests, 40→15 failures (25 fixed) ✅
+  - CalcitePPLAggregationPaginatingIT: 100 tests, 40→15 failures (25 fixed) ✅
+  - CalciteStatsCommandIT: 63 tests, 24→3 failures (21 fixed) ✅
+  - CalciteMultiValueStatsIT: 31 tests, 31→31 failures (0 fixed — all `list`/`values` functions, separate feature)
+- **Remaining failures** (not fixable in this iteration):
+  - 7 timestamp parse errors: engine-level `For input string` with nanosecond timestamps
+  - 2 `UNIX_TIMESTAMP`/`INTERVAL_DAY` not found: function not registered in engine
+  - 1 `Column 'state' is ambiguous`: join-related scoping issue
+  - 1 `testCountByNullableTimeSpan`: value count mismatch (expected 4, got 5)
+  - 2 take type mismatch: returns `string` instead of `array`
+  - 2 first/last case sensitivity: uppercase vs lowercase in results
+  - 31 list/values functions: `LIST` aggregate not registered (V4-006 scope)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (COUNT DISTINCT fix, AVG fix)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (PERCENTILE_APPROX uppercase registration)
+  - api/src/test/java/org/opensearch/sql/api/PPLToSqlNodeConverterTest.java (updated AVG test expectation)
+- **Learnings for future iterations:**
+  - SqlBasicCall 4-arg constructor with functionQuantifier is the correct way to create COUNT(DISTINCT field) in Calcite 1.41. The old pattern of putting DISTINCT as an operand produces invalid SQL with a comma.
+  - SqlPrettyWriter.keyword() uppercases ALL function names. UDFs registered with lowercase names won't be found when the SQL is serialized and re-parsed. Register UDFs with both cases (like matchPhrase pattern).
+  - AVG on integer columns returns integer in Calcite by default. Must explicitly CAST both input and output to DOUBLE.
+  - buildWindowAggSql (eventstats/streamstats) has the same AVG issue — only casts input, not output. Fix in future iteration.
+  - The `distinct()` method in SqlNodeDSL uses `AS` operator which is wrong for aggregate DISTINCT. Don't use it for COUNT DISTINCT.
+---
