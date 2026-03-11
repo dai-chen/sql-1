@@ -8,6 +8,7 @@ package org.opensearch.sql.calcite.utils;
 import java.util.Arrays;
 import java.util.List;
 import org.apache.calcite.sql.SqlBasicCall;
+import org.apache.calcite.sql.SqlBasicFunction;
 import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.JoinConditionType;
@@ -25,7 +26,8 @@ import org.apache.calcite.sql.SqlSelectKeyword;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
-import org.apache.calcite.sql.SqlUnresolvedFunction;
+import org.apache.calcite.sql.type.OperandTypes;
+import org.apache.calcite.sql.type.ReturnTypes;
 
 /** Fluent DSL for constructing Calcite {@link SqlNode} trees programmatically. */
 public final class SqlNodeDSL {
@@ -145,10 +147,16 @@ public final class SqlNodeDSL {
       return SqlLiteral.createExactNumeric(value.toString(), POS);
     } else if (value instanceof Float || value instanceof Double) {
       return SqlLiteral.createApproxNumeric(value.toString(), POS);
+    } else if (value instanceof java.math.BigDecimal) {
+      return SqlLiteral.createExactNumeric(value.toString(), POS);
     } else if (value instanceof String) {
       return SqlLiteral.createCharString((String) value, POS);
     } else if (value instanceof Boolean) {
       return SqlLiteral.createBoolean((Boolean) value, POS);
+    } else if (value instanceof Short) {
+      return SqlLiteral.createExactNumeric(value.toString(), POS);
+    } else if (value instanceof Byte) {
+      return SqlLiteral.createExactNumeric(value.toString(), POS);
     }
     throw new IllegalArgumentException("Unsupported literal type: " + value.getClass());
   }
@@ -249,25 +257,15 @@ public final class SqlNodeDSL {
   // ---- Function helpers ----
 
   public static SqlNode call(String funcName, SqlNode... args) {
-    SqlUnresolvedFunction func =
-        new SqlUnresolvedFunction(
-            new SqlIdentifier(funcName, POS),
-            null,
-            null,
-            null,
-            null,
-            SqlFunctionCategory.USER_DEFINED_FUNCTION);
+    SqlBasicFunction func =
+        SqlBasicFunction.create(funcName, ReturnTypes.ARG0_NULLABLE, OperandTypes.VARIADIC);
     return new SqlBasicCall(func, args, POS);
   }
 
   public static SqlNode agg(String funcName, SqlNode... args) {
-    SqlUnresolvedFunction func =
-        new SqlUnresolvedFunction(
-            new SqlIdentifier(funcName, POS),
-            null,
-            null,
-            null,
-            null,
+    SqlBasicFunction func =
+        SqlBasicFunction.create(
+            funcName, ReturnTypes.ARG0_NULLABLE, OperandTypes.VARIADIC,
             SqlFunctionCategory.USER_DEFINED_FUNCTION);
     return new SqlBasicCall(func, args, POS);
   }

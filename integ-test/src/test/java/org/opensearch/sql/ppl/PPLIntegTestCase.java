@@ -125,8 +125,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
       String sql = transpileV4(query);
       LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
       Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
-      request.setJsonEntity(
-          String.format(Locale.ROOT, "{\"query\": \"%s\"}", sql.replace("\\", "\\\\").replace("\"", "\\\"")));
+      request.setJsonEntity(new JSONObject().put("query", sql).toString());
       Response response = client().performRequest(request);
       Assert.assertEquals(200, response.getStatusLine().getStatusCode());
       String body = getResponseBody(response, true);
@@ -153,8 +152,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
       String sql = transpileV4(query);
       LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
       Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
-      request.setJsonEntity(
-          String.format(Locale.ROOT, "{\"query\": \"%s\"}", sql.replace("\\", "\\\\").replace("\"", "\\\"")));
+      request.setJsonEntity(new JSONObject().put("query", sql).toString());
       Response response = client().performRequest(request);
       Assert.assertEquals(200, response.getStatusLine().getStatusCode());
       return getResponseBody(response, true);

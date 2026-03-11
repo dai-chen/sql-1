@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.apache.calcite.avatica.util.TimeUnit;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
@@ -24,6 +25,7 @@ import org.apache.calcite.sql.JoinType;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
+import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelectKeyword;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
@@ -244,11 +246,38 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     for (UnresolvedPlan node : nodes) {
       current = node.accept(this, null);
     }
+    // Apply any deferred ORDER BY / LIMIT that wasn't consumed by visitHead
+    if (pendingOrderBy != null || pendingFetch != null) {
+      current = applyPendingOrderBy(current);
+    }
     return current;
+  }
+
+  /** Apply deferred ORDER BY and LIMIT to the given SqlNode. */
+  private SqlNode applyPendingOrderBy(SqlNode node) {
+    SqlNodeList orderList = pendingOrderBy != null
+        ? new SqlNodeList(pendingOrderBy, SqlParserPos.ZERO) : null;
+    SqlNode result;
+    if (orderList != null || pendingFetch != null) {
+      result = new SqlOrderBy(SqlParserPos.ZERO, node,
+          orderList != null ? orderList : SqlNodeList.EMPTY,
+          pendingOffset, pendingFetch);
+    } else {
+      result = node;
+    }
+    pendingOrderBy = null;
+    pendingFetch = null;
+    pendingOffset = null;
+    return result;
   }
 
   // -- Pipe state: the current SqlNode being built up --
   protected SqlNode pipe;
+
+  // -- Deferred ORDER BY: stored here by visitSort, applied by visitHead or convert() --
+  protected List<SqlNode> pendingOrderBy;
+  protected SqlNode pendingFetch;
+  protected SqlNode pendingOffset;
 
   private String nextAlias() {
     return "_t" + (++aliasCounter);
@@ -315,22 +344,18 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       col = nullFirst ? nullsFirst(col) : nullsLast(col);
       orderItems.add(col);
     }
-    pipe =
-        select(star())
-            .from(wrapAsSubquery())
-            .orderBy(orderItems.toArray(new SqlNode[0]))
-            .build();
+    // Defer ORDER BY — don't wrap as subquery. Store for later application.
+    pendingOrderBy = orderItems;
     return pipe;
   }
 
   @Override
   public SqlNode visitHead(Head node, Void ctx) {
-    SqlNodeDSL.SelectBuilder builder =
-        select(star()).from(wrapAsSubquery()).limit(intLiteral(node.getSize()));
+    // Defer LIMIT — store for later application together with ORDER BY
+    pendingFetch = intLiteral(node.getSize());
     if (node.getFrom() != null && node.getFrom() > 0) {
-      builder = builder.offset(intLiteral(node.getFrom()));
+      pendingOffset = intLiteral(node.getFrom());
     }
-    pipe = builder.build();
     return pipe;
   }
 
@@ -1228,6 +1253,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       case "REGEXP":
       case "regexp":
         return call("REGEXP_CONTAINS", left, right);
+      case "ilike":
+        return like(call("LOWER", left), call("LOWER", right));
       default:
         throw new UnsupportedOperationException("Unsupported operator: " + node.getOperator());
     }
@@ -1302,6 +1329,61 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if ("log2".equals(name)) return divide(call("LN", args.get(0)), call("LN", literal(2)));
     if ("like".equals(name)) return like(args.get(0), args.get(1));
     if ("not like".equals(name)) return notLike(args.get(0), args.get(1));
+    // Type constructor functions → CAST
+    if ("date".equals(name) && args.size() == 1)
+      return cast(args.get(0), typeSpec(SqlTypeName.DATE));
+    if ("time".equals(name) && args.size() == 1)
+      return cast(args.get(0), typeSpec(SqlTypeName.TIME));
+    if ("timestamp".equals(name)) {
+      if (args.size() == 1) return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      // timestamp(date, time) → CAST(CONCAT(CAST(date AS VARCHAR), ' ', CAST(time AS VARCHAR)) AS TIMESTAMP)
+      SqlDataTypeSpec vc = typeSpec(SqlTypeName.VARCHAR);
+      return cast(call("CONCAT", call("CONCAT", cast(args.get(0), vc), literal(" ")), cast(args.get(1), vc)),
+          typeSpec(SqlTypeName.TIMESTAMP));
+    }
+    if ("datetime".equals(name)) {
+      if (args.size() == 1) return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlDataTypeSpec vc = typeSpec(SqlTypeName.VARCHAR);
+      return cast(call("CONCAT", call("CONCAT", cast(args.get(0), vc), literal(" ")), cast(args.get(1), vc)),
+          typeSpec(SqlTypeName.TIMESTAMP));
+    }
+    // EXTRACT-based datetime functions → CAST(EXTRACT(unit FROM CAST(arg AS TIMESTAMP)) AS INTEGER)
+    if ("year".equals(name) && args.size() == 1)
+      return castExtract("YEAR", args.get(0));
+    if ("month".equals(name) && args.size() == 1)
+      return castExtract("MONTH", args.get(0));
+    if (("day".equals(name) || "dayofmonth".equals(name) || "day_of_month".equals(name)) && args.size() == 1)
+      return castExtract("DAY", args.get(0));
+    if ("hour".equals(name) && args.size() == 1)
+      return castExtract("HOUR", args.get(0));
+    if ("minute".equals(name) && args.size() == 1)
+      return castExtract("MINUTE", args.get(0));
+    if ("second".equals(name) && args.size() == 1)
+      return castExtract("SECOND", args.get(0));
+    if ("quarter".equals(name) && args.size() == 1)
+      return castExtract("QUARTER", args.get(0));
+    if (("weekofyear".equals(name) || "week_of_year".equals(name) || "week".equals(name)) && args.size() == 1)
+      return castExtract("WEEK", args.get(0));
+    if ("hour_of_day".equals(name) && args.size() == 1)
+      return castExtract("HOUR", args.get(0));
+    if ("minute_of_hour".equals(name) && args.size() == 1)
+      return castExtract("MINUTE", args.get(0));
+    if ("second_of_minute".equals(name) && args.size() == 1)
+      return castExtract("SECOND", args.get(0));
+    if ("month_of_year".equals(name) && args.size() == 1)
+      return castExtract("MONTH", args.get(0));
+    if (("dayofweek".equals(name) || "day_of_week".equals(name)) && args.size() == 1)
+      return cast(call("DAYOFWEEK", cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP))), typeSpec(SqlTypeName.INTEGER));
+    if (("dayofyear".equals(name) || "day_of_year".equals(name)) && args.size() == 1)
+      return cast(call("DAYOFYEAR", cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP))), typeSpec(SqlTypeName.INTEGER));
+    if ("minute_of_day".equals(name) && args.size() == 1) {
+      SqlNode ts = cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlNode hours = new SqlBasicCall(SqlStdOperatorTable.EXTRACT,
+          new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), ts}, POS);
+      SqlNode minutes = new SqlBasicCall(SqlStdOperatorTable.EXTRACT,
+          new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), ts}, POS);
+      return cast(plus(times(hours, intLiteral(60)), minutes), typeSpec(SqlTypeName.INTEGER));
+    }
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     if (args.isEmpty() && SQL_DATETIME_KEYWORDS.contains(sqlName)) return call(sqlName);
@@ -1336,6 +1418,60 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
             POS);
       }
       return count(field.accept(this, null));
+    }
+    // PPL-specific aggregates
+    if ("first".equals(name)) return call("PPL_FIRST", node.getField().accept(this, null));
+    if ("last".equals(name)) return call("PPL_LAST", node.getField().accept(this, null));
+    if ("earliest".equals(name))
+      return call("ARG_MIN", node.getField().accept(this, null), identifier("@timestamp"));
+    if ("latest".equals(name))
+      return call("ARG_MAX", node.getField().accept(this, null), identifier("@timestamp"));
+    if ("take".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      List<UnresolvedExpression> args = node.getArgList();
+      SqlNode size = (args != null && !args.isEmpty()) ? args.get(0).accept(this, null) : intLiteral(10);
+      return call("TAKE", field, size);
+    }
+    if ("median".equals(name))
+      return call("percentile_approx", node.getField().accept(this, null), intLiteral(50));
+    if ("count_distinct_approx".equals(name) || "approx_count_distinct".equals(name)
+        || "distinct_count_approx".equals(name)) {
+      return new SqlBasicCall(
+          SqlStdOperatorTable.COUNT,
+          new SqlNode[] {
+            SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS),
+            node.getField().accept(this, null)
+          },
+          POS);
+    }
+    if ("percentile".equals(name) || "percentile_approx".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      List<UnresolvedExpression> funcArgs = node.getArgList();
+      if (funcArgs != null && !funcArgs.isEmpty()) {
+        SqlNode pct = funcArgs.get(0).accept(this, null);
+        if (funcArgs.size() >= 2) {
+          SqlNode compression = funcArgs.get(1).accept(this, null);
+          return call("percentile_approx", field, pct, compression);
+        }
+        return call("percentile_approx", field, pct);
+      }
+      return call("percentile_approx", field, intLiteral(50));
+    }
+    if ("var_samp".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      return call("VAR_SAMP", cast(field, typeSpec(SqlTypeName.DOUBLE)));
+    }
+    if ("var_pop".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      return call("VAR_POP", cast(field, typeSpec(SqlTypeName.DOUBLE)));
+    }
+    if ("stddev_samp".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      return call("STDDEV_SAMP", cast(field, typeSpec(SqlTypeName.DOUBLE)));
+    }
+    if ("stddev_pop".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      return call("STDDEV_POP", cast(field, typeSpec(SqlTypeName.DOUBLE)));
     }
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     SqlNode field = node.getField().accept(this, null);
@@ -1425,6 +1561,26 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   private static SqlDataTypeSpec typeSpec(SqlTypeName typeName) {
     return new SqlDataTypeSpec(new SqlBasicTypeNameSpec(typeName, POS), POS);
+  }
+
+  /** CAST(EXTRACT(unit FROM CAST(arg AS TIMESTAMP)) AS INTEGER) */
+  private SqlNode castExtract(String unit, SqlNode arg) {
+    SqlNode ts = cast(arg, typeSpec(SqlTypeName.TIMESTAMP));
+    TimeUnit tu;
+    switch (unit) {
+      case "YEAR": tu = TimeUnit.YEAR; break;
+      case "MONTH": tu = TimeUnit.MONTH; break;
+      case "DAY": tu = TimeUnit.DAY; break;
+      case "HOUR": tu = TimeUnit.HOUR; break;
+      case "MINUTE": tu = TimeUnit.MINUTE; break;
+      case "SECOND": tu = TimeUnit.SECOND; break;
+      case "QUARTER": tu = TimeUnit.QUARTER; break;
+      case "WEEK": tu = TimeUnit.WEEK; break;
+      default: tu = TimeUnit.DAY; break;
+    }
+    SqlIntervalQualifier qualifier = new SqlIntervalQualifier(tu, null, POS);
+    SqlNode extract = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{qualifier, ts}, POS);
+    return cast(extract, typeSpec(SqlTypeName.INTEGER));
   }
 
   @Override
