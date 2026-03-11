@@ -188,3 +188,20 @@
   - fillnull replacementForAll (all-fields mode) deferred to DynamicPPLToSqlNodeConverter (needs schema)
   - PPL fillnull syntax is `fillnull value=X field1, field2` not `fillnull with X field1, field2`
 ---
+
+## [2026-03-11T01:38Z] - US-010: Create PPLTypeCoercion with MYSQL_5 conformance
+- Created PPLTypeCoercion.java (48 lines) in core/src/main/java/org/opensearch/sql/calcite/type/
+- Extends TypeCoercionImpl, overrides commonTypeForBinaryComparison() to add DATE + TIME → TIMESTAMP merge rule
+- Registered via TypeCoercionFactory in UnifiedQueryContext.buildFrameworkConfig(): .sqlValidatorConfig(SqlValidator.Config.DEFAULT.withTypeCoercionFactory(PPLTypeCoercion::new))
+- PPLTypeCoercionTest.java with 2 tests validating coercion through full Calcite validation pipeline
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: all pass (PPLTypeCoercionTest + full :api:test suite)
+- Files: core/src/main/java/org/opensearch/sql/calcite/type/PPLTypeCoercion.java (new), api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (modified +4 lines), api/src/test/java/org/opensearch/sql/api/PPLTypeCoercionTest.java (new)
+- Commit: 4e2ad0cf5 `feat: [US-010] Create PPLTypeCoercion with MYSQL_5 conformance`
+- **Learnings for future iterations:**
+  - Override commonTypeForBinaryComparison() instead of binaryComparisonCoercion() — cleaner, lets parent handle the coercion mechanics (coerceOperandType/CAST injection)
+  - Calcite's built-in commonTypeForBinaryComparison already handles: STRING→NUMERIC, DATE→TIMESTAMP widening, CHARACTER→DATETIME — only DATE+TIME merge is missing
+  - PPLTypeCoercion::new works as method reference for TypeCoercionFactory since constructor signature matches (RelDataTypeFactory, SqlValidator)
+  - builtinFunctionCoercion override not needed — Calcite's default implicitCast() handles STRING→NUMERIC and STRING→DATETIME for function args
+  - MYSQL_5 conformance for BOOLEAN↔NUMBER coercion is a per-query-path concern, not global — will be set when PPL V4 path is wired (US-012)
+---

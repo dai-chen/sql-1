@@ -187,8 +187,8 @@
         "Build passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "PPLTypeCoercion.java (48 lines) extending TypeCoercionImpl with DATE+TIME→TIMESTAMP coercion via commonTypeForBinaryComparison override. Registered in UnifiedQueryContext via .sqlValidatorConfig(SqlValidator.Config.DEFAULT.withTypeCoercionFactory(PPLTypeCoercion::new)). PPLTypeCoercionTest.java with 2 tests: testDateTimeComparisonCoercesToTimestamp, testIntegerStringComparisonCoerced. Commit: 4e2ad0cf5"
     },
     {
       "id": "US-011",
