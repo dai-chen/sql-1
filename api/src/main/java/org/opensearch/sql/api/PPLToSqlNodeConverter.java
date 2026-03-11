@@ -1443,11 +1443,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if ("distinct_count".equals(name) || "dc".equals(name)) {
       return new SqlBasicCall(
           SqlStdOperatorTable.COUNT,
-          new SqlNode[] {
-            SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS),
-            node.getField().accept(this, null)
-          },
-          POS);
+          new SqlNode[] {node.getField().accept(this, null)},
+          POS,
+          SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS));
     }
     if ("count".equals(name)) {
       UnresolvedExpression field = node.getField();
@@ -1458,11 +1456,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (Boolean.TRUE.equals(node.getDistinct())) {
         return new SqlBasicCall(
             SqlStdOperatorTable.COUNT,
-            new SqlNode[] {
-              SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS),
-              field.accept(this, null)
-            },
-            POS);
+            new SqlNode[] {field.accept(this, null)},
+            POS,
+            SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS));
       }
       return count(field.accept(this, null));
     }
@@ -1485,11 +1481,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         || "distinct_count_approx".equals(name)) {
       return new SqlBasicCall(
           SqlStdOperatorTable.COUNT,
-          new SqlNode[] {
-            SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS),
-            node.getField().accept(this, null)
-          },
-          POS);
+          new SqlNode[] {node.getField().accept(this, null)},
+          POS,
+          SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS));
     }
     if ("percentile".equals(name) || "percentile_approx".equals(name)) {
       SqlNode field = node.getField().accept(this, null);
@@ -1520,13 +1514,18 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SqlNode field = node.getField().accept(this, null);
       return call("STDDEV_POP", cast(field, typeSpec(SqlTypeName.DOUBLE)));
     }
+    if ("avg".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      return cast(call("AVG", cast(field, typeSpec(SqlTypeName.DOUBLE))), typeSpec(SqlTypeName.DOUBLE));
+    }
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     SqlNode field = node.getField().accept(this, null);
     if (Boolean.TRUE.equals(node.getDistinct())) {
       return new SqlBasicCall(
           SqlStdOperatorTable.COUNT,
-          new SqlNode[] {SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS), field},
-          POS);
+          new SqlNode[] {field},
+          POS,
+          SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS));
     }
     return call(sqlName, field);
   }

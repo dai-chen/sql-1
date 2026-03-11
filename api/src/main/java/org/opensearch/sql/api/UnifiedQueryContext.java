@@ -255,6 +255,10 @@ public class UnifiedQueryContext implements AutoCloseable {
           PercentileApproxFunction.class, "percentile_approx",
           ReturnTypes.ARG0_FORCE_NULLABLE,
           PPLOperandTypes.NUMERIC_NUMERIC_OPTIONAL_NUMERIC);
+      SqlAggFunction percentileApproxUpper = createUserDefinedAggFunction(
+          PercentileApproxFunction.class, "PERCENTILE_APPROX",
+          ReturnTypes.ARG0_FORCE_NULLABLE,
+          PPLOperandTypes.NUMERIC_NUMERIC_OPTIONAL_NUMERIC);
       SqlAggFunction take = createUserDefinedAggFunction(
           TakeAggFunction.class, "TAKE",
           PPLReturnTypes.ARG0_ARRAY,
@@ -272,7 +276,7 @@ public class UnifiedQueryContext implements AutoCloseable {
                       SqlLibrary.SPARK,
                       SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
-                      pplFirst, pplLast, percentileApprox, take)))
+                      pplFirst, pplLast, percentileApprox, percentileApproxUpper, take)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .sqlValidatorConfig(SqlValidator.Config.DEFAULT

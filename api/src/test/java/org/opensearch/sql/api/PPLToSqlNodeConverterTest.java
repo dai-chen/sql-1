@@ -221,7 +221,7 @@ public class PPLToSqlNodeConverterTest {
   @Test
   public void testStatsGroupBy() {
     ppl("source=t | stats avg(a) as avg_a by b").shouldTranslateTo("""
-        SELECT AVG("a") AS "avg_a", "b" AS "b"
+        SELECT CAST(AVG(CAST("a" AS DOUBLE)) AS DOUBLE) AS "avg_a", "b" AS "b"
         FROM (SELECT *
         FROM "t") AS "_t1"
         GROUP BY "b\"""");
