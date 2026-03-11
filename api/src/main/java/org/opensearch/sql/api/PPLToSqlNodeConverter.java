@@ -57,6 +57,7 @@ import org.opensearch.sql.ast.expression.subquery.ScalarSubquery;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.Aggregation;
+import org.opensearch.sql.ast.tree.Dedupe;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.Filter;
 import org.opensearch.sql.ast.tree.Head;
@@ -384,6 +385,82 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       items.add(as(expr, varName));
     }
     pipe = select(items.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitDedupe(Dedupe node, Void ctx) {
+    int allowedDuplication =
+        (Integer) ((Literal) node.getOptions().get(0).getValue()).getValue();
+    boolean keepEmpty =
+        (Boolean) ((Literal) node.getOptions().get(1).getValue()).getValue();
+    boolean consecutive =
+        (Boolean) ((Literal) node.getOptions().get(2).getValue()).getValue();
+
+    List<SqlNode> fieldNodes =
+        node.getFields().stream()
+            .map(f -> f.getField().accept(this, null))
+            .collect(Collectors.toList());
+
+    SqlNodeList partBy = new SqlNodeList(fieldNodes, POS);
+
+    if (!consecutive) {
+      // Standard dedup
+      if (!keepEmpty) {
+        SqlNode notNullFilter =
+            fieldNodes.stream().map(f -> isNotNull(f)).reduce((a, b) -> and(a, b)).get();
+        pipe = select(star()).from(wrapAsSubquery()).where(notNullFilter).build();
+      }
+
+      SqlNode rowNum = as(
+          window(call("ROW_NUMBER"), partBy, new SqlNodeList(fieldNodes, POS)),
+          "_dedup_rn");
+      pipe = select(star(), rowNum).from(wrapAsSubquery()).build();
+
+      SqlNode rnCond = lte(identifier("_dedup_rn"), intLiteral(allowedDuplication));
+      if (keepEmpty) {
+        SqlNode nullCheck =
+            fieldNodes.stream().map(f -> isNull(f)).reduce((a, b) -> or(a, b)).get();
+        rnCond = or(nullCheck, rnCond);
+      }
+      pipe = select(star()).from(wrapAsSubquery()).where(rnCond).build();
+      pipe = select(star()).from(wrapAsSubquery()).build();
+    } else {
+      // Consecutive dedup — gaps-and-islands
+      if (!keepEmpty) {
+        SqlNode notNullFilter =
+            fieldNodes.stream().map(f -> isNotNull(f)).reduce((a, b) -> and(a, b)).get();
+        pipe = select(star()).from(wrapAsSubquery()).where(notNullFilter).build();
+      }
+
+      SqlNode idOrder = cast(identifier("_id"), typeSpec(SqlTypeName.INTEGER));
+      SqlNodeList globalOrd = new SqlNodeList(List.of(idOrder), POS);
+
+      SqlNode globalRn = as(
+          window(call("ROW_NUMBER"), SqlNodeList.EMPTY, globalOrd), "_global_rn");
+      SqlNode groupRn = as(
+          window(call("ROW_NUMBER"), partBy, new SqlNodeList(List.of(idOrder), POS)),
+          "_group_rn");
+      pipe = select(star(), globalRn, groupRn).from(wrapAsSubquery()).build();
+
+      List<SqlNode> islandParts = new ArrayList<>(fieldNodes);
+      islandParts.add(minus(identifier("_global_rn"), identifier("_group_rn")));
+      SqlNode dedupRn = as(
+          window(call("ROW_NUMBER"),
+              new SqlNodeList(islandParts, POS),
+              new SqlNodeList(List.of(cast(identifier("_id"), typeSpec(SqlTypeName.INTEGER))), POS)),
+          "_dedup_rn");
+      pipe = select(star(), dedupRn).from(wrapAsSubquery()).build();
+
+      SqlNode rnCond = lte(identifier("_dedup_rn"), intLiteral(allowedDuplication));
+      if (keepEmpty) {
+        SqlNode nullCheck =
+            fieldNodes.stream().map(f -> isNull(f)).reduce((a, b) -> or(a, b)).get();
+        rnCond = or(nullCheck, rnCond);
+      }
+      pipe = select(star()).from(wrapAsSubquery()).where(rnCond).build();
+      pipe = select(star()).from(wrapAsSubquery()).build();
+    }
     return pipe;
   }
 

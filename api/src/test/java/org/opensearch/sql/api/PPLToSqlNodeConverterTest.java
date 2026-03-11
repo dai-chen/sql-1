@@ -195,4 +195,29 @@ public class PPLToSqlNodeConverterTest {
     assertTrue(sql, sql.contains("+"));
     assertTrue(sql, sql.contains("\"a\""));
   }
+
+  // -- US-007: Dedup command tests --
+
+  @Test
+  public void testDedupSimple() {
+    String sql = convert("source=t | dedup a");
+    assertTrue(sql, sql.contains("ROW_NUMBER()"));
+    assertTrue(sql, sql.contains("IS NOT NULL"));
+  }
+
+  @Test
+  public void testDedupKeepEmpty() {
+    String sql = convert("source=t | dedup 2 a, b keepempty=true");
+    assertTrue(sql, sql.contains("ROW_NUMBER()"));
+    assertTrue(sql, sql.contains("IS NULL"));
+    assertTrue(sql, sql.contains("<= 2"));
+  }
+
+  @Test
+  public void testDedupConsecutive() {
+    String sql = convert("source=t | dedup a consecutive=true");
+    assertTrue(sql, sql.contains("ROW_NUMBER()"));
+    assertTrue(sql, sql.contains("_global_rn"));
+    assertTrue(sql, sql.contains("_group_rn"));
+  }
 }
