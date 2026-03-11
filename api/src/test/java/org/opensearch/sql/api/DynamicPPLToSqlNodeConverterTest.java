@@ -5,8 +5,7 @@
 
 package org.opensearch.sql.api;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -20,6 +19,13 @@ import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 
+/**
+ * Schema-dependent PPL-to-SQL conversion tests.
+ *
+ * <p>Tests use an in-memory schema with table "t" (a:INTEGER, b:VARCHAR, c:DOUBLE)
+ * to verify commands that require column resolution: fields -, fillnull all-fields,
+ * eval column override.
+ */
 public class DynamicPPLToSqlNodeConverterTest {
 
   private SchemaPlus schema;
@@ -43,35 +49,51 @@ public class DynamicPPLToSqlNodeConverterTest {
     return node.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
   }
 
-  private String convert(String ppl) {
-    UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl);
-    DynamicPPLToSqlNodeConverter converter = new DynamicPPLToSqlNodeConverter(schema);
-    SqlNode result = converter.convert(plan);
-    return toSql(result);
+  /** Fluent assertion: {@code ppl("source=t | fields - a").shouldTranslateTo("SELECT ...")} */
+  private PplAssertion ppl(String ppl) {
+    return new PplAssertion(ppl);
+  }
+
+  private class PplAssertion {
+    private final String ppl;
+    private final String sql;
+
+    PplAssertion(String ppl) {
+      this.ppl = ppl;
+      UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl);
+      DynamicPPLToSqlNodeConverter converter = new DynamicPPLToSqlNodeConverter(schema);
+      this.sql = toSql(converter.convert(plan));
+    }
+
+    void shouldTranslateTo(String expectedSql) {
+      assertEquals("PPL: " + ppl, expectedSql, sql);
+    }
   }
 
   @Test
   public void testFieldsExclude() {
-    String sql = convert("source=t | fields - a");
-    assertTrue(sql, sql.contains("\"b\""));
-    assertTrue(sql, sql.contains("\"c\""));
-    assertFalse(sql, sql.contains("\"a\""));
+    // fields - a → SELECT only non-excluded columns (b, c) resolved from schema
+    ppl("source=t | fields - a").shouldTranslateTo("""
+        SELECT "b", "c"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testFillNullAllFields() {
-    String sql = convert("source=t | fillnull value=0");
-    assertTrue(sql, sql.contains("COALESCE"));
-    assertTrue(sql, sql.contains("\"a\""));
-    assertTrue(sql, sql.contains("\"b\""));
-    assertTrue(sql, sql.contains("\"c\""));
+    // fillnull without field list → COALESCE every column from schema
+    ppl("source=t | fillnull value=0").shouldTranslateTo("""
+        SELECT COALESCE("a", 0) AS "a", COALESCE("b", 0) AS "b", COALESCE("c", 0) AS "c"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testEvalColumnOverride() {
-    String sql = convert("source=t | eval a = b");
-    assertTrue(sql, sql.contains("\"b\" AS \"a\""));
-    assertTrue(sql, sql.contains("\"b\""));
-    assertTrue(sql, sql.contains("\"c\""));
+    // eval a = b → explicit column list with override instead of SELECT *, expr
+    ppl("source=t | eval a = b").shouldTranslateTo("""
+        SELECT "b" AS "a", "b", "c"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 }

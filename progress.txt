@@ -304,3 +304,12 @@
 - Type coercion for TIME+DATE comparisons requires explicit CAST to TIMESTAMP on both sides — the SQL endpoint doesn't do this automatically
 - The remaining 414 regressions require porting many more function-specific handlers from the string transpiler
 ---
+
+## Human Intervention (2026-03-10)
+
+Refactoring unit test assertions before next round:
+- PPLToSqlNodeConverterTest uses fragile `assertTrue(sql.contains(...))` for all 41 tests
+- Changing to `assertEquals` on full SQL string from `toSql(SqlNode)` for precise regression detection
+- Agent should use fluent `ppl("...").shouldTranslateTo("...")` pattern with Java text blocks going forward
+
+Files affected: `api/src/test/java/org/opensearch/sql/api/PPLToSqlNodeConverterTest.java`

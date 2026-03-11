@@ -6,18 +6,19 @@ You are an autonomous coding agent migrating the PPL-to-SQL translation from a s
 
 1. Read the PRD at `prd.json`
 2. Read the progress log at `progress.txt` (check **Codebase Patterns** section FIRST)
-3. Read the design doc at `docs/dev/2026-03-10-unified-sql-ppl-v4-design.md` for architecture context
-4. Read the implementation plan at `docs/dev/2026-03-10-impl-plan-2.1-2.2.md` for task details
-5. Check you're on the correct branch specified in `prd.json` field `branchName`
-6. Pick the **highest priority** user story where `passes: false`
-7. Implement that single user story
-8. Run build: `./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20`
-9. Run tests: `./gradlew :api:test 2>&1 | tail -30`
-10. If checks pass, commit ALL changes with message: `feat: [{story.id}] {story.title}`
-11. Push the commit: `git push`
-12. Update `prd.json` — set `passes: true` for the completed story
-12. Append your progress to `progress.txt`
-13. If you discover reusable patterns, consolidate them into the Codebase Patterns section at the top of `progress.txt`
+3. Check for any **Round Summary** or **Human Intervention** sections at the end of `progress.txt` — these describe changes made outside the loop that you must account for
+4. Read the design doc at `docs/dev/2026-03-10-unified-sql-ppl-v4-design.md` for architecture context
+5. Read the implementation plan at `docs/dev/2026-03-10-impl-plan-2.1-2.2.md` for task details
+6. Check you're on the correct branch specified in `prd.json` field `branchName`
+7. Pick the **highest priority** user story where `passes: false`
+8. Implement that single user story
+9. Run build: `./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20`
+10. Run tests: `./gradlew :api:test 2>&1 | tail -30`
+11. If checks pass, commit ALL changes with message: `feat: [{story.id}] {story.title}`
+12. Push the commit: `git push`
+13. Update `prd.json` — set `passes: true` for the completed story
+14. Append your progress to `progress.txt`
+15. If you discover reusable patterns, consolidate them into the Codebase Patterns section at the top of `progress.txt`
 
 ## Key Architecture Context
 
@@ -64,6 +65,10 @@ APPEND to progress.txt (never replace, always append):
   - Useful context
 ---
 ```
+
+## Human Intervention Notes
+
+If you see a `## Human Intervention` section in `progress.txt`, a human made changes between rounds. Read it carefully — it explains what was changed and why. Account for these changes in your implementation. Do not undo or conflict with human changes.
 
 ## Quality Requirements
 

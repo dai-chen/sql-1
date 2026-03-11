@@ -5,318 +5,473 @@
 
 package org.opensearch.sql.api;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.dialect.CalciteSqlDialect;
 import org.junit.Test;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 
+/**
+ * PPL-to-SQL conversion tests.
+ *
+ * <p>Each test documents the exact SQL equivalent of a PPL query. The SQL is produced by
+ * converting PPL AST → Calcite SqlNode → SQL string via CalciteSqlDialect.DEFAULT.
+ *
+ * <p>PPL pipe semantics map to nested subqueries: each pipe stage wraps the previous
+ * result as {@code (SELECT ... FROM previous) AS _tN}.
+ */
 public class PPLToSqlNodeConverterTest {
 
   private static String toSql(SqlNode node) {
     return node.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
   }
 
-  private String convert(String ppl) {
-    UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl);
-    PPLToSqlNodeConverter converter = new PPLToSqlNodeConverter();
-    SqlNode result = converter.convert(plan);
-    return toSql(result);
+  /** Fluent assertion: {@code ppl("source=t | where a > 1").shouldTranslateTo("SELECT ...")} */
+  private PplAssertion ppl(String ppl) {
+    return new PplAssertion(ppl);
   }
+
+  private class PplAssertion {
+    private final String ppl;
+    private final String sql;
+
+    PplAssertion(String ppl) {
+      this.ppl = ppl;
+      UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl);
+      PPLToSqlNodeConverter converter = new PPLToSqlNodeConverter();
+      this.sql = toSql(converter.convert(plan));
+    }
+
+    void shouldTranslateTo(String expectedSql) {
+      assertEquals("PPL: " + ppl, expectedSql, sql);
+    }
+  }
+
+  // ===== Core commands (US-003) =====
 
   @Test
   public void testSource() {
-    String sql = convert("source=t");
-    assertTrue(sql.contains("SELECT *"));
-    assertTrue(sql.contains("FROM \"t\""));
+    ppl("source=t").shouldTranslateTo("""
+        SELECT *
+        FROM "t\"""");
   }
 
   @Test
   public void testWhereFilter() {
-    String sql = convert("source=t | where a > 1");
-    assertTrue(sql.contains("\"a\" > 1"));
+    ppl("source=t | where a > 1").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" > 1""");
   }
 
   @Test
   public void testFieldsProject() {
-    String sql = convert("source=t | fields b, c");
-    assertTrue(sql.contains("\"b\""));
-    assertTrue(sql.contains("\"c\""));
+    ppl("source=t | fields b, c").shouldTranslateTo("""
+        SELECT "b", "c"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testSortOrderBy() {
-    String sql = convert("source=t | sort b");
-    assertTrue(sql.contains("ORDER BY"));
-    assertTrue(sql.contains("\"b\""));
+    ppl("source=t | sort b").shouldTranslateTo("""
+        SELECT *
+        FROM "t"
+        ORDER BY "b" NULLS FIRST""");
   }
 
   @Test
   public void testHeadLimit() {
-    String sql = convert("source=t | head 10");
-    assertTrue(sql.contains("FETCH NEXT 10 ROWS ONLY") || sql.contains("10"));
+    ppl("source=t | head 10").shouldTranslateTo("""
+        SELECT *
+        FROM "t"
+        FETCH NEXT 10 ROWS ONLY""");
   }
 
   @Test
   public void testFullPipeline() {
-    String sql = convert("source=t | where a > 1 | fields b, c | sort b | head 10");
-    assertTrue("Should have WHERE clause", sql.contains("\"a\" > 1"));
-    assertTrue("Should have projected columns", sql.contains("\"b\""));
-    assertTrue("Should have projected columns", sql.contains("\"c\""));
-    assertTrue("Should have ORDER BY", sql.contains("ORDER BY"));
-    assertTrue("Should have subquery nesting", sql.contains("_t"));
+    // Each pipe stage wraps the previous as a subquery (sort/head optimized to not wrap)
+    ppl("source=t | where a > 1 | fields b, c | sort b | head 10").shouldTranslateTo("""
+        SELECT "b", "c"
+        FROM (SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" > 1) AS "_t2"
+        ORDER BY "b" NULLS FIRST
+        FETCH NEXT 10 ROWS ONLY""");
   }
 
-  // -- US-004: Expression visitor tests --
+  // ===== Expression visitors (US-004) =====
 
   @Test
   public void testFunctionCall() {
-    String sql = convert("source=t | where abs(a) > 1");
-    assertTrue(sql.contains("ABS"));
+    ppl("source=t | where abs(a) > 1").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE ABS("a") > 1""");
   }
 
   @Test
   public void testArithmeticOperators() {
-    String sql = convert("source=t | where a + b > 1");
-    assertTrue(sql.contains("+"));
+    ppl("source=t | where a + b > 1").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" + "b" > 1""");
   }
 
   @Test
   public void testIfFunction() {
-    String sql = convert("source=t | where if(a > 1, b, c) > 0");
-    assertTrue(sql.contains("CASE WHEN"));
+    // PPL if(cond, then, else) → SQL CASE WHEN
+    ppl("source=t | where if(a > 1, b, c) > 0").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE CASE WHEN "a" > 1 THEN "b" ELSE "c" END > 0""");
   }
 
   @Test
   public void testInExpression() {
-    String sql = convert("source=t | where a in (1, 2, 3)");
-    assertTrue(sql.contains("IN"));
+    ppl("source=t | where a in (1, 2, 3)").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" IN (1, 2, 3)""");
   }
 
   @Test
   public void testBetweenExpression() {
-    String sql = convert("source=t | where a between 1 and 10");
-    assertTrue(sql.contains("BETWEEN"));
+    ppl("source=t | where a between 1 and 10").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" BETWEEN ASYMMETRIC FALSE AND 1""");
   }
 
   @Test
-  public void testCaseExpression() {
-    // PPL case syntax: case(condition, result ...) - tested via where clause
-    String sql = convert("source=t | where isnull(a)");
-    assertTrue(sql.contains("IS NULL"));
+  public void testIsNull() {
+    // PPL isnull(a) → SQL IS NULL
+    ppl("source=t | where isnull(a)").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" IS NULL""");
   }
 
   @Test
   public void testCastExpression() {
-    String sql = convert("source=t | where cast(a as integer) > 0");
-    assertTrue(sql.contains("CAST"));
-    assertTrue(sql.contains("INTEGER"));
+    ppl("source=t | where cast(a as integer) > 0").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE CAST("a" AS INTEGER) > 0""");
   }
 
   @Test
   public void testXorExpression() {
-    String sql = convert("source=t | where a xor b");
-    assertTrue(sql.contains("AND"));
-    assertTrue(sql.contains("OR"));
-    assertTrue(sql.contains("NOT"));
+    // PPL xor → SQL (A OR B) AND NOT (A AND B)
+    ppl("source=t | where a xor b").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE ("a" OR "b") AND NOT ("a" AND "b")""");
   }
 
   @Test
   public void testRegexpCompare() {
-    String sql = convert("source=t | where a REGEXP 'pattern'");
-    assertTrue(sql.contains("REGEXP_CONTAINS"));
+    ppl("source=t | where a REGEXP 'pattern'").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE REGEXP_CONTAINS("a", 'pattern')""");
   }
 
   @Test
   public void testLiteralTypes() {
-    String sql = convert("source=t | where a = '2024-01-01'");
-    assertTrue(sql.contains("2024-01-01"));
+    ppl("source=t | where a = '2024-01-01'").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" = '2024-01-01'""");
   }
 
   @Test
   public void testLogFunction() {
-    String sql = convert("source=t | where log(a) > 1");
-    assertTrue(sql.contains("LN"));
+    // PPL log(a) → SQL LN(a)
+    ppl("source=t | where log(a) > 1").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE LN("a") > 1""");
   }
 
-  // -- US-005: Stats (aggregation) command tests --
+  // ===== Stats / Aggregation (US-005) =====
 
   @Test
   public void testStatsCount() {
-    String sql = convert("source=t | stats count() as cnt");
-    assertTrue(sql, sql.contains("COUNT(*)"));
-    assertTrue(sql, sql.contains("\"cnt\""));
+    ppl("source=t | stats count() as cnt").shouldTranslateTo("""
+        SELECT COUNT(*) AS "cnt"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testStatsGroupBy() {
-    String sql = convert("source=t | stats avg(a) as avg_a by b");
-    assertTrue(sql, sql.contains("AVG"));
-    assertTrue(sql, sql.contains("GROUP BY"));
+    ppl("source=t | stats avg(a) as avg_a by b").shouldTranslateTo("""
+        SELECT AVG("a") AS "avg_a", "b" AS "b"
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        GROUP BY "b\"""");
   }
 
   @Test
   public void testStatsMultipleAggs() {
-    String sql = convert("source=t | stats count() as cnt, sum(a) as total by b");
-    assertTrue(sql, sql.contains("COUNT(*)"));
-    assertTrue(sql, sql.contains("SUM"));
-    assertTrue(sql, sql.contains("GROUP BY"));
+    ppl("source=t | stats count() as cnt, sum(a) as total by b").shouldTranslateTo("""
+        SELECT COUNT(*) AS "cnt", SUM("a") AS "total", "b" AS "b"
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        GROUP BY "b\"""");
   }
 
   @Test
   public void testStatsWithSpan() {
-    String sql = convert("source=t | stats count() as cnt by span(a, 10)");
-    assertTrue(sql, sql.contains("COUNT(*)"));
-    assertTrue(sql, sql.contains("FLOOR"));
-    assertTrue(sql, sql.contains("GROUP BY"));
+    // PPL span(a, 10) → SQL FLOOR(a / 10) * 10
+    ppl("source=t | stats count() as cnt by span(a, 10)").shouldTranslateTo("""
+        SELECT COUNT(*) AS "cnt", FLOOR("a" / 10) * 10 AS "span(a,10)"
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        GROUP BY FLOOR("a" / 10) * 10""");
   }
 
-  // -- US-006: Eval command tests --
+  // ===== Eval (US-006) =====
 
   @Test
   public void testEvalSimple() {
-    String sql = convert("source=t | eval x = a + 1");
-    assertTrue(sql, sql.contains("+"));
-    assertTrue(sql, sql.contains("\"x\""));
+    ppl("source=t | eval x = a + 1").shouldTranslateTo("""
+        SELECT *, "a" + 1 AS "x"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testEvalForwardReference() {
-    String sql = convert("source=t | eval x = a + 1, y = x * 2");
-    assertTrue(sql, sql.contains("\"x\""));
-    assertTrue(sql, sql.contains("\"y\""));
-    assertTrue(sql, sql.contains("*"));
+    // y = x * 2 inlines x's definition: (a + 1) * 2
+    ppl("source=t | eval x = a + 1, y = x * 2").shouldTranslateTo("""
+        SELECT *, "a" + 1 AS "x", ("a" + 1) * 2 AS "y"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testEvalSelfReference() {
-    String sql = convert("source=t | eval a = a + 1");
-    assertTrue(sql, sql.contains("+"));
-    assertTrue(sql, sql.contains("\"a\""));
+    // eval a = a + 1 shadows the original column
+    ppl("source=t | eval a = a + 1").shouldTranslateTo("""
+        SELECT *, "a" + 1 AS "a"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
-  // -- US-007: Dedup command tests --
+  // ===== Dedup (US-007) =====
 
   @Test
   public void testDedupSimple() {
-    String sql = convert("source=t | dedup a");
-    assertTrue(sql, sql.contains("ROW_NUMBER()"));
-    assertTrue(sql, sql.contains("IS NOT NULL"));
+    // Standard dedup: filter nulls → ROW_NUMBER() PARTITION BY field → keep rn <= 1
+    ppl("source=t | dedup a").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY "a" ORDER BY "a") AS "_dedup_rn"
+        FROM (SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" IS NOT NULL) AS "_t2") AS "_t3"
+        WHERE "_dedup_rn" <= 1) AS "_t4\"""");
   }
 
   @Test
   public void testDedupKeepEmpty() {
-    String sql = convert("source=t | dedup 2 a, b keepempty=true");
-    assertTrue(sql, sql.contains("ROW_NUMBER()"));
-    assertTrue(sql, sql.contains("IS NULL"));
-    assertTrue(sql, sql.contains("<= 2"));
+    // keepempty=true: keep rows where fields are null OR rn <= allowedDuplicates
+    ppl("source=t | dedup 2 a, b keepempty=true").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY "a", "b" ORDER BY "a", "b") AS "_dedup_rn"
+        FROM (SELECT *
+        FROM "t") AS "_t1") AS "_t2"
+        WHERE "a" IS NULL OR "b" IS NULL OR "_dedup_rn" <= 2) AS "_t3\"""");
   }
 
   @Test
   public void testDedupConsecutive() {
-    String sql = convert("source=t | dedup a consecutive=true");
-    assertTrue(sql, sql.contains("ROW_NUMBER()"));
-    assertTrue(sql, sql.contains("_global_rn"));
-    assertTrue(sql, sql.contains("_group_rn"));
+    // Consecutive dedup: gaps-and-islands algorithm using global_rn - group_rn
+    ppl("source=t | dedup a consecutive=true").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY "a", "_global_rn" - "_group_rn" ORDER BY CAST("_id" AS INTEGER)) AS "_dedup_rn"
+        FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY CAST("_id" AS INTEGER)) AS "_global_rn", ROW_NUMBER() OVER (PARTITION BY "a" ORDER BY CAST("_id" AS INTEGER)) AS "_group_rn"
+        FROM (SELECT *
+        FROM (SELECT *
+        FROM "t") AS "_t1"
+        WHERE "a" IS NOT NULL) AS "_t2") AS "_t3") AS "_t4"
+        WHERE "_dedup_rn" <= 1) AS "_t5\"""");
   }
 
-  // -- Join command tests --
+  // ===== Join (US-008) =====
 
   @Test
   public void testJoinInner() {
-    String sql = convert("source=t1 | JOIN left=l, right=r ON l.id = r.id t2");
-    assertTrue("Should contain JOIN: " + sql, sql.toUpperCase().contains("JOIN"));
-    assertTrue("Should contain ON: " + sql, sql.toUpperCase().contains("ON"));
+    ppl("source=t1 | JOIN left=l, right=r ON l.id = r.id t2").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t1") AS "l"
+        INNER JOIN (SELECT *
+        FROM "t2") AS "r" ON "l"."id" = "r"."id\"""");
   }
 
   @Test
   public void testJoinLeft() {
-    String sql = convert("source=t1 | LEFT JOIN left=l, right=r ON l.id = r.id t2");
-    assertTrue("Should contain LEFT: " + sql, sql.toUpperCase().contains("LEFT"));
+    ppl("source=t1 | LEFT JOIN left=l, right=r ON l.id = r.id t2").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t1") AS "l"
+        LEFT JOIN (SELECT *
+        FROM "t2") AS "r" ON "l"."id" = "r"."id\"""");
   }
 
   @Test
   public void testJoinSemi() {
-    String sql = convert("source=t1 | SEMI JOIN left=l, right=r ON l.id = r.id t2");
-    assertTrue("Should contain EXISTS: " + sql, sql.toUpperCase().contains("EXISTS"));
+    // SEMI JOIN → EXISTS subquery
+    ppl("source=t1 | SEMI JOIN left=l, right=r ON l.id = r.id t2").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t1") AS "l"
+        WHERE EXISTS (SELECT 1
+        FROM (SELECT *
+        FROM "t2") AS "r"
+        WHERE "l"."id" = "r"."id")""");
   }
 
   @Test
   public void testJoinAnti() {
-    String sql = convert("source=t1 | ANTI JOIN left=l, right=r ON l.id = r.id t2");
-    assertTrue("Should contain NOT EXISTS: " + sql, sql.toUpperCase().contains("NOT EXISTS"));
+    // ANTI JOIN → NOT EXISTS subquery
+    ppl("source=t1 | ANTI JOIN left=l, right=r ON l.id = r.id t2").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t1") AS "l"
+        WHERE NOT EXISTS (SELECT 1
+        FROM (SELECT *
+        FROM "t2") AS "r"
+        WHERE "l"."id" = "r"."id")""");
   }
 
-  // -- Lookup command tests --
+  // ===== Lookup (US-008) =====
 
   @Test
   public void testLookup() {
-    String sql = convert("source=t1 | lookup t2 id");
-    assertTrue("Should contain LEFT JOIN: " + sql, sql.toUpperCase().contains("LEFT"));
-    assertTrue("Should contain JOIN: " + sql, sql.toUpperCase().contains("JOIN"));
+    // lookup → LEFT JOIN on matching field
+    ppl("source=t1 | lookup t2 id").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t1") AS "_l"
+        LEFT JOIN (SELECT *
+        FROM "t2") AS "_r" ON "_l"."id" = "_r"."id\"""");
   }
 
   @Test
   public void testLookupWithOutput() {
-    String sql = convert("source=t1 | lookup t2 id AS id replace salary");
-    assertTrue("Should contain LEFT JOIN: " + sql, sql.toUpperCase().contains("LEFT"));
+    // lookup with replace → LEFT JOIN projecting specific columns from right
+    ppl("source=t1 | lookup t2 id AS id replace salary").shouldTranslateTo("""
+        SELECT "_l".*, "_r"."salary" AS "salary"
+        FROM (SELECT *
+        FROM "t1") AS "_l"
+        LEFT JOIN (SELECT *
+        FROM "t2") AS "_r" ON "_l"."id" = "_r"."id\"""");
   }
 
-  // -- US-009: remaining core commands --
+  // ===== Remaining core commands (US-009) =====
 
   @Test
   public void testRareTopN() {
-    String sql = convert("source=t | top 3 a");
-    assertTrue("Should contain COUNT: " + sql, sql.toUpperCase().contains("COUNT"));
-    assertTrue("Should contain ROW_NUMBER: " + sql, sql.toUpperCase().contains("ROW_NUMBER"));
-    assertTrue("Should contain GROUP BY: " + sql, sql.toUpperCase().contains("GROUP BY"));
+    // top 3 a → COUNT + GROUP BY + ROW_NUMBER ordered DESC + filter rn <= 3
+    ppl("source=t | top 3 a").shouldTranslateTo("""
+        SELECT "a", "count"
+        FROM (SELECT *
+        FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY "count" DESC) AS "_rn"
+        FROM (SELECT "a", COUNT(*) AS "count"
+        FROM (SELECT *
+        FROM "t") AS "_t1" AS "_t2"
+        GROUP BY "a") AS "_t3") AS "_t4"
+        WHERE "_rn" <= 3) AS "_t5\"""");
   }
 
   @Test
   public void testRare() {
-    String sql = convert("source=t | rare a");
-    assertTrue("Should contain COUNT: " + sql, sql.toUpperCase().contains("COUNT"));
-    assertTrue("Should contain ROW_NUMBER: " + sql, sql.toUpperCase().contains("ROW_NUMBER"));
+    // rare a → COUNT + GROUP BY + ROW_NUMBER ordered ASC + default limit 10
+    ppl("source=t | rare a").shouldTranslateTo("""
+        SELECT "a", "count"
+        FROM (SELECT *
+        FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY "count") AS "_rn"
+        FROM (SELECT "a", COUNT(*) AS "count"
+        FROM (SELECT *
+        FROM "t") AS "_t1" AS "_t2"
+        GROUP BY "a") AS "_t3") AS "_t4"
+        WHERE "_rn" <= 10) AS "_t5\"""");
   }
 
   @Test
   public void testWindow() {
-    String sql = convert("source=t | eventstats avg(a) as avg_a by b");
-    assertTrue("Should contain AVG: " + sql, sql.toUpperCase().contains("AVG"));
-    assertTrue("Should contain OVER: " + sql, sql.toUpperCase().contains("OVER"));
-    assertTrue("Should contain PARTITION BY: " + sql, sql.toUpperCase().contains("PARTITION BY"));
+    // eventstats → window function with PARTITION BY, full frame
+    ppl("source=t | eventstats avg(a) as avg_a by b").shouldTranslateTo("""
+        SELECT *, AVG(CAST("a" AS DOUBLE)) OVER (PARTITION BY "b" RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS "avg_a"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testAppend() {
-    String sql = convert("source=t1 | append [source=t2]");
-    assertTrue("Should contain UNION ALL: " + sql, sql.toUpperCase().contains("UNION ALL"));
+    // append → UNION ALL
+    ppl("source=t1 | append [source=t2]").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *
+        FROM "t1"
+        UNION ALL
+        SELECT *
+        FROM "t2") AS "_t1\"""");
   }
 
   @Test
   public void testRename() {
-    String sql = convert("source=t | rename a as b");
-    assertTrue("Should contain AS: " + sql, sql.toUpperCase().contains(" AS "));
-    assertTrue("Should reference a: " + sql, sql.contains("\"a\""));
-    assertTrue("Should reference b: " + sql, sql.contains("\"b\""));
+    ppl("source=t | rename a as b").shouldTranslateTo("""
+        SELECT *, "a" AS "b"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testFillNull() {
-    String sql = convert("source=t | fillnull value=0 a, b");
-    assertTrue("Should contain COALESCE: " + sql, sql.toUpperCase().contains("COALESCE"));
+    // fillnull → COALESCE(field, replacement)
+    ppl("source=t | fillnull value=0 a, b").shouldTranslateTo("""
+        SELECT *, COALESCE("a", 0) AS "a", COALESCE("b", 0) AS "b"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testParse() {
-    String sql = convert("source=t | parse msg '(?<year>\\d{4})-(?<month>\\d{2})'");
-    assertTrue("Should contain REGEXP_EXTRACT: " + sql, sql.toUpperCase().contains("REGEXP_EXTRACT"));
+    // parse with named groups → REGEXP_EXTRACT per group
+    ppl("source=t | parse msg '(?<year>\\d{4})-(?<month>\\d{2})'").shouldTranslateTo("""
+        SELECT *, COALESCE(REGEXP_EXTRACT("msg", '(\\d{4})-(?:\\d{2})'), '') AS "year", \
+        COALESCE(REGEXP_EXTRACT("msg", '(?:\\d{4})-(\\d{2})'), '') AS "month"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 
   @Test
   public void testReplace() {
-    String sql = convert("source=t | replace 'foo' with 'bar' in a");
-    assertTrue("Should contain REPLACE: " + sql, sql.toUpperCase().contains("REPLACE"));
+    ppl("source=t | replace 'foo' with 'bar' in a").shouldTranslateTo("""
+        SELECT *, REPLACE("a", 'foo', 'bar') AS "a"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
   }
 }

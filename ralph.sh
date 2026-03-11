@@ -54,12 +54,44 @@ echo "Starting Ralph Loop — Agent: $AGENT — Max: ${MAX_ITERATIONS:-unlimited
 trap 'echo "Interrupted."; exit 0' INT TERM
 ITERATION=0
 
+summarize() {
+  local REASON="$1"
+  echo ""
+  echo "==============================================================="
+  echo "  Ralph Summary — $REASON after $ITERATION iterations"
+  echo "==============================================================="
+
+  kiro-cli chat --agent "$AGENT" --no-interactive --trust-all-tools \
+    "Read prd.json, progress.txt, and ralph-prompt.md. The Ralph loop just stopped ($REASON after $ITERATION iterations). Append a round summary to progress.txt with these sections:
+
+## Round Summary ($REASON, iteration $ITERATION)
+
+### Progress
+- **Completed this round**: Which stories passed and what was implemented
+- **Remaining**: Which stories are still incomplete with brief status
+- **Blockers**: Any recurring failures, skipped stories, or issues needing human attention
+
+### PoC Direction Check
+- **Approach validation**: Is the current approach proving viable? Any fundamental issues discovered?
+- **Surprises**: What was harder/easier than expected? Any assumptions invalidated?
+- **Alternative approaches**: Did anything encountered this round suggest a better path?
+- **Risk areas**: What upcoming work might expose weaknesses in the current design?
+- **Open questions**: Unresolved design decisions that need human input
+
+### Recommended Next Steps
+What to do when resuming the next round.
+
+Keep it concise but substantive. Then output RALPH_SUMMARY_DONE when finished." \
+    2>&1 | tee /dev/stderr
+}
+
 while [ ! -f "$SCRIPT_DIR/STOP_RALPH" ]; do
   ITERATION=$((ITERATION + 1))
 
   if [ "$MAX_ITERATIONS" -gt 0 ] && [ "$ITERATION" -gt "$MAX_ITERATIONS" ]; then
     echo "Max iterations ($MAX_ITERATIONS) reached."
-    exit 1
+    summarize "max iterations reached"
+    exit 0
   fi
 
   REMAINING=$(jq '[.userStories[] | select(.passes == false)] | length' "$PRD_FILE" 2>/dev/null || echo "?")
@@ -75,6 +107,7 @@ while [ ! -f "$SCRIPT_DIR/STOP_RALPH" ]; do
   if echo "$OUTPUT" | grep -q "RALPH_COMPLETE"; then
     echo ""
     echo "All stories complete! Finished at iteration $ITERATION."
+    summarize "all stories complete"
     exit 0
   fi
 
@@ -84,4 +117,5 @@ done
 
 echo "STOP_RALPH file detected. Stopping."
 rm -f "$SCRIPT_DIR/STOP_RALPH"
+summarize "manual stop (STOP_RALPH)"
 exit 0
