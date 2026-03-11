@@ -13,8 +13,16 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import org.apache.calcite.schema.SchemaPlus;
+import org.apache.calcite.schema.Table;
+import org.apache.calcite.schema.impl.AbstractSchema;
+import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.dialect.CalciteSqlDialect;
+import org.apache.calcite.tools.Frameworks;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.JSONException;
@@ -27,12 +35,18 @@ import org.opensearch.client.RequestOptions;
 import org.opensearch.client.Response;
 import org.opensearch.client.ResponseException;
 import org.opensearch.common.collect.MapBuilder;
+import org.opensearch.sql.api.DynamicPPLToSqlNodeConverter;
+import org.opensearch.sql.api.PPLToSqlNodeConverter;
 import org.opensearch.sql.api.PPLToSqlTranspiler;
 import org.opensearch.sql.ast.statement.ExplainMode;
+import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.common.setting.Settings.Key;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
+import org.opensearch.sql.opensearch.client.OpenSearchRestClient;
+import org.opensearch.sql.opensearch.storage.OpenSearchIndex;
 import org.opensearch.sql.protocol.response.format.Format;
+import org.opensearch.sql.util.InternalRestHighLevelClient;
 import org.opensearch.sql.util.RetryProcessor;
 
 /** OpenSearch Rest integration test base for PPL testing. */
@@ -44,6 +58,56 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   public static final Integer DEFAULT_SUBSEARCH_MAXOUT = 10000;
   public static final Integer DEFAULT_JOIN_SUBSEARCH_MAXOUT = 50000;
   static final boolean V4_ENABLED = Boolean.getBoolean("ppl.engine.v4");
+
+  private static final Settings V4_SETTINGS =
+      new Settings() {
+        @SuppressWarnings("unchecked")
+        @Override
+        public <T> T getSettingValue(Key key) {
+          return null;
+        }
+
+        @Override
+        public java.util.List<?> getSettings() {
+          return java.util.Collections.emptyList();
+        }
+      };
+
+  private SchemaPlus v4Schema;
+
+  private SchemaPlus getV4Schema() {
+    if (v4Schema == null) {
+      AbstractSchema osSchema = new AbstractSchema() {
+        private final OpenSearchRestClient osClient =
+            new OpenSearchRestClient(new InternalRestHighLevelClient(client()));
+
+        @Override
+        protected Map<String, Table> getTableMap() {
+          return new HashMap<>() {
+            @Override
+            public Table get(Object key) {
+              if (!super.containsKey(key)) {
+                String indexName = (String) key;
+                super.put(indexName, new OpenSearchIndex(osClient, V4_SETTINGS, indexName));
+              }
+              return super.get(key);
+            }
+          };
+        }
+      };
+      v4Schema = Frameworks.createRootSchema(false);
+      v4Schema.add("default", osSchema);
+      v4Schema = v4Schema.getSubSchema("default");
+    }
+    return v4Schema;
+  }
+
+  private String transpileV4(String ppl) {
+    UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl);
+    DynamicPPLToSqlNodeConverter converter = new DynamicPPLToSqlNodeConverter(getV4Schema());
+    SqlNode sqlNode = converter.convert(plan);
+    return sqlNode.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
+  }
 
   @Override
   protected void init() throws Exception {
@@ -58,7 +122,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   protected JSONObject executeQuery(String query) throws IOException {
     if (V4_ENABLED) {
       query = query.replace("\\\"", "\"");
-      String sql = PPLToSqlTranspiler.transpile(query);
+      String sql = transpileV4(query);
       LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
       Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
       request.setJsonEntity(
@@ -86,7 +150,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
         return getResponseBody(response, true);
       }
       query = query.replace("\\\"", "\"");
-      String sql = PPLToSqlTranspiler.transpile(query);
+      String sql = transpileV4(query);
       LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
       Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
       request.setJsonEntity(
