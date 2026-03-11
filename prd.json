@@ -1,0 +1,118 @@
+{
+  "project": "PPL V4 — SqlNode Converter to 85%",
+  "branchName": "poc/ppl-to-sqlnode-unified-api",
+  "description": "Increase Calcite*IT pass rate from 41.3% to >=85% via PPL-to-SqlNode converter. Fix 414 regressions vs string transpiler baseline AND implement missing command/function support.",
+  "buildCommand": "./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20",
+  "testCommand": "./gradlew :api:test 2>&1 | tail -30",
+  "verifyCommand": "scripts/ppl_it_rate.sh",
+  "userStories": [
+    {
+      "id": "V4-001",
+      "title": "Fix DATE+TIME comparison and datetime implementation",
+      "description": "Fix CalciteDateTimeComparisonIT (72) and CalciteDateTimeImplementationIT (16) — cross-type datetime comparisons and datetime implementation",
+      "acceptanceCriteria": ["CalciteDateTimeComparisonIT failures reduced significantly", "CalciteDateTimeImplementationIT failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 1,
+      "passes": false,
+      "notes": "88 failures total. Highest impact single category."
+    },
+    {
+      "id": "V4-002",
+      "title": "Fix stats/aggregation and multi-value stats",
+      "description": "Fix CalcitePPLAggregationIT (40), CalcitePPLAggregationPaginatingIT (40), CalciteStatsCommandIT (26), CalciteMultiValueStatsIT (31)",
+      "acceptanceCriteria": ["Aggregation test failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 2,
+      "passes": false,
+      "notes": "137 failures total. Stats is core functionality."
+    },
+    {
+      "id": "V4-003",
+      "title": "Fix datetime and now-like function regressions",
+      "description": "Fix CalciteDateTimeFunctionIT (52), CalciteNowLikeFunctionIT (12), CalciteConvertTZFunctionIT (14)",
+      "acceptanceCriteria": ["Datetime function failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 3,
+      "passes": false,
+      "notes": "78 failures total. Port datetime function handling from PPLToSqlTranspiler."
+    },
+    {
+      "id": "V4-004",
+      "title": "Fix bin/span and chart/timechart commands",
+      "description": "Fix CalciteBinCommandIT (42), CalciteChartCommandIT (15), CalciteTimechartCommandIT (18), CalciteTimechartPerFunctionIT (12)",
+      "acceptanceCriteria": ["Bin and chart failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 4,
+      "passes": false,
+      "notes": "87 failures total. Chart/timechart may need new visitor methods."
+    },
+    {
+      "id": "V4-005",
+      "title": "Fix search command and relevance functions",
+      "description": "Fix CalciteSearchCommandIT (48), CalciteRelevanceFunctionIT (14), and related match/query_string classes (~20)",
+      "acceptanceCriteria": ["Search and relevance failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 5,
+      "passes": false,
+      "notes": "~82 failures. Search/relevance may need special handling for full-text queries."
+    },
+    {
+      "id": "V4-006",
+      "title": "Fix array and MV (multi-value) functions",
+      "description": "Fix CalciteArrayFunctionIT (59), CalciteMVAppendFunctionIT (15), CalciteMvExpandCommandIT (14), CalciteNoMvCommandIT (19), CalciteMvCombineCommandIT (if any)",
+      "acceptanceCriteria": ["Array and MV function failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 6,
+      "passes": false,
+      "notes": "~107 failures. Array/MV functions may need new SqlNode patterns."
+    },
+    {
+      "id": "V4-007",
+      "title": "Fix null handling and builtin function regressions",
+      "description": "Fix CalcitePPLBuiltinFunctionsNullIT (39), CalcitePPLBuiltinFunctionIT (10), CalcitePPLConditionBuiltinFunctionIT (12), CalcitePPLCastFunctionIT (15)",
+      "acceptanceCriteria": ["Null handling and builtin function failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 7,
+      "passes": false,
+      "notes": "76 failures total."
+    },
+    {
+      "id": "V4-008",
+      "title": "Fix join, lookup, and subquery issues",
+      "description": "Fix CalcitePPLJoinIT (36), CalcitePPLLookupIT (12), CalcitePPLExistsSubqueryIT (14), CalcitePPLScalarSubqueryIT (10), CalcitePPLInSubqueryIT (if any)",
+      "acceptanceCriteria": ["Join, lookup, and subquery failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 8,
+      "passes": false,
+      "notes": "~72 failures total."
+    },
+    {
+      "id": "V4-009",
+      "title": "Fix fields, rename, replace, basic, and eval commands",
+      "description": "Fix CalciteFieldsCommandIT (25), CalcitePPLRenameIT (20), CalciteReplaceCommandIT (21), CalcitePPLBasicIT (22), CalciteEvalCommandIT (4), CalciteFillNullCommandIT (13)",
+      "acceptanceCriteria": ["Command-level failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 9,
+      "passes": false,
+      "notes": "~105 failures total."
+    },
+    {
+      "id": "V4-010",
+      "title": "Fix streamstats, graph lookup, and new commands",
+      "description": "Fix CalciteStreamstatsCommandIT (18), CalcitePPLGraphLookupIT (21), CalciteNewAddedCommandsIT (10), CalciteRexCommandIT (17), CalcitePPLPatternsIT (15), CalciteMultisearchCommandIT (15)",
+      "acceptanceCriteria": ["Advanced command failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 10,
+      "passes": false,
+      "notes": "~96 failures. Some commands (graph lookup, rex, patterns, multisearch) may need new visitor methods."
+    },
+    {
+      "id": "V4-011",
+      "title": "Fix math, string, text, operator, and JSON functions",
+      "description": "Fix CalciteMathematicalFunctionIT, CalcitePPLStringBuiltinFunctionIT, CalciteTextFunctionIT, CalciteOperatorIT, CalcitePPLJsonBuiltinFunctionIT (17), CalcitePPLEvalMaxMinFunctionIT, CalcitePPLCaseFunctionIT, CalcitePPLCryptographicFunctionIT",
+      "acceptanceCriteria": ["Function-level failures reduced significantly", "Build passes", "Unit tests pass"],
+      "priority": 11,
+      "passes": false,
+      "notes": "~60 failures across multiple function test classes."
+    },
+    {
+      "id": "V4-012",
+      "title": "Fix remaining scattered failures to reach 85%",
+      "description": "Fix remaining failures across CalciteSortCommandIT, CalciteTopCommandIT, CalciteRareCommandIT, CalcitePPLEventstatsIT, CalcitePPLSpathCommandIT, CalciteExpandCommandIT, CalciteFlattenCommandIT, CalciteTransposeCommandIT, CalcitePPLAppendPipeCommandIT, CalcitePPLEnhancedCoalesceIT, CalciteParseCommandIT, CalciteObjectFieldOperateIT, CalciteDataTypeIT, and all other small classes",
+      "acceptanceCriteria": ["Integration test pass rate >= 85%", "Build passes", "Unit tests pass"],
+      "priority": 12,
+      "passes": false,
+      "notes": "~150+ failures across 40+ classes with 1-10 failures each. This is the long-tail cleanup."
+    }
+  ]
+}
