@@ -70,15 +70,20 @@ import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.Aggregation;
 import org.opensearch.sql.ast.tree.Append;
 import org.opensearch.sql.ast.tree.Bin;
+import org.opensearch.sql.ast.tree.Chart;
+import org.opensearch.sql.ast.tree.CountBin;
 import org.opensearch.sql.ast.tree.Dedupe;
+import org.opensearch.sql.ast.tree.DefaultBin;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
 import org.opensearch.sql.ast.tree.Filter;
 import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
+import org.opensearch.sql.ast.tree.MinSpanBin;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Project;
+import org.opensearch.sql.ast.tree.RangeBin;
 import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
@@ -91,6 +96,7 @@ import org.opensearch.sql.ast.tree.SubqueryAlias;
 import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Window;
+import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.calcite.utils.SqlNodeDSL;
 import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.opensearch.sql.calcite.utils.WildcardUtils;
@@ -283,6 +289,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   protected SqlNode pendingFetch;
   protected SqlNode pendingOffset;
 
+  // -- Bin alias tracking: maps original field name to bin expression alias --
+  protected final Map<String, SqlNode> binReplacements = new HashMap<>();
+
   private String nextAlias() {
     return "_t" + (++aliasCounter);
   }
@@ -324,7 +333,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     SqlNode[] cols =
         node.getProjectList().stream()
-            .map(expr -> expr.accept(this, null))
+            .map(expr -> {
+              SqlNode col = expr.accept(this, null);
+              // If this is a bin-replaced field, alias it back to the original name
+              if (expr instanceof Field) {
+                String name = ((Field) expr).getField().toString();
+                if (binReplacements.containsKey(name)) {
+                  return as(col, name);
+                }
+              }
+              return col;
+            })
             .toArray(SqlNode[]::new);
     pipe = select(cols).from(wrapAsSubquery()).build();
     return pipe;
@@ -871,17 +890,38 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitBin(Bin node, Void ctx) {
-    if (!(node instanceof SpanBin)) {
+    SqlNode field = node.getField().accept(this, null);
+    String alias = node.getAlias() != null ? node.getAlias() : getFieldName(node.getField());
+
+    SqlNode binSql;
+    if (node instanceof SpanBin) {
+      binSql = visitSpanBin((SpanBin) node, field);
+    } else if (node instanceof CountBin) {
+      binSql = visitCountBin((CountBin) node, field);
+    } else if (node instanceof MinSpanBin) {
+      binSql = visitMinSpanBin((MinSpanBin) node, field);
+    } else if (node instanceof RangeBin) {
+      binSql = visitRangeBin((RangeBin) node, field);
+    } else if (node instanceof DefaultBin) {
+      binSql = visitDefaultBin((DefaultBin) node, field);
+    } else {
       throw new UnsupportedOperationException(
           "Unsupported bin type in V4: " + node.getClass().getSimpleName());
     }
-    SpanBin spanBin = (SpanBin) node;
-    SqlNode field = spanBin.getField().accept(this, null);
-    String alias = spanBin.getAlias() != null ? spanBin.getAlias()
-        : getFieldName(spanBin.getField());
-    UnresolvedExpression spanExpr = spanBin.getSpan();
 
-    SqlNode binSql;
+    String fieldName = getFieldName(node.getField());
+    // All bin types: subquery approach — materialize bin expression as a named column
+    String tmpAlias = "_bin_" + fieldName.replaceAll("[^a-zA-Z0-9]", "_");
+    pipe = select(star(), as(binSql, tmpAlias)).from(wrapAsSubquery()).build();
+    binReplacements.put(fieldName, identifier(tmpAlias));
+    if (!alias.equals(fieldName)) {
+      binReplacements.put(alias, identifier(tmpAlias));
+    }
+    return pipe;
+  }
+
+  private SqlNode visitSpanBin(SpanBin spanBin, SqlNode field) {
+    UnresolvedExpression spanExpr = spanBin.getSpan();
     if (spanExpr instanceof Literal) {
       Literal lit = (Literal) spanExpr;
       if (lit.getType() == DataType.INTEGER || lit.getType() == DataType.DECIMAL) {
@@ -892,31 +932,114 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         SqlDataTypeSpec intType = typeSpec(SqlTypeName.INTEGER);
         SqlDataTypeSpec varcharType = typeSpec(SqlTypeName.VARCHAR);
         if (isInt) {
-          binSql = call("CONCAT",
+          return call("CONCAT",
               call("CONCAT", cast(cast(start, intType), varcharType), literal("-")),
               cast(cast(end, intType), varcharType));
         } else {
-          binSql = call("CONCAT",
+          return call("CONCAT",
               call("CONCAT", cast(start, varcharType), literal("-")),
               cast(end, varcharType));
         }
       } else {
-        // String literal: time-based or log-based span — delegate to string transpiler approach
-        String spanStr = lit.getValue().toString();
-        String fieldStr = field.toSqlString(
-            org.apache.calcite.sql.dialect.CalciteSqlDialect.DEFAULT).getSql();
-        binSql = SqlLiteral.createCharString(
-            "UNSUPPORTED_SPAN:" + spanStr, POS); // fallback
-        // Use transpileSpanToSqlNode for time/log spans
-        binSql = transpileSpanToSqlNode(spanStr, field);
+        return transpileSpanToSqlNode(lit.getValue().toString(), field);
       }
-    } else {
-      binSql = cast(field, typeSpec(SqlTypeName.VARCHAR));
     }
+    return cast(field, typeSpec(SqlTypeName.VARCHAR));
+  }
 
-    // Emit as SELECT *, binSql AS alias
-    pipe = select(star(), as(binSql, alias)).from(wrapAsSubquery()).build();
-    return pipe;
+  /** CountBin: nice-number width algorithm using inline SQL. */
+  private SqlNode visitCountBin(CountBin countBin, SqlNode field) {
+    int bins = countBin.getBins() != null ? countBin.getBins() : 10;
+    // width = POWER(10, CEIL(LOG10((MAX(f) OVER() - MIN(f) OVER()) / bins)))
+    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode dataRange = minus(maxOver, minOver);
+    SqlNode targetWidth = divide(dataRange, literal(bins));
+    SqlNode exponent = call("CEIL", call("LOG10", targetWidth));
+    SqlNode width = call("POWER", literal(10.0), exponent);
+    SqlNode binStart = times(call("FLOOR", divide(field, width)), width);
+    SqlNode binEnd = plus(binStart, width);
+    return formatBinRange(binStart, binEnd);
+  }
+
+  /** MinSpanBin: magnitude-based width with minimum span constraint. */
+  private SqlNode visitMinSpanBin(MinSpanBin minSpanBin, SqlNode field) {
+    SqlNode minspanVal = minSpanBin.getMinspan().accept(this, null);
+    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode dataRange = minus(maxOver, minOver);
+    // width = POWER(10, FLOOR(LOG10(dataRange)))
+    // then ensure width >= minspan using CASE WHEN
+    SqlNode magnitude = call("POWER", literal(10.0), call("FLOOR", call("LOG10", dataRange)));
+    SqlNode width = caseWhen(
+        List.of(gte(magnitude, minspanVal)),
+        List.of(magnitude),
+        minspanVal);
+    SqlNode binStart = times(call("FLOOR", divide(field, width)), width);
+    SqlNode binEnd = plus(binStart, width);
+    return formatBinRange(binStart, binEnd);
+  }
+
+  /** RangeBin: magnitude-based width with start/end range constraints. */
+  private SqlNode visitRangeBin(RangeBin rangeBin, SqlNode field) {
+    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode effectiveMin = rangeBin.getStart() != null
+        ? rangeBin.getStart().accept(this, null) : minOver;
+    SqlNode effectiveMax = rangeBin.getEnd() != null
+        ? rangeBin.getEnd().accept(this, null) : maxOver;
+    SqlNode dataRange = minus(effectiveMax, effectiveMin);
+    SqlNode log10Range = call("LOG10", dataRange);
+    SqlNode magnitude = call("FLOOR", log10Range);
+    SqlNode width = call("POWER", literal(10.0), magnitude);
+    SqlNode widthInt = call("FLOOR", width);
+    SqlNode binStart = times(call("FLOOR", divide(field, widthInt)), widthInt);
+    SqlNode binEnd = plus(binStart, widthInt);
+    return formatBinRange(binStart, binEnd);
+  }
+
+  /** DefaultBin: automatic magnitude-based binning. */
+  private SqlNode visitDefaultBin(DefaultBin defaultBin, SqlNode field) {
+    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode dataRange = minus(maxOver, minOver);
+    SqlNode log10Range = call("LOG10", dataRange);
+    SqlNode magnitude = call("FLOOR", log10Range);
+    SqlNode width = call("POWER", literal(10.0), magnitude);
+    SqlNode widthInt = call("FLOOR", width);
+    SqlNode binStart = times(call("FLOOR", divide(field, widthInt)), widthInt);
+    SqlNode binEnd = plus(binStart, widthInt);
+    return formatBinRange(binStart, binEnd);
+  }
+
+  /** Format bin range as "start-end" string with integer casting. */
+  private SqlNode formatBinRange(SqlNode binStart, SqlNode binEnd) {
+    SqlDataTypeSpec intType = typeSpec(SqlTypeName.INTEGER);
+    SqlDataTypeSpec vc = typeSpec(SqlTypeName.VARCHAR);
+    return call("CONCAT",
+        call("CONCAT", cast(cast(binStart, intType), vc), literal("-")),
+        cast(cast(binEnd, intType), vc));
+  }
+
+  /** Build FLOOR(field TO timeUnit) using SqlStdOperatorTable.FLOOR + SqlIntervalQualifier. */
+  private SqlNode floorToUnit(SqlNode field, String truncUnit) {
+    TimeUnit tu = mapTruncUnit(truncUnit);
+    return new SqlBasicCall(SqlStdOperatorTable.FLOOR,
+        new SqlNode[] {field, new SqlIntervalQualifier(tu, null, POS)}, POS);
+  }
+
+  private static TimeUnit mapTruncUnit(String truncUnit) {
+    switch (truncUnit) {
+      case "SECOND": return TimeUnit.SECOND;
+      case "MINUTE": return TimeUnit.MINUTE;
+      case "HOUR": return TimeUnit.HOUR;
+      case "DAY": return TimeUnit.DAY;
+      case "WEEK": return TimeUnit.WEEK;
+      case "MONTH": return TimeUnit.MONTH;
+      case "QUARTER": return TimeUnit.QUARTER;
+      case "YEAR": return TimeUnit.YEAR;
+      default: return TimeUnit.SECOND;
+    }
   }
 
   private SqlNode transpileSpanToSqlNode(String spanStr, SqlNode field) {
@@ -971,24 +1094,47 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
     if (isMonth && value == 1) {
       return call("SUBSTRING",
-          cast(call("FLOOR", field, identifier(truncUnit)), typeSpec(SqlTypeName.VARCHAR)),
+          cast(floorToUnit(field, truncUnit), typeSpec(SqlTypeName.VARCHAR)),
           intLiteral(1), intLiteral(7));
     }
+    if (isMonth) {
+      // Multi-month span: compute total months, floor to span, convert to year-month string
+      // totalMonths = EXTRACT(YEAR FROM field) * 12 + EXTRACT(MONTH FROM field) - 1
+      SqlNode yearPart = new SqlBasicCall(SqlStdOperatorTable.EXTRACT,
+          new SqlNode[]{new SqlIntervalQualifier(TimeUnit.YEAR, null, POS), field}, POS);
+      SqlNode monthPart = new SqlBasicCall(SqlStdOperatorTable.EXTRACT,
+          new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MONTH, null, POS), field}, POS);
+      SqlNode totalMonths = plus(times(yearPart, intLiteral(12)),
+          minus(monthPart, intLiteral(1)));
+      // flooredMonths = FLOOR(totalMonths / value) * value
+      SqlNode flooredMonths = times(call("FLOOR",
+          divide(totalMonths, intLiteral(value))), intLiteral(value));
+      // resultYear = flooredMonths / 12, resultMonth = flooredMonths % 12 + 1
+      SqlNode resultYear = divide(flooredMonths, intLiteral(12));
+      SqlNode resultMonth = plus(call("MOD", flooredMonths, intLiteral(12)), intLiteral(1));
+      // Format as "YYYY-MM"
+      SqlDataTypeSpec vc = typeSpec(SqlTypeName.VARCHAR);
+      return call("CONCAT",
+          call("CONCAT", cast(resultYear, vc), literal("-")),
+          call("LPAD", cast(resultMonth, vc), intLiteral(2), literal("0")));
+    }
     if (value == 1 && secondsPerUnit > 0) {
-      return call("FLOOR", field, identifier(truncUnit));
+      return floorToUnit(field, truncUnit);
     }
     if (secondsPerUnit > 0) {
       long totalSeconds = (long) value * secondsPerUnit;
       SqlNode epoch = call("TIMESTAMPDIFF",
-          identifier("SECOND"), literal("1970-01-01 00:00:00"), field);
+          identifier("SECOND"),
+          cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP)),
+          field);
       SqlNode floored = times(call("FLOOR",
           divide(epoch, literal(totalSeconds))), literal(totalSeconds));
       return call("TIMESTAMPADD",
           identifier("SECOND"), cast(floored, typeSpec(SqlTypeName.INTEGER)),
-          literal("1970-01-01 00:00:00"));
+          cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP)));
     }
     // Fallback for sub-second or multi-month
-    return call("FLOOR", field, identifier("SECOND"));
+    return floorToUnit(field, "SECOND");
   }
 
   @Override
@@ -1206,6 +1352,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitQualifiedName(QualifiedName node, Void ctx) {
     List<String> parts = node.getParts();
+    if (parts.size() == 1 && binReplacements.containsKey(parts.get(0))) {
+      return binReplacements.get(parts.get(0));
+    }
     return identifier(parts.toArray(new String[0]));
   }
 
@@ -2016,6 +2165,79 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitExistsSubquery(ExistsSubquery node, Void ctx) {
     return exists(convertSubPlan(node.getQuery()));
+  }
+
+  @Override
+  public SqlNode visitChart(Chart node, Void ctx) {
+    // Parse chart arguments
+    Argument.ArgumentMap args = Argument.ArgumentMap.of(node.getArguments());
+    boolean useNull = args.get("usenull") == null
+        || Boolean.TRUE.equals(args.get("usenull").getValue());
+    String nullStr = args.get("nullstr") != null
+        ? (String) args.get("nullstr").getValue() : "NULL";
+
+    List<SqlNode> selectItems = new ArrayList<>();
+    List<SqlNode> groupByItems = new ArrayList<>();
+    List<SqlNode> nullFilters = new ArrayList<>();
+
+    // Row split (may be null for simple chart by field)
+    if (node.getRowSplit() != null) {
+      SqlNode rowSplitExpr = node.getRowSplit().accept(this, null);
+      selectItems.add(rowSplitExpr);
+      SqlNode rowGroupBy;
+      if (node.getRowSplit() instanceof Alias) {
+        rowGroupBy = ((Alias) node.getRowSplit()).getDelegated().accept(this, null);
+      } else {
+        rowGroupBy = node.getRowSplit().accept(this, null);
+      }
+      groupByItems.add(rowGroupBy);
+      // Always filter null row splits
+      nullFilters.add(isNotNull(rowGroupBy));
+    }
+
+    // Column split (optional) — cast to VARCHAR for nullstr/otherstr compatibility
+    if (node.getColumnSplit() != null) {
+      SqlNode colSplitSelect = node.getColumnSplit().accept(this, null);
+      SqlNode colGroupBy;
+      if (node.getColumnSplit() instanceof Alias) {
+        colGroupBy = ((Alias) node.getColumnSplit()).getDelegated().accept(this, null);
+      } else {
+        colGroupBy = node.getColumnSplit().accept(this, null);
+      }
+
+      // Cast column split to VARCHAR and handle nulls
+      String colAlias = node.getColumnSplit() instanceof Alias
+          ? ((Alias) node.getColumnSplit()).getName() : null;
+      SqlNode colCastExpr = cast(colGroupBy, typeSpec(SqlTypeName.VARCHAR));
+      if (useNull) {
+        // Replace null with nullStr
+        colCastExpr = call("COALESCE", colCastExpr, literal(nullStr));
+      } else {
+        // Filter out null column splits
+        nullFilters.add(isNotNull(colGroupBy));
+      }
+      if (colAlias != null) {
+        selectItems.add(as(colCastExpr, colAlias));
+      } else {
+        selectItems.add(colCastExpr);
+      }
+      groupByItems.add(colGroupBy);
+    }
+
+    // Aggregation function
+    selectItems.add(node.getAggregationFunction().accept(this, null));
+
+    SqlNodeDSL.SelectBuilder builder = select(selectItems.toArray(new SqlNode[0]))
+        .from(wrapAsSubquery());
+    if (!groupByItems.isEmpty()) {
+      builder = builder.groupBy(groupByItems.toArray(new SqlNode[0]));
+    }
+    if (!nullFilters.isEmpty()) {
+      SqlNode filter = nullFilters.stream().reduce((a, b) -> and(a, b)).get();
+      builder = builder.where(filter);
+    }
+    pipe = builder.build();
+    return pipe;
   }
 
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
