@@ -99,8 +99,8 @@
         "Build passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added visitAggregation (50 lines) handling agg expressions, group-by, span, and bucket_nullable. 4 unit tests. Commit: eda6947f6"
     },
     {
       "id": "US-006",
@@ -115,8 +115,8 @@
         "Build passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added visitEval (26 lines) with SqlShuttle-based forward-reference inlining. 3 unit tests. Commit: 800e583b0"
     },
     {
       "id": "US-007",
@@ -131,8 +131,8 @@
         "Build passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added visitDedupe (77 lines) with standard dedup (ROW_NUMBER OVER PARTITION BY), keepempty=true (OR IS NULL), and consecutive dedup (gaps-and-islands with _global_rn/_group_rn). 3 unit tests. Commit: 2c94fb4bb"
     },
     {
       "id": "US-008",
@@ -148,8 +148,8 @@
         "Build passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added visitJoin (INNER/LEFT/RIGHT/FULL/CROSS via SqlJoin, SEMI/ANTI via EXISTS/NOT EXISTS), visitLookup (LEFT JOIN with REPLACE/APPEND output), resolveJoinRight, extractRelation, buildFieldListCondition helpers. Added join() to SqlNodeDSL. 6 unit tests. Commit: 7d7439d7f"
     },
     {
       "id": "US-009",
@@ -169,8 +169,8 @@
         "Build passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added 10 visit methods: visitRareTopN (GROUP BY + ROW_NUMBER + filter), visitTrendline (SMA/WMA via window functions), visitWindow (eventstats: SELECT *, agg OVER PARTITION BY), visitStreamWindow (running window with frame spec), visitAppend (UNION ALL), visitBin (SpanBin: FLOOR-based bucketing with time/log/numeric spans), visitReplace (REPLACE/REGEXP_REPLACE), visitRename (SELECT *, old AS new), visitFillNull (COALESCE), visitParse (REGEXP_EXTRACT per named group). Added windowWithFrame and unionAll helpers to SqlNodeDSL. Added buildWindowAggSql, windowBoundToSqlNode, transpileSpanToSqlNode, getFieldName helpers. 8 new unit tests. Commit: 98b924310"
     },
     {
       "id": "US-010",

@@ -79,3 +79,112 @@
   - SqlSelectKeyword.DISTINCT + field as SqlBasicCall args to SqlStdOperatorTable.COUNT creates COUNT(DISTINCT field)
   - SQL_DATETIME_KEYWORDS (CURRENT_TIMESTAMP etc.) need special handling — call with no args, not as identifier
 ---
+
+## [2026-03-11T00:20Z] - US-005: Add stats (aggregation) command
+- Added visitAggregation method (50 lines) to PPLToSqlNodeConverter.java
+- SELECT items: aggregates first, then span (if any), then group-by fields (matches PPL convention)
+- GROUP BY: span delegated expression + group-by field delegated expressions (unwrapped from Alias)
+- bucket_nullable=false: adds WHERE IS NOT NULL filter on all group-by columns
+- 4 unit tests: testStatsCount, testStatsGroupBy, testStatsMultipleAggs, testStatsWithSpan
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: all 21 tests pass (17 existing + 4 new)
+- Files: PPLToSqlNodeConverter.java (+51 lines), PPLToSqlNodeConverterTest.java (+32 lines)
+- Commit: eda6947f6 `feat: [US-005] Add stats (aggregation) command`
+- **Learnings for future iterations:**
+  - Aggregation node stores span separately from groupExprList — must handle both
+  - For GROUP BY, unwrap Alias to get the raw expression (delegated), but keep full Alias for SELECT
+  - bucket_nullable default is true; only filter nulls when explicitly set to false
+  - The visitAggregateFunction and visitSpan expression visitors (from US-004) handle all the expression-level work; visitAggregation just orchestrates the SELECT/GROUP BY structure
+---
+
+## [2026-03-11T00:28Z] - US-006: Add eval command
+- Added visitEval method (26 lines) to PPLToSqlNodeConverter.java
+- Architecture: wrap current pipe as subquery, SELECT *, expr1 AS alias1, expr2 AS alias2
+- Forward-reference inlining: SqlShuttle replaces SqlIdentifier references to earlier eval aliases with their SqlNode expressions
+- Self-referencing eval (column override): emits SELECT *, expr AS col — duplicate column handled downstream
+- 3 unit tests: testEvalSimple, testEvalForwardReference, testEvalSelfReference — all pass
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: full `:api:test` suite passes (24 tests total)
+- Files: PPLToSqlNodeConverter.java (+27 lines), PPLToSqlNodeConverterTest.java (+24 lines)
+- Commit: 800e583b0 `feat: [US-006] Add eval command`
+- **Learnings for future iterations:**
+  - SqlShuttle is the idiomatic way to transform SqlNode trees — visit(SqlIdentifier) for identifier substitution
+  - Forward-reference inlining at the SqlNode level is cleaner than the string-based regex approach in PPLToSqlTranspiler
+  - Eval's self-referencing case (e.g. eval a = a + 1) doesn't need special temp-alias handling at the SqlNode level — the duplicate column in SELECT *, expr AS a is resolved by Calcite validation or the next subquery wrap
+  - LinkedHashMap preserves insertion order for eval aliases, which matters for forward references
+---
+
+## [2026-03-11T00:38Z] - US-007: Add dedup command
+- Added visitDedupe method (77 lines) to PPLToSqlNodeConverter.java
+- Standard dedup (consecutive=false, keepEmpty=false): filter nulls → ROW_NUMBER() OVER (PARTITION BY fields ORDER BY fields) → filter _dedup_rn <= N → strip helper column
+- keepEmpty=true: skip null filter, add OR (field IS NULL) to row number condition
+- Consecutive dedup (gaps-and-islands): ROW_NUMBER() global + per-group → island detection via (global_rn - group_rn) → ROW_NUMBER() per island → filter
+- 3 unit tests: testDedupSimple, testDedupKeepEmpty, testDedupConsecutive — all pass
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: full `:api:test` suite passes (27 tests total)
+- Files: PPLToSqlNodeConverter.java (+77 lines), PPLToSqlNodeConverterTest.java (+25 lines)
+- Commit: 2c94fb4bb `feat: [US-007] Add dedup command`
+- **Learnings for future iterations:**
+  - Dedupe AST node options are positional: [0]=allowedDuplication(Integer), [1]=keepEmpty(Boolean), [2]=consecutive(Boolean) — accessed via `((Literal) node.getOptions().get(N).getValue()).getValue()`
+  - Standard dedup needs 4 subquery wraps: null filter → ROW_NUMBER → row filter → strip helper column
+  - Consecutive dedup uses gaps-and-islands: global ROW_NUMBER + per-group ROW_NUMBER → island = (global - group) → per-island ROW_NUMBER
+  - The final `SELECT * FROM (...)` wrap after filtering is needed to strip the _dedup_rn helper column from the output
+  - CAST("_id" AS INTEGER) is used for ordering in consecutive dedup (same as string transpiler)
+---
+
+## [2026-03-11T00:46Z] - US-008: Add join and lookup commands
+- Added visitJoin method to PPLToSqlNodeConverter.java handling all 7 join types
+- INNER/LEFT/RIGHT/FULL/CROSS: mapped to Calcite JoinType, constructed via SqlNodeDSL.join() → SqlJoin node
+- CROSS+condition → INNER JOIN, INNER+no_condition → CROSS JOIN (same semantics as string transpiler)
+- SEMI/ANTI: rewritten to WHERE EXISTS/NOT EXISTS (SELECT 1 FROM right WHERE condition)
+- Added visitLookup method: LEFT JOIN with _l/_r aliases, ON clause from mappingAliasMap
+- Lookup REPLACE: SELECT _l.*, _r.lookupField AS targetField
+- Lookup APPEND: SELECT _l.*, COALESCE(_l.targetField, _r.lookupField) AS targetField
+- Added join() helper to SqlNodeDSL.java using Calcite SqlJoin constructor
+- Added resolveJoinRight() helper: handles SubqueryAlias, Relation, and subquery pipeline right sides
+- Added extractRelation() helper: unwraps Project(AllFields) → Relation
+- Added buildFieldListCondition() helper: builds ON clause from field list
+- 6 unit tests: testJoinInner, testJoinLeft, testJoinSemi, testJoinAnti, testLookup, testLookupWithOutput
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: full `:api:test` suite passes (33 tests total)
+- Files: PPLToSqlNodeConverter.java (+138 lines), SqlNodeDSL.java (+14 lines), PPLToSqlNodeConverterTest.java (+42 lines)
+- Commit: 7d7439d7f `feat: [US-008] Add join and lookup commands`
+- **Learnings for future iterations:**
+  - Calcite SqlJoin constructor: new SqlJoin(pos, left, natural, joinType.symbol(pos), right, conditionType.symbol(pos), condition)
+  - JoinType and JoinConditionType are Calcite enums (org.apache.calcite.sql.JoinType, not PPL's Join.JoinType)
+  - SEMI/ANTI joins have no direct SQL syntax in Calcite — must rewrite to EXISTS/NOT EXISTS
+  - For qualified star (_l.*), use new SqlIdentifier(Arrays.asList(alias, ""), POS) — empty string as last part creates star
+  - Join's left side comes from pipe (already visited via flatten pattern), right side from node.getRight()
+  - Lookup always uses LEFT JOIN with fixed aliases _l and _r
+  - extractRelation() handles the common case where right side is Project(AllFields) wrapping a Relation
+---
+
+## [2026-03-11T01:30Z] - US-009: Add subquery, window, and remaining core commands
+- Added 10 visit methods to PPLToSqlNodeConverter.java (+562 lines)
+- visitRareTopN: GROUP BY + COUNT(*) + ROW_NUMBER + filter + project
+- visitTrendline: SMA (AVG via window) / WMA (NTH_VALUE weighted sum) with ROWS frame
+- visitWindow (eventstats): SELECT *, agg OVER (PARTITION BY ... RANGE UNBOUNDED)
+- visitStreamWindow (streamstats): running window with WindowFrame-based frame spec
+- visitAppend: UNION ALL via new SqlNodeDSL.unionAll() helper
+- visitBin: SpanBin only — numeric (FLOOR), time-based (epoch bucketing), log-based spans
+- visitReplace: REPLACE / REGEXP_REPLACE with WildcardUtils support
+- visitRename: SELECT *, old AS new (non-wildcard, chained rename support)
+- visitFillNull: COALESCE(field, value) per field pair
+- visitParse: REGEXP_EXTRACT per named capture group (REGEX method only)
+- Added windowWithFrame() and unionAll() to SqlNodeDSL.java (+18 lines)
+- Added buildWindowAggSql, windowBoundToSqlNode, transpileSpanToSqlNode, getFieldName helpers
+- 8 new unit tests: testRareTopN, testRare, testWindow, testAppend, testRename, testFillNull, testParse, testReplace
+- Build: passes, Tests: 108 total all pass
+- Files: PPLToSqlNodeConverter.java, SqlNodeDSL.java, PPLToSqlNodeConverterTest.java
+- Commit: 98b924310 `feat: [US-009] Add subquery, window, and remaining core commands`
+- **Learnings for future iterations:**
+  - WindowFrame AST uses WindowBound subclasses (CurrentRow, Unbounded, OffSet) — map to SqlWindow.createXxx() factory methods
+  - SqlWindow.create() takes isRows boolean + lower/upper SqlNode bounds for frame specification
+  - eventstats uses RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING (full partition)
+  - streamstats uses WindowFunction.getWindowFrame() for per-function frame specs
+  - buildWindowAggSql needed because PPL parser wraps eventstats aggregates as Function not AggregateFunction
+  - Bin only supports SpanBin in V4 — other bin types (MinSpanBin, CountBin, RangeBin, DefaultBin) throw UnsupportedOperationException
+  - Parse only supports REGEX method — GROK and PATTERNS throw UnsupportedOperationException
+  - fillnull replacementForAll (all-fields mode) deferred to DynamicPPLToSqlNodeConverter (needs schema)
+  - PPL fillnull syntax is `fillnull value=X field1, field2` not `fillnull with X field1, field2`
+---
