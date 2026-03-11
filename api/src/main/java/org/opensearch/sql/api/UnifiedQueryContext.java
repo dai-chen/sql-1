@@ -34,11 +34,13 @@ import org.apache.calcite.sql.type.ReturnTypes;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.util.SqlOperatorTables;
 import org.apache.calcite.sql.validate.SqlConformance;
+import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Programs;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.parser.OpenSearchSqlParserImpl;
+import org.opensearch.sql.calcite.type.PPLTypeCoercion;
 import org.opensearch.sql.calcite.udf.udaf.FirstAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.LastAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.PercentileApproxFunction;
@@ -273,6 +275,8 @@ public class UnifiedQueryContext implements AutoCloseable {
                       pplFirst, pplLast, percentileApprox, take)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
+          .sqlValidatorConfig(SqlValidator.Config.DEFAULT
+              .withTypeCoercionFactory(PPLTypeCoercion::new))
           .build();
     }
 
