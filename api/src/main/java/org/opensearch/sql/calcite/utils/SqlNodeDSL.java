@@ -18,6 +18,7 @@ import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlNumericLiteral;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
+import org.apache.calcite.sql.SqlSelectKeyword;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
@@ -340,6 +341,31 @@ public final class SqlNodeDSL {
 
   public static SqlNode like(SqlNode expr, SqlNode pattern) {
     return new SqlBasicCall(SqlStdOperatorTable.LIKE, new SqlNode[] {expr, pattern}, POS);
+  }
+
+  public static SqlNode notLike(SqlNode expr, SqlNode pattern) {
+    return new SqlBasicCall(SqlStdOperatorTable.NOT_LIKE, new SqlNode[] {expr, pattern}, POS);
+  }
+
+  // ---- EXISTS / IN subquery ----
+
+  public static SqlNode exists(SqlNode subquery) {
+    return new SqlBasicCall(SqlStdOperatorTable.EXISTS, new SqlNode[] {subquery}, POS);
+  }
+
+  public static SqlNode inSub(SqlNode expr, SqlNode subquery) {
+    return new SqlBasicCall(SqlStdOperatorTable.IN, new SqlNode[] {expr, subquery}, POS);
+  }
+
+  // ---- DISTINCT aggregate wrapper ----
+
+  public static SqlNode distinct(SqlNode arg) {
+    return new SqlBasicCall(
+        SqlStdOperatorTable.AS,
+        new SqlNode[] {
+          SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS), arg
+        },
+        POS);
   }
 
   // ---- Aggregate shortcuts ----

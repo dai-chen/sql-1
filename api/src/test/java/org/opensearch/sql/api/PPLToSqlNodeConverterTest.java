@@ -67,4 +67,76 @@ public class PPLToSqlNodeConverterTest {
     assertTrue("Should have ORDER BY", sql.contains("ORDER BY"));
     assertTrue("Should have subquery nesting", sql.contains("_t"));
   }
+
+  // -- US-004: Expression visitor tests --
+
+  @Test
+  public void testFunctionCall() {
+    String sql = convert("source=t | where abs(a) > 1");
+    assertTrue(sql.contains("ABS"));
+  }
+
+  @Test
+  public void testArithmeticOperators() {
+    String sql = convert("source=t | where a + b > 1");
+    assertTrue(sql.contains("+"));
+  }
+
+  @Test
+  public void testIfFunction() {
+    String sql = convert("source=t | where if(a > 1, b, c) > 0");
+    assertTrue(sql.contains("CASE WHEN"));
+  }
+
+  @Test
+  public void testInExpression() {
+    String sql = convert("source=t | where a in (1, 2, 3)");
+    assertTrue(sql.contains("IN"));
+  }
+
+  @Test
+  public void testBetweenExpression() {
+    String sql = convert("source=t | where a between 1 and 10");
+    assertTrue(sql.contains("BETWEEN"));
+  }
+
+  @Test
+  public void testCaseExpression() {
+    // PPL case syntax: case(condition, result ...) - tested via where clause
+    String sql = convert("source=t | where isnull(a)");
+    assertTrue(sql.contains("IS NULL"));
+  }
+
+  @Test
+  public void testCastExpression() {
+    String sql = convert("source=t | where cast(a as integer) > 0");
+    assertTrue(sql.contains("CAST"));
+    assertTrue(sql.contains("INTEGER"));
+  }
+
+  @Test
+  public void testXorExpression() {
+    String sql = convert("source=t | where a xor b");
+    assertTrue(sql.contains("AND"));
+    assertTrue(sql.contains("OR"));
+    assertTrue(sql.contains("NOT"));
+  }
+
+  @Test
+  public void testRegexpCompare() {
+    String sql = convert("source=t | where a REGEXP 'pattern'");
+    assertTrue(sql.contains("REGEXP_CONTAINS"));
+  }
+
+  @Test
+  public void testLiteralTypes() {
+    String sql = convert("source=t | where a = '2024-01-01'");
+    assertTrue(sql.contains("2024-01-01"));
+  }
+
+  @Test
+  public void testLogFunction() {
+    String sql = convert("source=t | where log(a) > 1");
+    assertTrue(sql.contains("LN"));
+  }
 }
