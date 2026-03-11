@@ -89,6 +89,7 @@ import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Window;
 import org.opensearch.sql.calcite.utils.SqlNodeDSL;
+import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.opensearch.sql.calcite.utils.WildcardUtils;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
@@ -1232,10 +1233,58 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
   }
 
+  private static SqlTypeName extractCastType(SqlNode node) {
+    if (!(node instanceof SqlBasicCall)) return null;
+    SqlBasicCall call = (SqlBasicCall) node;
+    if (call.getOperator() != SqlStdOperatorTable.CAST || call.operandCount() != 2) return null;
+    if (!(call.operand(1) instanceof SqlDataTypeSpec)) return null;
+    SqlDataTypeSpec spec = call.operand(1);
+    if (!(spec.getTypeNameSpec() instanceof SqlBasicTypeNameSpec)) return null;
+    String name = spec.getTypeNameSpec().getTypeName().getSimple();
+    if (name == null) return null;
+    switch (name.toUpperCase()) {
+      case "DATE": return SqlTypeName.DATE;
+      case "TIME": return SqlTypeName.TIME;
+      case "TIMESTAMP": return SqlTypeName.TIMESTAMP;
+      default: return null;
+    }
+  }
+
+  /** Promote TIME to TIMESTAMP using today's date (PPL semantics). */
+  private static SqlNode promoteTimeToTimestamp(SqlNode node) {
+    if (!(node instanceof SqlBasicCall)) return cast(node, typeSpec(SqlTypeName.TIMESTAMP));
+    SqlBasicCall call = (SqlBasicCall) node;
+    if (call.getOperator() == SqlStdOperatorTable.CAST && call.operandCount() == 2) {
+      SqlNode inner = call.operand(0);
+      if (inner instanceof SqlLiteral) {
+        String val = ((SqlLiteral) inner).toValue();
+        if (val != null) {
+          return cast(literal(java.time.LocalDate.now() + " " + val), typeSpec(SqlTypeName.TIMESTAMP));
+        }
+      }
+    }
+    return cast(node, typeSpec(SqlTypeName.TIMESTAMP));
+  }
+
+  private static SqlNode[] promoteDatetimeOperands(SqlNode left, SqlNode right) {
+    SqlTypeName lt = extractCastType(left);
+    SqlTypeName rt = extractCastType(right);
+    if (lt != null && rt != null && lt != rt) {
+      if (lt == SqlTypeName.TIME) left = promoteTimeToTimestamp(left);
+      else if (lt != SqlTypeName.TIMESTAMP) left = cast(left, typeSpec(SqlTypeName.TIMESTAMP));
+      if (rt == SqlTypeName.TIME) right = promoteTimeToTimestamp(right);
+      else if (rt != SqlTypeName.TIMESTAMP) right = cast(right, typeSpec(SqlTypeName.TIMESTAMP));
+    }
+    return new SqlNode[] {left, right};
+  }
+
   @Override
   public SqlNode visitCompare(org.opensearch.sql.ast.expression.Compare node, Void ctx) {
     SqlNode left = node.getLeft().accept(this, null);
     SqlNode right = node.getRight().accept(this, null);
+    SqlNode[] promoted = promoteDatetimeOperands(left, right);
+    left = promoted[0];
+    right = promoted[1];
     switch (node.getOperator()) {
       case ">":
         return gt(left, right);
@@ -1343,9 +1392,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     if ("datetime".equals(name)) {
       if (args.size() == 1) return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
-      SqlDataTypeSpec vc = typeSpec(SqlTypeName.VARCHAR);
-      return cast(call("CONCAT", call("CONCAT", cast(args.get(0), vc), literal(" ")), cast(args.get(1), vc)),
-          typeSpec(SqlTypeName.TIMESTAMP));
+      return cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
     }
     // EXTRACT-based datetime functions → CAST(EXTRACT(unit FROM CAST(arg AS TIMESTAMP)) AS INTEGER)
     if ("year".equals(name) && args.size() == 1)
@@ -1591,20 +1638,21 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (unit == SpanUnit.NONE || !SpanUnit.isTimeUnit(unit)) {
       return times(call("FLOOR", divide(field, value)), value);
     }
-    return call("DATE_TRUNC", field, literal(spanUnitToSql(unit)));
+    return new SqlBasicCall(SqlStdOperatorTable.FLOOR,
+        new SqlNode[] {field, new SqlIntervalQualifier(spanUnitToTimeUnit(unit), null, POS)}, POS);
   }
 
-  private static String spanUnitToSql(SpanUnit u) {
+  private static TimeUnit spanUnitToTimeUnit(SpanUnit u) {
     switch (SpanUnit.getName(u)) {
-      case "s": return "SECOND";
-      case "m": return "MINUTE";
-      case "h": return "HOUR";
-      case "d": return "DAY";
-      case "w": return "WEEK";
-      case "M": return "MONTH";
-      case "q": return "QUARTER";
-      case "y": return "YEAR";
-      default: return "DAY";
+      case "s": return TimeUnit.SECOND;
+      case "m": return TimeUnit.MINUTE;
+      case "h": return TimeUnit.HOUR;
+      case "d": return TimeUnit.DAY;
+      case "w": return TimeUnit.WEEK;
+      case "M": return TimeUnit.MONTH;
+      case "q": return TimeUnit.QUARTER;
+      case "y": return TimeUnit.YEAR;
+      default: return TimeUnit.DAY;
     }
   }
 
