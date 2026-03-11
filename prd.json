@@ -206,8 +206,8 @@
         "Build passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "DynamicPPLToSqlNodeConverter.java (207 lines) extending PPLToSqlNodeConverter with SchemaPlus. Overrides: visitRelation (captures tableName), visitProject (fields - exclude), visitRename (wildcard via WildcardRenameUtils), visitFillNull (all-fields COALESCE), visitEval (column override with explicit column list), convertSubPlan (returns Dynamic subclass). DynamicPPLToSqlNodeConverterTest.java with 3 tests. Commit: c50f243a7"
     },
     {
       "id": "US-012",

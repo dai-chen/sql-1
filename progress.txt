@@ -205,3 +205,28 @@
   - builtinFunctionCoercion override not needed — Calcite's default implicitCast() handles STRING→NUMERIC and STRING→DATETIME for function args
   - MYSQL_5 conformance for BOOLEAN↔NUMBER coercion is a per-query-path concern, not global — will be set when PPL V4 path is wired (US-012)
 ---
+
+## [2026-03-11T01:54Z] - US-011: Create DynamicPPLToSqlNodeConverter with schema-dependent commands
+- Created DynamicPPLToSqlNodeConverter.java (207 lines) extending PPLToSqlNodeConverter
+- Constructor takes SchemaPlus defaultSchema, creates JavaTypeFactoryImpl for type resolution
+- resolveColumns(tableName): case-insensitive table lookup → getRowType → getFieldList → getName
+- visitRelation override: captures tableName for later column resolution by other visitors
+- visitProject override: handles fields - (exclude) by resolving all columns from schema, filtering out excluded ones
+- visitRename override: handles wildcard rename via WildcardRenameUtils.isWildcardPattern/matchFieldNames/applyWildcardTransformation
+- visitFillNull override: handles all-fields mode (replacementForAll.isPresent()) by applying COALESCE to every column from schema
+- visitEval override: handles column override by detecting when eval alias matches existing column, emitting explicit column list instead of SELECT *
+- convertSubPlan override: returns DynamicPPLToSqlNodeConverter(defaultSchema) so subqueries also get schema access
+- DynamicPPLToSqlNodeConverterTest.java with 3 tests using in-memory SchemaPlus (table "t" with columns a:INTEGER, b:VARCHAR, c:DOUBLE)
+- Build: `:api:compileJava` and `:api:compileTestJava` pass
+- Tests: all 3 new tests pass (testFieldsExclude, testFillNullAllFields, testEvalColumnOverride), full :api:test suite passes
+- Files: api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (new), api/src/test/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverterTest.java (new)
+- Commit: c50f243a7 `feat: [US-011] Create DynamicPPLToSqlNodeConverter with schema-dependent commands`
+- **Learnings for future iterations:**
+  - SchemaPlus column resolution pattern: defaultSchema.getTable(name) → Table → getRowType(typeFactory) → getFieldList() → getName()
+  - Case-insensitive table lookup: iterate getTableNames() if exact match fails (same as StarExceptReplaceRewriter)
+  - getFieldName is private in parent class — use local fieldName() helper instead
+  - Eval column override: when eval alias matches existing column, emit explicit column list with override instead of SELECT *, expr AS col (avoids duplicate column ambiguity)
+  - WildcardRenameUtils (core module) is accessible from api module — matchFieldNames returns List<String> of matching field names
+  - For non-wildcard renames and non-exclude projects, delegate to super to avoid code duplication
+  - convertSubPlan override is critical — without it, subqueries in append/join/subquery expressions would use base PPLToSqlNodeConverter without schema access
+---
