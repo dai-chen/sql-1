@@ -57,6 +57,7 @@ import org.opensearch.sql.ast.expression.subquery.ScalarSubquery;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.Aggregation;
+import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.Filter;
 import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Project;
@@ -357,6 +358,32 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
 
     pipe = builder.build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitEval(Eval node, Void ctx) {
+    Map<String, SqlNode> evalAliases = new java.util.LinkedHashMap<>();
+    List<SqlNode> items = new ArrayList<>();
+    items.add(star());
+    for (Let let : node.getExpressionList()) {
+      String varName = let.getVar().getField().toString();
+      SqlNode expr = let.getExpression().accept(this, null);
+      if (!evalAliases.isEmpty()) {
+        expr = expr.accept(new org.apache.calcite.sql.util.SqlShuttle() {
+          @Override
+          public SqlNode visit(org.apache.calcite.sql.SqlIdentifier id) {
+            if (id.isSimple() && evalAliases.containsKey(id.getSimple())) {
+              return evalAliases.get(id.getSimple());
+            }
+            return id;
+          }
+        });
+      }
+      evalAliases.put(varName, expr);
+      items.add(as(expr, varName));
+    }
+    pipe = select(items.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
     return pipe;
   }
 

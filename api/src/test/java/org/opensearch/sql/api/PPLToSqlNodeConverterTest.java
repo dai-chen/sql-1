@@ -171,4 +171,28 @@ public class PPLToSqlNodeConverterTest {
     assertTrue(sql, sql.contains("FLOOR"));
     assertTrue(sql, sql.contains("GROUP BY"));
   }
+
+  // -- US-006: Eval command tests --
+
+  @Test
+  public void testEvalSimple() {
+    String sql = convert("source=t | eval x = a + 1");
+    assertTrue(sql, sql.contains("+"));
+    assertTrue(sql, sql.contains("\"x\""));
+  }
+
+  @Test
+  public void testEvalForwardReference() {
+    String sql = convert("source=t | eval x = a + 1, y = x * 2");
+    assertTrue(sql, sql.contains("\"x\""));
+    assertTrue(sql, sql.contains("\"y\""));
+    assertTrue(sql, sql.contains("*"));
+  }
+
+  @Test
+  public void testEvalSelfReference() {
+    String sql = convert("source=t | eval a = a + 1");
+    assertTrue(sql, sql.contains("+"));
+    assertTrue(sql, sql.contains("\"a\""));
+  }
 }
