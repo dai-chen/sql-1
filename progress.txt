@@ -4,13 +4,33 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 41.3% (934/2264, 144 skipped)
-- Regressions vs string transpiler baseline: 414 tests (58.5% → 41.3%)
+- Current rate: 52.4% (1187/2264, 144 skipped)
+- Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
 - DSL: SqlNodeDSL utility class for declarative SqlNode construction
 - Type coercion: PPLTypeCoercion (MYSQL_5 conformance + DATE+TIME→TIMESTAMP)
 - Test wiring: PPLIntegTestCase V4 routing via -Dppl.engine.v4=true
+
+### Bin Command Patterns
+- All bin types use subquery approach: SELECT *, binExpr AS _bin_field FROM (subquery)
+- binReplacements map tracks field→expression for downstream pipe resolution
+- SpanBin: numeric → FLOOR(field/span)*span CONCAT range; time → floorToUnit() or epoch bucketing
+- CountBin: POWER(10, CEIL(LOG10(range/bins))) with MIN/MAX OVER() window functions
+- MinSpanBin: magnitude-based width with CASE WHEN >= minspan constraint
+- RangeBin: magnitude-based width with optional start/end range expansion
+- DefaultBin: automatic magnitude-based POWER(10, FLOOR(LOG10(range)))
+- Time-based bin results must be CAST to VARCHAR (tests expect string type)
+- floorToUnit() helper: SqlStdOperatorTable.FLOOR + SqlIntervalQualifier for FLOOR(field TO HOUR) syntax
+
+### Chart/Timechart Patterns
+- Chart and timechart share the same Chart AST node — single visitChart handles both
+- Chart = aggregation + optional column split: SELECT rowSplit, colSplit, AGG() GROUP BY rowSplit, colSplit
+- Chart.transformPerFunction() rewrites per_* functions at AST level before converter sees them
+- Null row splits always filtered (WHERE rowSplit IS NOT NULL)
+- Column splits cast to VARCHAR for nullstr/otherstr compatibility
+- usenull=true (default): COALESCE(CAST(colSplit AS VARCHAR), nullstr)
+- Chart limit/useother requires ROW_NUMBER ranking + secondary aggregation (not yet implemented)
 
 ## Codebase Patterns
 
@@ -188,4 +208,42 @@ The string-based PPLToSqlTranspiler (58.5%, 1324/2264) was replaced with a SqlNo
   - Now-like SQL keywords (CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME) produce epoch-based internal representations in Calcite that don't serialize properly to JSON. Always generate UTC string literals instead.
   - `SqlBasicCall.getOperandList()` not `getOperands()` in this Calcite version.
   - `isAlreadyCastToTime` helper: check if SqlNode is CAST(... AS TIME) by inspecting operator and type spec toString.
+---
+
+## 2026-03-11T23:27 - V4-004: Fix bin/chart/timechart commands
+- **What was fixed**: 253 new tests passing across multiple classes
+  - **SpanBin FLOOR syntax**: Created `floorToUnit()` helper using `SqlStdOperatorTable.FLOOR` with `SqlIntervalQualifier` to generate `FLOOR(field TO HOUR)` instead of `FLOOR(field, "HOUR")`. Fixed all 3 FLOOR calls in `transpileSpanToSqlNode`.
+  - **SpanBin subquery approach**: Unified all bin types to use subquery approach (`SELECT *, binExpr AS _bin_field FROM subquery`) instead of inline replacement. Fixes duplicate column issue when bin alias matches field name.
+  - **SpanBin time-based VARCHAR casting**: Time-based bin results now cast to VARCHAR for string output (tests expect string type, not timestamp).
+  - **Multi-month span**: Added proper YYYYMM month arithmetic for `isMonth && value > 1` case (e.g., `span=4mon`).
+  - **CountBin**: Implemented nice-number width algorithm using `POWER(10, CEIL(LOG10(range/bins)))` with window functions `MIN/MAX OVER()`.
+  - **MinSpanBin**: Implemented magnitude-based width with `CASE WHEN` for minimum span constraint.
+  - **RangeBin**: Implemented magnitude-based width with optional start/end range expansion.
+  - **DefaultBin**: Implemented automatic magnitude-based binning.
+  - **visitChart**: Implemented for both chart and timechart commands. Handles rowSplit, columnSplit, aggregation, GROUP BY, null row split filtering, column split VARCHAR casting, COALESCE with nullstr for null column splits.
+  - **TIMESTAMPDIFF/TIMESTAMPADD fix**: Cast epoch string to TIMESTAMP type for multi-unit time spans.
+- **Pass rate change**: 41.3% (934/2264) → 52.4% (1187/2264) = +11.1pp, +253 tests
+- **Per-class results**:
+  - CalciteBinCommandIT: 1→32 pass (70 total, 27 skipped, 11 fail)
+  - CalciteChartCommandIT: 0→6 pass (15 total, 9 fail)
+  - CalciteTimechartCommandIT: 0→10 pass (18 total, 8 fail)
+  - CalciteTimechartPerFunctionIT: 0→0 pass (12 total, 12 fail — per functions need eval column override fix)
+  - CalcitePPLAggregationIT: 85→87 pass (bonus from FLOOR fix)
+  - CalcitePPLAggregationPaginatingIT: 85→87 pass (bonus)
+  - CalciteStatsCommandIT: 60→60 pass (no change)
+  - CalciteDateTimeComparisonIT: 191→191 pass (no regression) ✅
+- **Remaining failures**:
+  - Bin: aligntime not implemented, CountBin LOG10(0) edge case, error message format, nested field without explicit projection
+  - Chart: limit/useother/otherstr not implemented (complex ROW_NUMBER ranking), FLOOR TO WEEK off-by-one, timestamp nanosecond parsing
+  - TimechartPerFunction: per functions produce extra column (eval column override issue in DynamicPPLToSqlNodeConverter)
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+250/-28 lines)
+- **Learnings for future iterations:**
+  - `FLOOR(field TO HOUR)` requires SqlStdOperatorTable.FLOOR with SqlIntervalQualifier, not `call("FLOOR", field, identifier("HOUR"))` which generates `FLOOR(field, "HOUR")` with quoted identifier
+  - All bin types should use subquery approach to avoid column ambiguity with SELECT *
+  - Time-based bin results must be cast to VARCHAR — tests expect string type
+  - Chart and timechart share the same Chart AST node — a single visitChart handles both
+  - Chart.transformPerFunction() rewrites per_* functions at AST level before converter sees them
+  - Chart limit/useother requires ROW_NUMBER window ranking + secondary aggregation — complex feature for future iteration
+  - CountBin/MinSpanBin/RangeBin use window functions (MIN/MAX OVER()) which can't be inlined into expressions — must use subquery wrapping
+  - The `binReplacements` map tracks field-to-expression mappings for downstream pipe stages to resolve bin aliases
 ---

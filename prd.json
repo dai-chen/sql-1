@@ -39,8 +39,8 @@
       "description": "Fix CalciteBinCommandIT (42), CalciteChartCommandIT (15), CalciteTimechartCommandIT (18), CalciteTimechartPerFunctionIT (12)",
       "acceptanceCriteria": ["Bin and chart failures reduced significantly", "Build passes", "Unit tests pass"],
       "priority": 4,
-      "passes": false,
-      "notes": "87 failures total. Chart/timechart may need new visitor methods."
+      "passes": true,
+      "notes": "253 new tests passing. Rate: 41.3%→52.4%. CalciteBinCommandIT: 1→32 pass (11 fail, 27 skip). CalciteChartCommandIT: 0→6 pass (9 fail). CalciteTimechartCommandIT: 0→10 pass (8 fail). CalciteTimechartPerFunctionIT: 0→0 (per functions need eval override). Fixes: FLOOR syntax (SqlIntervalQualifier), CountBin/MinSpanBin/RangeBin/DefaultBin, visitChart, null handling, VARCHAR casting. Remaining: chart limit/useother, aligntime, per functions."
     },
     {
       "id": "V4-005",
