@@ -221,8 +221,8 @@
         "Build passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Replaced PPLToSqlTranspiler.transpile() with DynamicPPLToSqlNodeConverter pipeline in PPLIntegTestCase V4 routing. Added lazy SchemaPlus backed by OpenSearchIndex tables (same pattern as UnifiedQueryOpenSearchIT). transpileV4() pipeline: parse → convert → toSqlString. Build passes for both :api and :integ-test modules."
     },
     {
       "id": "US-013",

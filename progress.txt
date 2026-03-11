@@ -230,3 +230,22 @@
   - For non-wildcard renames and non-exclude projects, delegate to super to avoid code duplication
   - convertSubPlan override is critical — without it, subqueries in append/join/subquery expressions would use base PPLToSqlNodeConverter without schema access
 ---
+
+## [2026-03-11T02:05Z] - US-012: Wire converter into PPLIntegTestCase V4 routing
+- Replaced PPLToSqlTranspiler.transpile() with DynamicPPLToSqlNodeConverter pipeline in PPLIntegTestCase V4 routing
+- Added transpileV4(String ppl) method: PPLToSqlNodeConverter.parse(ppl) → DynamicPPLToSqlNodeConverter.convert(plan) → sqlNode.toSqlString(CalciteSqlDialect.DEFAULT).getSql()
+- Added lazy SchemaPlus initialization via getV4Schema(): AbstractSchema backed by OpenSearchIndex tables (same pattern as UnifiedQueryOpenSearchIT.createOpenSearchSchema())
+- Added V4_SETTINGS: minimal Settings implementation returning null for all keys (sufficient for OpenSearchIndex schema resolution)
+- Replaced two PPLToSqlTranspiler.transpile(query) calls with transpileV4(query) in executeQuery() and executeQueryToString()
+- Build: :api:compileJava, :api:compileTestJava, :integ-test:compileTestJava all pass
+- Tests: :api:test all 108 tests pass
+- Files changed: integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (+66 lines, -2 lines)
+- Commit: 2785c09b0 `feat: [US-012] Wire converter into PPLIntegTestCase V4 routing`
+- **Learnings for future iterations:**
+  - SchemaPlus for V4 test path follows same pattern as UnifiedQueryOpenSearchIT: AbstractSchema with lazy-loading HashMap that creates OpenSearchIndex on first access
+  - OpenSearchIndex constructor needs (OpenSearchClient, Settings, String indexName) — Settings can be minimal (return null for all keys) since it's only stored, not actively used during schema resolution
+  - The v4Schema field is instance-level (not static) because client() is instance-specific in OpenSearch REST test framework
+  - SchemaPlus is wrapped: createRootSchema → add("default", osSchema) → getSubSchema("default") so table lookups work directly
+  - End-to-end verification requires a running OpenSearch cluster (integ-test:integTest) — unit build verification is sufficient for this story
+  - The EXPLAIN query handling in executeQueryToString() is unchanged — it still routes through the PPL explain endpoint
+---
