@@ -237,7 +237,7 @@
       ],
       "priority": 13,
       "passes": false,
-      "notes": "This is the final gate. The Ralph loop iterates on this story until zero regressions."
+      "notes": "Iteration 1: Fixed JSON escaping (newlines in SQL), function quoting (SqlBasicFunction vs SqlUnresolvedFunction), deferred ORDER BY/LIMIT, BigDecimal literals, date/time/timestamp→CAST, EXTRACT-based datetime functions, PPL-specific aggregates (first/last/earliest/latest/take/median/percentile/var/stddev), ilike operator. Results: 934/2264 passed (41.3%), 414 regressions remaining. Major remaining categories: CalciteDateTimeComparisonIT (72 - type coercion), CalcitePPLAggregationIT (56 - stats/agg), CalcitePPLBuiltinFunctionsNullIT (44 - null handling), CalciteDateTimeFunctionIT (18 - more datetime funcs), CalciteBinCommandIT (25 - bin/span), CalcitePPLJoinIT (18 - join issues)."
     }
   ]
 }

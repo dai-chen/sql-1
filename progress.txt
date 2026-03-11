@@ -249,3 +249,58 @@
   - End-to-end verification requires a running OpenSearch cluster (integ-test:integTest) — unit build verification is sufficient for this story
   - The EXPLAIN query handling in executeQueryToString() is unchanged — it still routes through the PPL explain endpoint
 ---
+
+## [2026-03-11T02:18Z] - US-013: Regression comparison (Iteration 1)
+- Ran full V4 integration test suite via scripts/ppl_it_rate.sh
+- Initial result: 197/2264 passed (8.7%) — massive regression from baseline 58.5%
+- Root cause analysis identified 5 major issues:
+
+### Fixes Applied:
+1. **JSON escaping** (PPLIntegTestCase.java): Replaced String.format with JSONObject.put() for SQL body construction. Calcite's toSqlString() produces multi-line SQL with newlines that broke JSON.
+2. **Function quoting** (SqlNodeDSL.java): Changed call()/agg() from SqlUnresolvedFunction(SqlIdentifier) to SqlBasicFunction.create(). SqlUnresolvedFunction quoted function names as identifiers ("CONCAT"() instead of CONCAT()), causing "Failed to plan query" errors.
+3. **Deferred ORDER BY** (PPLToSqlNodeConverter.java): Added pendingOrderBy/pendingFetch/pendingOffset fields. visitSort stores ORDER BY items instead of building immediately. visitHead stores LIMIT. convert() applies both at outermost level via SqlOrderBy. Fixes ORDER BY being lost in subqueries.
+4. **Datetime functions** (PPLToSqlNodeConverter.java): Added date/time/timestamp/datetime → CAST expressions. Added EXTRACT-based functions (year, month, day, hour, minute, second, quarter, week, and aliases like hour_of_day, minute_of_hour, etc.) with CAST to INTEGER for type compatibility.
+5. **PPL-specific aggregates** (PPLToSqlNodeConverter.java): first→PPL_FIRST, last→PPL_LAST, earliest→ARG_MIN(@timestamp), latest→ARG_MAX(@timestamp), take(field,n)→TAKE(field,n), median→percentile_approx(field,50), percentile→percentile_approx, var_samp/var_pop/stddev_samp/stddev_pop with CAST to DOUBLE.
+6. **Other fixes**: BigDecimal/Short/Byte literal support, ilike→LOWER(left) LIKE LOWER(right)
+
+### Results:
+- After fixes: 934/2264 passed (41.3%), 414 regressions vs baseline
+- Baseline: 1325/2264 passed (58.5%), 795 failures
+- 23 tests newly fixed (passed with new converter but failed with string transpiler)
+
+### Remaining Regressions by Category:
+- 500 IllegalStateException "Failed to plan query": ~350 (unrecognized functions, complex SQL patterns)
+- Assertion mismatches (type/value): ~50 (type coercion, datetime comparison semantics)
+- Other: ~14
+
+### Remaining Regressions by Class (top 10):
+- CalciteDateTimeComparisonIT: 72 (TIME+DATE type coercion not handled by SQL endpoint)
+- CalcitePPLAggregationIT: 56 (stats command issues, missing GROUP BY FROM clause)
+- CalcitePPLAggregationPaginatingIT: 56 (same as above, paginating variant)
+- CalcitePPLBuiltinFunctionsNullIT: 44 (null handling in functions)
+- CalciteDateTimeFunctionIT: 18 (remaining datetime functions not yet ported)
+- CalciteBinCommandIT: 25 (bin/span time bucketing)
+- CalciteStatsCommandIT: 23 (stats command edge cases)
+- CalcitePPLJoinIT: 18 (join issues)
+- CalcitePPLBasicIT: 14 (basic command issues)
+- CalciteReplaceCommandIT: 14 (replace command)
+
+### Files Changed:
+- api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+174 lines)
+- api/src/main/java/org/opensearch/sql/calcite/utils/SqlNodeDSL.java (+30 lines, -26 lines)
+- integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (+6 lines, -6 lines)
+- docs/dev/current-sqlnode-converter-failures.txt (new)
+- docs/dev/regressions-vs-baseline.txt (new)
+
+### Commit: 61e950272
+
+### Learnings for future iterations:
+- Calcite's toSqlString() always produces multi-line SQL — any JSON construction must handle newlines
+- SqlUnresolvedFunction quotes function names via SqlIdentifier — use SqlBasicFunction.create() for unquoted names
+- ORDER BY in subqueries is semantically ignored in SQL — must defer to outermost query level
+- PPL datetime functions (year, month, day, etc.) return BIGINT in SQL but PPL expects INT — need CAST to INTEGER
+- PPL-specific aggregates (first, last, take, earliest, latest) map to custom UDFs (PPL_FIRST, PPL_LAST, TAKE, ARG_MIN, ARG_MAX)
+- The string transpiler (PPLToSqlTranspiler.java) has ~100 lines of datetime function handling that needs to be ported to SqlNode form
+- Type coercion for TIME+DATE comparisons requires explicit CAST to TIMESTAMP on both sides — the SQL endpoint doesn't do this automatically
+- The remaining 414 regressions require porting many more function-specific handlers from the string transpiler
+---
