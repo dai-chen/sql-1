@@ -162,3 +162,30 @@ The string-based PPLToSqlTranspiler (58.5%, 1324/2264) was replaced with a SqlNo
   - buildWindowAggSql (eventstats/streamstats) has the same AVG issue — only casts input, not output. Fix in future iteration.
   - The `distinct()` method in SqlNodeDSL uses `AS` operator which is wrong for aggregate DISTINCT. Don't use it for COUNT DISTINCT.
 ---
+
+## 2026-03-11T20:20 - V4-003: Fix datetime and now-like function regressions
+- **What was fixed**: 22 regressions across 3 test classes
+  - **~30 missing datetime functions added**: date_add, date_sub, adddate, subdate, datediff, timestampdiff, timestampadd, dayname, monthname, weekday, yearweek, unix_timestamp, from_unixtime, to_days, from_days, to_seconds, last_day, time_to_sec, sec_to_time, timediff, makedate, maketime, addtime, subtime, convert_tz, date_format, str_to_date, period_add, period_diff, extract, microsecond, get_format, strftime
+  - **Now-like functions fixed**: now, curdate, curtime, current_date, current_time, current_timestamp, localtime, localtimestamp, sysdate, utc_date, utc_time, utc_timestamp — generate UTC string literals at transpile time instead of SQL keywords (CURRENT_TIMESTAMP etc.) that Calcite serialized as epoch-based numbers (year 56194237)
+  - **castExtract fixed**: Preserves CAST-to-TIME args for hour/minute/second on time values, while still casting raw strings to TIMESTAMP
+  - **period_add/period_diff**: Proper YYYYMM month arithmetic (not simple addition/subtraction)
+  - **datediff**: Cast args to DATE first (ignore time component)
+  - **dayname/monthname**: CASE WHEN mapping to full names (engine returns abbreviated)
+  - **makedate**: ROUND day parameter (not truncate)
+  - **from_unixtime with format**: Return VARCHAR type
+  - **adddate/subdate with plain days**: Return DATE type
+- **Regressions fixed**: 22 of 31 in scope
+  - CalciteNowLikeFunctionIT: 12→0 failures (12 fixed) ✅
+  - CalciteDateTimeFunctionIT: 52→39 failures (13 fixed, 8 were regressions)
+  - CalciteConvertTZFunctionIT: 14→12 failures (2 fixed, both regressions)
+- **Remaining 9 regressions**: All are engine-level TIME handling bugs — `CAST('17:30:00' AS TIME)` passes Calcite validation but fails at runtime with `Invalid DATE value, '17:30:00'` in `DateTimeUtils.timestampStringToUnixDate`. Affects: testHour, testMinute, testSecond, testHour_of_day, testMinute_of_hour, testSecond_of_minute, testMinute_of_day, testTimeToSec, testExtract (all have time-only string args)
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+314 lines)
+- **Learnings for future iterations:**
+  - Calcite's SqlNode-to-RelNode compilation path handles CAST('time_string' AS TIME) differently than the SQL string parsing path. The string transpiler's SQL worked because the engine's SQL parser handles TIME literals correctly, but the SqlNode path's runtime compilation fails with `Invalid DATE value`.
+  - DAYNAME/MONTHNAME in Calcite return abbreviated names (Wed, Sep) not full names (Wednesday, September). Use CASE WHEN with DAYOFWEEK/EXTRACT(MONTH) for full names.
+  - PERIOD_ADD/PERIOD_DIFF need YYYYMM-aware month arithmetic: decompose to year*12+month, add/subtract, reconstruct.
+  - DATEDIFF should cast to DATE first — TIMESTAMPDIFF(DAY) on timestamps includes time component.
+  - Now-like SQL keywords (CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME) produce epoch-based internal representations in Calcite that don't serialize properly to JSON. Always generate UTC string literals instead.
+  - `SqlBasicCall.getOperandList()` not `getOperands()` in this Calcite version.
+  - `isAlreadyCastToTime` helper: check if SqlNode is CAST(... AS TIME) by inspecting operator and type spec toString.
+---
