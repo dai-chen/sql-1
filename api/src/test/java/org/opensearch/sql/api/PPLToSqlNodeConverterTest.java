@@ -220,4 +220,46 @@ public class PPLToSqlNodeConverterTest {
     assertTrue(sql, sql.contains("_global_rn"));
     assertTrue(sql, sql.contains("_group_rn"));
   }
+
+  // -- Join command tests --
+
+  @Test
+  public void testJoinInner() {
+    String sql = convert("source=t1 | JOIN left=l, right=r ON l.id = r.id t2");
+    assertTrue("Should contain JOIN: " + sql, sql.toUpperCase().contains("JOIN"));
+    assertTrue("Should contain ON: " + sql, sql.toUpperCase().contains("ON"));
+  }
+
+  @Test
+  public void testJoinLeft() {
+    String sql = convert("source=t1 | LEFT JOIN left=l, right=r ON l.id = r.id t2");
+    assertTrue("Should contain LEFT: " + sql, sql.toUpperCase().contains("LEFT"));
+  }
+
+  @Test
+  public void testJoinSemi() {
+    String sql = convert("source=t1 | SEMI JOIN left=l, right=r ON l.id = r.id t2");
+    assertTrue("Should contain EXISTS: " + sql, sql.toUpperCase().contains("EXISTS"));
+  }
+
+  @Test
+  public void testJoinAnti() {
+    String sql = convert("source=t1 | ANTI JOIN left=l, right=r ON l.id = r.id t2");
+    assertTrue("Should contain NOT EXISTS: " + sql, sql.toUpperCase().contains("NOT EXISTS"));
+  }
+
+  // -- Lookup command tests --
+
+  @Test
+  public void testLookup() {
+    String sql = convert("source=t1 | lookup t2 id");
+    assertTrue("Should contain LEFT JOIN: " + sql, sql.toUpperCase().contains("LEFT"));
+    assertTrue("Should contain JOIN: " + sql, sql.toUpperCase().contains("JOIN"));
+  }
+
+  @Test
+  public void testLookupWithOutput() {
+    String sql = convert("source=t1 | lookup t2 id AS id replace salary");
+    assertTrue("Should contain LEFT JOIN: " + sql, sql.toUpperCase().contains("LEFT"));
+  }
 }

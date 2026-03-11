@@ -17,7 +17,9 @@ import org.antlr.v4.runtime.tree.ParseTree;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlIntervalQualifier;
+import org.apache.calcite.sql.JoinType;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
@@ -61,9 +63,12 @@ import org.opensearch.sql.ast.tree.Dedupe;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.Filter;
 import org.opensearch.sql.ast.tree.Head;
+import org.opensearch.sql.ast.tree.Join;
+import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Sort;
+import org.opensearch.sql.ast.tree.SubqueryAlias;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.utils.SqlNodeDSL;
 import org.opensearch.sql.common.setting.Settings;
@@ -462,6 +467,139 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       pipe = select(star()).from(wrapAsSubquery()).build();
     }
     return pipe;
+  }
+
+  // -- Join & Lookup visitors --
+
+  @Override
+  public SqlNode visitJoin(Join node, Void ctx) {
+    String leftAlias = node.getLeftAlias().orElse(null);
+    SqlNode leftSide = leftAlias != null ? subquery(pipe, leftAlias) : wrapAsSubquery();
+
+    SqlNode rightSide = resolveJoinRight(node.getRight(), node.getRightAlias().orElse(null));
+
+    SqlNode condition = null;
+    if (node.getJoinCondition().isPresent()) {
+      condition = node.getJoinCondition().get().accept(this, null);
+    } else if (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
+      condition = buildFieldListCondition(node.getJoinFields().get(),
+          node.getLeftAlias().orElse(null), node.getRightAlias().orElse(null));
+    }
+
+    Join.JoinType jt = node.getJoinType();
+
+    if (jt == Join.JoinType.SEMI || jt == Join.JoinType.ANTI) {
+      SqlNode subSelect = condition != null
+          ? select(literal(1)).from(rightSide).where(condition).build()
+          : select(literal(1)).from(rightSide).build();
+      SqlNode existsExpr = jt == Join.JoinType.SEMI ? exists(subSelect) : not(exists(subSelect));
+      pipe = select(star()).from(leftSide).where(existsExpr).build();
+      return pipe;
+    }
+
+    JoinType calciteJoinType;
+    switch (jt) {
+      case LEFT: calciteJoinType = JoinType.LEFT; break;
+      case RIGHT: calciteJoinType = JoinType.RIGHT; break;
+      case FULL: calciteJoinType = JoinType.FULL; break;
+      case CROSS: calciteJoinType = condition != null ? JoinType.INNER : JoinType.CROSS; break;
+      default: calciteJoinType = condition != null ? JoinType.INNER : JoinType.CROSS; break;
+    }
+
+    pipe = select(star()).from(SqlNodeDSL.join(leftSide, calciteJoinType, rightSide, condition)).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitLookup(Lookup node, Void ctx) {
+    String leftAlias = "_l";
+    String rightAlias = "_r";
+    SqlNode leftSide = subquery(pipe, leftAlias);
+
+    Relation lookupRel = extractRelation(node.getLookupRelation());
+    String lookupTable = lookupRel != null
+        ? lookupRel.getTableQualifiedName().toString()
+        : node.getLookupRelation().toString();
+    SqlNode rightSide = subquery(
+        select(star()).from(table(lookupTable)).build(), rightAlias);
+
+    SqlNode onCondition = null;
+    for (Map.Entry<String, String> e : node.getMappingAliasMap().entrySet()) {
+      SqlNode cond = eq(
+          identifier(leftAlias, e.getValue()),
+          identifier(rightAlias, e.getKey()));
+      onCondition = onCondition == null ? cond : and(onCondition, cond);
+    }
+
+    SqlNode joinNode = SqlNodeDSL.join(leftSide, JoinType.LEFT, rightSide, onCondition);
+
+    Map<String, String> outputMap = node.getOutputAliasMap();
+    boolean isReplace = node.getOutputStrategy() == Lookup.OutputStrategy.REPLACE;
+
+    if (outputMap.isEmpty()) {
+      pipe = select(star()).from(joinNode).build();
+    } else {
+      List<SqlNode> selectItems = new ArrayList<>();
+      selectItems.add(new SqlIdentifier(java.util.Arrays.asList(leftAlias, ""), POS));
+      for (Map.Entry<String, String> e : outputMap.entrySet()) {
+        SqlNode rRef = identifier(rightAlias, e.getKey());
+        if (isReplace) {
+          selectItems.add(as(rRef, e.getValue()));
+        } else {
+          selectItems.add(as(call("COALESCE", identifier(leftAlias, e.getValue()), rRef), e.getValue()));
+        }
+      }
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
+    }
+    return pipe;
+  }
+
+  private SqlNode resolveJoinRight(UnresolvedPlan plan, String alias) {
+    if (plan instanceof SubqueryAlias) {
+      SubqueryAlias sa = (SubqueryAlias) plan;
+      String saAlias = alias != null ? alias : sa.getAlias();
+      UnresolvedPlan child = (UnresolvedPlan) sa.getChild().get(0);
+      Relation rel = extractRelation(child);
+      if (rel != null) {
+        return subquery(select(star()).from(table(rel.getTableQualifiedName().toString())).build(), saAlias);
+      }
+      return subquery(convertSubPlan(child), saAlias);
+    }
+    Relation rel = extractRelation(plan);
+    if (rel != null) {
+      String tableName = rel.getTableQualifiedName().toString();
+      return alias != null
+          ? subquery(select(star()).from(table(tableName)).build(), alias)
+          : table(tableName);
+    }
+    SqlNode subSql = convertSubPlan(plan);
+    return alias != null ? subquery(subSql, alias) : subquery(subSql, nextAlias());
+  }
+
+  private static Relation extractRelation(UnresolvedPlan plan) {
+    if (plan instanceof Relation) return (Relation) plan;
+    if (plan instanceof Project) {
+      Project proj = (Project) plan;
+      if (proj.getProjectList().size() == 1
+          && proj.getProjectList().get(0) instanceof AllFields
+          && !proj.getChild().isEmpty()) {
+        UnresolvedPlan child = (UnresolvedPlan) proj.getChild().get(0);
+        if (child instanceof Relation) return (Relation) child;
+      }
+    }
+    return null;
+  }
+
+  private SqlNode buildFieldListCondition(List<Field> fields, String leftAlias, String rightAlias) {
+    SqlNode result = null;
+    for (Field f : fields) {
+      String fname = f.getField().toString();
+      SqlNode lRef = leftAlias != null ? identifier(leftAlias, fname) : identifier(fname);
+      SqlNode rRef = rightAlias != null ? identifier(rightAlias, fname) : identifier(fname);
+      SqlNode cond = eq(lRef, rRef);
+      result = result == null ? cond : and(result, cond);
+    }
+    return result;
   }
 
   // -- Expression visitors --

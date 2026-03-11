@@ -10,6 +10,9 @@ import java.util.List;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.SqlDataTypeSpec;
+import org.apache.calcite.sql.JoinConditionType;
+import org.apache.calcite.sql.JoinType;
+import org.apache.calcite.sql.SqlJoin;
 import org.apache.calcite.sql.SqlFunctionCategory;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlLiteral;
@@ -311,6 +314,17 @@ public final class SqlNodeDSL {
             null,
             POS);
     return new SqlBasicCall(SqlStdOperatorTable.OVER, new SqlNode[] {agg, win}, POS);
+  }
+
+  // ---- Join helper ----
+
+  public static SqlNode join(SqlNode left, JoinType joinType, SqlNode right, SqlNode condition) {
+    return new SqlJoin(POS, left,
+        SqlLiteral.createBoolean(false, POS),
+        joinType.symbol(POS),
+        right,
+        condition != null ? JoinConditionType.ON.symbol(POS) : JoinConditionType.NONE.symbol(POS),
+        condition);
   }
 
   // ---- Null checks ----
