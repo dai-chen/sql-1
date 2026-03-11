@@ -7,6 +7,9 @@ package org.opensearch.sql.api;
 
 import static org.opensearch.sql.calcite.utils.SqlNodeDSL.*;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -1130,7 +1133,15 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     if (args.isEmpty()) {
-      return SQL_DATETIME_KEYWORDS.contains(sqlName) ? identifier(sqlName) : call(sqlName);
+      // Now-like datetime functions: generate UTC literals at transpile time
+      LocalDateTime utcNow = LocalDateTime.now(ZoneOffset.UTC);
+      if (Set.of("now", "current_timestamp", "localtimestamp", "localtime", "utc_timestamp", "sysdate").contains(name))
+        return literal(utcNow.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+      if (Set.of("curdate", "current_date", "utc_date").contains(name))
+        return literal(utcNow.toLocalDate().toString());
+      if (Set.of("curtime", "current_time", "utc_time").contains(name))
+        return literal(utcNow.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
+      return call(sqlName);
     }
     SqlNode[] sqlArgs = args.stream().map(a -> a.accept(this, null)).toArray(SqlNode[]::new);
     return call(sqlName, sqlArgs);
@@ -1431,9 +1442,279 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), ts}, POS);
       return cast(plus(times(hours, intLiteral(60)), minutes), typeSpec(SqlTypeName.INTEGER));
     }
+    if ("microsecond".equals(name) && args.size() == 1)
+      return castExtract("MICROSECOND", args.get(0));
+    // date_add / adddate
+    if ("date_add".equals(name) || "adddate".equals(name)) {
+      SqlNode dateArg = ensureTimestamp(args.get(0));
+      SqlNode intervalArg = args.get(1);
+      if (intervalArg instanceof SqlBasicCall && ((SqlBasicCall) intervalArg).getOperator().getName().startsWith("INTERVAL_")) {
+        String unit = ((SqlBasicCall) intervalArg).getOperator().getName().substring(9);
+        SqlNode value = ((SqlBasicCall) intervalArg).operand(0);
+        return cast(call("TIMESTAMPADD", identifier(unit), value, dateArg), typeSpec(SqlTypeName.TIMESTAMP));
+      }
+      // Plain days → return DATE
+      return cast(call("TIMESTAMPADD", identifier("DAY"), intervalArg, dateArg), typeSpec(SqlTypeName.DATE));
+    }
+    // date_sub / subdate
+    if ("date_sub".equals(name) || "subdate".equals(name)) {
+      SqlNode dateArg = ensureTimestamp(args.get(0));
+      SqlNode intervalArg = args.get(1);
+      if (intervalArg instanceof SqlBasicCall && ((SqlBasicCall) intervalArg).getOperator().getName().startsWith("INTERVAL_")) {
+        String unit = ((SqlBasicCall) intervalArg).getOperator().getName().substring(9);
+        SqlNode value = ((SqlBasicCall) intervalArg).operand(0);
+        return cast(call("TIMESTAMPADD", identifier(unit), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{value}, POS), dateArg), typeSpec(SqlTypeName.TIMESTAMP));
+      }
+      // Plain days → return DATE
+      return cast(call("TIMESTAMPADD", identifier("DAY"), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{intervalArg}, POS), dateArg), typeSpec(SqlTypeName.DATE));
+    }
+    // datediff
+    if ("datediff".equals(name))
+      return cast(call("TIMESTAMPDIFF", identifier("DAY"), cast(args.get(1), typeSpec(SqlTypeName.DATE)), cast(args.get(0), typeSpec(SqlTypeName.DATE))), typeSpec(SqlTypeName.BIGINT));
+    // timestampdiff
+    if ("timestampdiff".equals(name)) {
+      SqlNode unit = args.get(0);
+      String unitStr = (unit instanceof SqlLiteral) ? ((SqlLiteral) unit).toValue().replace("'", "") : unit.toString().replace("'", "").replace("`", "");
+      return cast(call("TIMESTAMPDIFF", identifier(unitStr), ensureTimestamp(args.get(1)), ensureTimestamp(args.get(2))), typeSpec(SqlTypeName.BIGINT));
+    }
+    // timestampadd
+    if ("timestampadd".equals(name)) {
+      SqlNode unit = args.get(0);
+      String unitStr = (unit instanceof SqlLiteral) ? ((SqlLiteral) unit).toValue().replace("'", "") : unit.toString().replace("'", "").replace("`", "");
+      return cast(call("TIMESTAMPADD", identifier(unitStr), args.get(1), ensureTimestamp(args.get(2))), typeSpec(SqlTypeName.TIMESTAMP));
+    }
+    // dayname / monthname
+    if ("dayname".equals(name)) {
+      SqlNode ts = ensureTimestamp(args.get(0));
+      SqlNode dow = call("DAYOFWEEK", ts);
+      return caseWhen(
+          List.of(eq(dow, intLiteral(1)), eq(dow, intLiteral(2)), eq(dow, intLiteral(3)),
+                  eq(dow, intLiteral(4)), eq(dow, intLiteral(5)), eq(dow, intLiteral(6)),
+                  eq(dow, intLiteral(7))),
+          List.of(literal("Sunday"), literal("Monday"), literal("Tuesday"),
+                  literal("Wednesday"), literal("Thursday"), literal("Friday"),
+                  literal("Saturday")),
+          cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR)));
+    }
+    if ("monthname".equals(name)) {
+      SqlNode ts = ensureTimestamp(args.get(0));
+      SqlNode mo = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MONTH, null, POS), ts}, POS);
+      return caseWhen(
+          List.of(eq(mo, intLiteral(1)), eq(mo, intLiteral(2)), eq(mo, intLiteral(3)),
+                  eq(mo, intLiteral(4)), eq(mo, intLiteral(5)), eq(mo, intLiteral(6)),
+                  eq(mo, intLiteral(7)), eq(mo, intLiteral(8)), eq(mo, intLiteral(9)),
+                  eq(mo, intLiteral(10)), eq(mo, intLiteral(11)), eq(mo, intLiteral(12))),
+          List.of(literal("January"), literal("February"), literal("March"),
+                  literal("April"), literal("May"), literal("June"),
+                  literal("July"), literal("August"), literal("September"),
+                  literal("October"), literal("November"), literal("December")),
+          cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR)));
+    }
+    // weekday: 0=Monday...6=Sunday from DAYOFWEEK (1=Sunday...7=Saturday)
+    if ("weekday".equals(name)) {
+      SqlNode ts = ensureTimestamp(args.get(0));
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.INTEGER))),
+          cast(call("MOD", plus(call("DAYOFWEEK", ts), intLiteral(5)), intLiteral(7)), typeSpec(SqlTypeName.INTEGER)));
+    }
+    // yearweek
+    if ("yearweek".equals(name)) {
+      SqlNode ts = ensureTimestamp(args.get(0));
+      SqlNode yearPart = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.YEAR, null, POS), ts}, POS);
+      SqlNode weekPart = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.WEEK, null, POS), ts}, POS);
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.INTEGER))),
+          cast(plus(times(yearPart, intLiteral(100)), weekPart), typeSpec(SqlTypeName.INTEGER)));
+    }
+    // unix_timestamp
+    if ("unix_timestamp".equals(name)) {
+      SqlNode epoch = cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP));
+      if (args.isEmpty())
+        return cast(call("TIMESTAMPDIFF", identifier("SECOND"), epoch, identifier("CURRENT_TIMESTAMP")), typeSpec(SqlTypeName.DOUBLE));
+      return cast(call("TIMESTAMPDIFF", identifier("SECOND"), epoch, cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP))), typeSpec(SqlTypeName.DOUBLE));
+    }
+    // from_unixtime
+    if ("from_unixtime".equals(name)) {
+      SqlNode epoch = cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlNode result = call("TIMESTAMPADD", identifier("SECOND"), cast(args.get(0), typeSpec(SqlTypeName.INTEGER)), epoch);
+      if (args.size() >= 2) {
+        return cast(result, typeSpec(SqlTypeName.VARCHAR));
+      }
+      return cast(result, typeSpec(SqlTypeName.TIMESTAMP));
+    }
+    // to_days
+    if ("to_days".equals(name)) {
+      SqlNode origin = cast(literal("0001-01-01"), typeSpec(SqlTypeName.DATE));
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.BIGINT))),
+          cast(plus(call("TIMESTAMPDIFF", identifier("DAY"), origin, cast(args.get(0), typeSpec(SqlTypeName.DATE))), intLiteral(366)), typeSpec(SqlTypeName.BIGINT)));
+    }
+    // from_days
+    if ("from_days".equals(name)) {
+      SqlNode origin = cast(literal("0001-01-01"), typeSpec(SqlTypeName.DATE));
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.DATE))),
+          cast(call("TIMESTAMPADD", identifier("DAY"), cast(minus(args.get(0), intLiteral(366)), typeSpec(SqlTypeName.INTEGER)), origin), typeSpec(SqlTypeName.DATE)));
+    }
+    // to_seconds
+    if ("to_seconds".equals(name)) {
+      SqlNode origin = cast(literal("0001-01-01"), typeSpec(SqlTypeName.DATE));
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.BIGINT))),
+          cast(times(plus(call("TIMESTAMPDIFF", identifier("DAY"), origin, cast(args.get(0), typeSpec(SqlTypeName.DATE))), intLiteral(366)), intLiteral(86400)), typeSpec(SqlTypeName.BIGINT)));
+    }
+    // last_day
+    if ("last_day".equals(name))
+      return cast(call("LAST_DAY", ensureTimestamp(args.get(0))), typeSpec(SqlTypeName.DATE));
+    // time_to_sec
+    if ("time_to_sec".equals(name)) {
+      SqlNode ts = ensureTimestamp(args.get(0));
+      SqlNode h = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), ts}, POS);
+      SqlNode m = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), ts}, POS);
+      SqlNode s = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.SECOND, null, POS), ts}, POS);
+      return cast(plus(plus(times(h, intLiteral(3600)), times(m, intLiteral(60))), s), typeSpec(SqlTypeName.BIGINT));
+    }
+    // sec_to_time
+    if ("sec_to_time".equals(name)) {
+      SqlNode epoch = cast(literal("00:00:00"), typeSpec(SqlTypeName.TIME));
+      return cast(call("TIMESTAMPADD", identifier("SECOND"), cast(args.get(0), typeSpec(SqlTypeName.INTEGER)), epoch), typeSpec(SqlTypeName.TIME));
+    }
+    // timediff
+    if ("timediff".equals(name)) {
+      SqlNode epoch = cast(literal("00:00:00"), typeSpec(SqlTypeName.TIME));
+      SqlNode diff = call("TIMESTAMPDIFF", identifier("SECOND"), cast(args.get(1), typeSpec(SqlTypeName.TIMESTAMP)), cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP)));
+      return caseWhen(
+          List.of(or(isNull(args.get(0)), isNull(args.get(1)))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIME))),
+          cast(call("TIMESTAMPADD", identifier("SECOND"), diff, epoch), typeSpec(SqlTypeName.TIME)));
+    }
+    // makedate
+    if ("makedate".equals(name)) {
+      SqlNode yearStart = cast(call("CONCAT", cast(args.get(0), typeSpec(SqlTypeName.VARCHAR)), literal("-01-01")), typeSpec(SqlTypeName.DATE));
+      SqlNode dayNum = cast(call("ROUND", args.get(1)), typeSpec(SqlTypeName.INTEGER));
+      return cast(call("TIMESTAMPADD", identifier("DAY"), cast(minus(dayNum, intLiteral(1)), typeSpec(SqlTypeName.INTEGER)), yearStart), typeSpec(SqlTypeName.DATE));
+    }
+    // maketime
+    if ("maketime".equals(name)) {
+      SqlNode epoch = cast(literal("00:00:00"), typeSpec(SqlTypeName.TIME));
+      SqlNode t1 = call("TIMESTAMPADD", identifier("HOUR"), cast(args.get(0), typeSpec(SqlTypeName.INTEGER)), epoch);
+      SqlNode t2 = call("TIMESTAMPADD", identifier("MINUTE"), cast(args.get(1), typeSpec(SqlTypeName.INTEGER)), t1);
+      return cast(call("TIMESTAMPADD", identifier("SECOND"), cast(args.get(2), typeSpec(SqlTypeName.INTEGER)), t2), typeSpec(SqlTypeName.TIME));
+    }
+    // addtime
+    if ("addtime".equals(name)) {
+      SqlNode ts = cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlNode h = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), args.get(1)}, POS);
+      SqlNode m = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), args.get(1)}, POS);
+      SqlNode s = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.SECOND, null, POS), args.get(1)}, POS);
+      SqlNode totalSec = cast(plus(plus(times(h, intLiteral(3600)), times(m, intLiteral(60))), s), typeSpec(SqlTypeName.INTEGER));
+      return call("TIMESTAMPADD", identifier("SECOND"), totalSec, ts);
+    }
+    // subtime
+    if ("subtime".equals(name)) {
+      SqlNode ts = cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlNode h = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), args.get(1)}, POS);
+      SqlNode m = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), args.get(1)}, POS);
+      SqlNode s = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.SECOND, null, POS), args.get(1)}, POS);
+      SqlNode totalSec = cast(new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{plus(plus(times(h, intLiteral(3600)), times(m, intLiteral(60))), s)}, POS), typeSpec(SqlTypeName.INTEGER));
+      return call("TIMESTAMPADD", identifier("SECOND"), totalSec, ts);
+    }
+    // convert_tz (simplified — timezone conversion not fully supported, pass through)
+    if ("convert_tz".equals(name))
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP))),
+          cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP)));
+    // date_format / time_format (simplified — cast to VARCHAR)
+    if ("date_format".equals(name) || "time_format".equals(name))
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR))),
+          cast(args.get(0), typeSpec(SqlTypeName.VARCHAR)));
+    // str_to_date
+    if ("str_to_date".equals(name))
+      return caseWhen(
+          List.of(isNull(args.get(0))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP))),
+          cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP)));
+    // period_add / period_diff
+    if ("period_add".equals(name)) {
+      SqlNode p = args.get(0);
+      SqlNode n = args.get(1);
+      // totalMonths = (p/100)*12 + (p%100) - 1 + n
+      SqlNode yr = divide(p, intLiteral(100));
+      SqlNode mo = call("MOD", p, intLiteral(100));
+      SqlNode totalMonths = plus(plus(times(yr, intLiteral(12)), mo), minus(n, intLiteral(1)));
+      // result = (totalMonths/12)*100 + (totalMonths%12) + 1
+      SqlNode resYr = divide(totalMonths, intLiteral(12));
+      SqlNode resMo = plus(call("MOD", totalMonths, intLiteral(12)), intLiteral(1));
+      return caseWhen(
+          List.of(or(isNull(p), isNull(n))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.INTEGER))),
+          cast(plus(times(resYr, intLiteral(100)), resMo), typeSpec(SqlTypeName.INTEGER)));
+    }
+    if ("period_diff".equals(name)) {
+      SqlNode p1 = args.get(0);
+      SqlNode p2 = args.get(1);
+      // (p1/100*12 + p1%100) - (p2/100*12 + p2%100)
+      SqlNode m1 = plus(times(divide(p1, intLiteral(100)), intLiteral(12)), call("MOD", p1, intLiteral(100)));
+      SqlNode m2 = plus(times(divide(p2, intLiteral(100)), intLiteral(12)), call("MOD", p2, intLiteral(100)));
+      return caseWhen(
+          List.of(or(isNull(p1), isNull(p2))),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.INTEGER))),
+          cast(minus(m1, m2), typeSpec(SqlTypeName.INTEGER)));
+    }
+    // extract (explicit function form)
+    if ("extract".equals(name) && args.size() == 2) {
+      String part;
+      if (args.get(0) instanceof SqlLiteral) {
+        part = ((SqlLiteral) args.get(0)).toValue().replace("'", "").toUpperCase();
+      } else {
+        part = args.get(0).toString().replace("'", "").replace("`", "").toUpperCase();
+      }
+      SqlNode ts = args.get(1);
+      TimeUnit tu;
+      switch (part) {
+        case "YEAR": tu = TimeUnit.YEAR; break;
+        case "MONTH": tu = TimeUnit.MONTH; break;
+        case "DAY": tu = TimeUnit.DAY; break;
+        case "HOUR": tu = TimeUnit.HOUR; break;
+        case "MINUTE": tu = TimeUnit.MINUTE; break;
+        case "SECOND": tu = TimeUnit.SECOND; break;
+        case "QUARTER": tu = TimeUnit.QUARTER; break;
+        case "WEEK": tu = TimeUnit.WEEK; break;
+        case "MICROSECOND": tu = TimeUnit.MICROSECOND; break;
+        default: tu = TimeUnit.DAY; break;
+      }
+      SqlIntervalQualifier qualifier = new SqlIntervalQualifier(tu, null, POS);
+      SqlNode extractNode = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{qualifier, ts}, POS);
+      return cast(extractNode, typeSpec(SqlTypeName.BIGINT));
+    }
+    // get_format (simplified)
+    if ("get_format".equals(name)) return literal("%Y-%m-%d");
+    // strftime (simplified)
+    if ("strftime".equals(name)) {
+      SqlNode target = args.size() > 1 ? args.get(1) : args.get(0);
+      return caseWhen(
+          List.of(isNull(target)),
+          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR))),
+          cast(target, typeSpec(SqlTypeName.VARCHAR)));
+    }
+    // Now-like datetime functions: generate UTC literals at transpile time
+    LocalDateTime utcNow = LocalDateTime.now(ZoneOffset.UTC);
+    if (Set.of("now", "current_timestamp", "localtimestamp", "localtime", "utc_timestamp", "sysdate").contains(name))
+      return literal(utcNow.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+    if (Set.of("curdate", "current_date", "utc_date").contains(name))
+      return literal(utcNow.toLocalDate().toString());
+    if (Set.of("curtime", "current_time", "utc_time").contains(name))
+      return literal(utcNow.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
-    if (args.isEmpty() && SQL_DATETIME_KEYWORDS.contains(sqlName)) return call(sqlName);
     return call(sqlName, args.toArray(new SqlNode[0]));
   }
 
@@ -1609,9 +1890,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return new SqlDataTypeSpec(new SqlBasicTypeNameSpec(typeName, POS), POS);
   }
 
-  /** CAST(EXTRACT(unit FROM CAST(arg AS TIMESTAMP)) AS INTEGER) */
+  private SqlNode ensureTimestamp(SqlNode node) {
+    if (isAlreadyCastToTime(node)) return node;
+    return cast(node, typeSpec(SqlTypeName.TIMESTAMP));
+  }
+
+  /** CAST(EXTRACT(unit FROM arg) AS INTEGER) */
   private SqlNode castExtract(String unit, SqlNode arg) {
-    SqlNode ts = cast(arg, typeSpec(SqlTypeName.TIMESTAMP));
     TimeUnit tu;
     switch (unit) {
       case "YEAR": tu = TimeUnit.YEAR; break;
@@ -1622,11 +1907,35 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       case "SECOND": tu = TimeUnit.SECOND; break;
       case "QUARTER": tu = TimeUnit.QUARTER; break;
       case "WEEK": tu = TimeUnit.WEEK; break;
+      case "MICROSECOND": tu = TimeUnit.MICROSECOND; break;
       default: tu = TimeUnit.DAY; break;
     }
+    // If arg is already CAST to TIME, leave it (EXTRACT(HOUR FROM TIME) works).
+    // Otherwise cast to TIMESTAMP (needed for raw string literals).
+    SqlNode target;
+    if (isAlreadyCastToTime(arg)) {
+      target = arg;
+    } else {
+      target = cast(arg, typeSpec(SqlTypeName.TIMESTAMP));
+    }
     SqlIntervalQualifier qualifier = new SqlIntervalQualifier(tu, null, POS);
-    SqlNode extract = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{qualifier, ts}, POS);
+    SqlNode extract = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{qualifier, target}, POS);
     return cast(extract, typeSpec(SqlTypeName.INTEGER));
+  }
+
+  /** Check if a SqlNode is CAST(... AS TIME) */
+  private static boolean isAlreadyCastToTime(SqlNode node) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall c = (SqlBasicCall) node;
+      if (c.getOperator() == SqlStdOperatorTable.CAST && c.getOperandList().size() == 2) {
+        SqlNode typeNode = c.getOperandList().get(1);
+        if (typeNode instanceof SqlDataTypeSpec) {
+          String typeName = typeNode.toString().toUpperCase();
+          return typeName.contains("TIME") && !typeName.contains("TIMESTAMP");
+        }
+      }
+    }
+    return false;
   }
 
   @Override
