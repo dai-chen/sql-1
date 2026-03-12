@@ -29,7 +29,7 @@ Test wiring: `PPLIntegTestCase.java` — when `ppl.engine.v4=true`, PPL queries 
 11. Run unit tests: `./gradlew :api:test 2>&1 | tail -30`
 12. Run the specific integration test class(es) again to verify fixes
 13. Run pass rate: `scripts/ppl_it_rate.sh`
-14. If checks pass, commit with: `V4 Iteration N: <task name> — rate X% → Y%`
+14. If checks pass, commit and push: `git add -A && git commit -m "V4 Iteration N: <task name> — rate X% → Y%" && git push`
 15. Update `prd.json` — set `passes: true` for the completed story
 16. Append progress to `progress.txt`
 17. Consolidate reusable patterns into the Codebase Patterns section

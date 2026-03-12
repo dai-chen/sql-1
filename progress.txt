@@ -291,3 +291,19 @@ The string-based PPLToSqlTranspiler (58.5%, 1324/2264) was replaced with a SqlNo
 4. Consider a human intervention to fix the engine-level TIME casting bug before the next round — it's a permanent blocker for ~9 tests and may affect other stories.
 5. Target: reach ~65-70% by end of next round (need ~290-400 more tests passing from current 1187/2264).
 ---
+
+## Human Intervention — Root Cause Analysis (2026-03-11)
+
+### 1. V4 Error Handling Path (fix in next iteration)
+V4 transpilation errors throw client-side exceptions (SyntaxCheckException, IllegalArgumentException) instead of ResponseException. This is because `transpileV4()` runs before the HTTP call — if it fails, the server is never reached. ~49 test references to ResponseException are affected across many IT classes.
+
+**Fix:** In `PPLIntegTestCase.executeQuery()` and `executeQueryToString()`, wrap `transpileV4()` in try-catch that converts client-side exceptions into ResponseException. This is assigned to V4-005 as a prerequisite task.
+
+### 2. UDF Registration Clarification
+The UDFs registered in UnifiedQueryContext (PPL_FIRST, PPL_LAST, TAKE, percentile_approx, MATCH_PHRASE) were ALL pre-existing before the PoC — they represent PPL-specific aggregates with no standard SQL equivalent. The converter correctly maps to them. No new UDFs were registered by the Ralph loop or the converter refactor. Do NOT register new UDFs without approval — represent everything in SQL first.
+
+### 3. timestampStringToEpochMillis Bug (engine-level, out of scope)
+`CalciteNoPushdownIndexScan.timestampStringToEpochMillis()` throws NumberFormatException on custom date formats (epoch_millis, yyyy-MM-dd without time). This blocks ~9 tests. This is an engine scan bug, not a converter issue — will be fixed separately outside the Ralph loop.
+
+### 4. Search/Relevance Functions May Be Blocked
+CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures) may require UDF/TVF registration for full-text search functions (match, query_string). If V4-005 is blocked by this, skip to V4-006. These are deferred to V4-026/V4-028 at the tail of the PRD.

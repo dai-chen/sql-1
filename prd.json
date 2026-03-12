@@ -1,5 +1,5 @@
 {
-  "project": "PPL V4 — SqlNode Converter to 85%",
+  "project": "PPL V4 \u2014 SqlNode Converter to 85%",
   "branchName": "poc/ppl-to-sqlnode-unified-api",
   "description": "Increase Calcite*IT pass rate from 41.3% to >=85% via PPL-to-SqlNode converter. Fix 414 regressions vs string transpiler baseline AND implement missing command/function support.",
   "buildCommand": "./gradlew :api:compileJava :api:compileTestJava 2>&1 | tail -20",
@@ -9,26 +9,39 @@
     {
       "id": "V4-001",
       "title": "Fix DATE+TIME comparison and datetime implementation",
-      "description": "Fix CalciteDateTimeComparisonIT (72) and CalciteDateTimeImplementationIT (16) — cross-type datetime comparisons and datetime implementation",
-      "acceptanceCriteria": ["CalciteDateTimeComparisonIT failures reduced significantly", "CalciteDateTimeImplementationIT failures reduced significantly", "Build passes", "Unit tests pass"],
+      "description": "Fix CalciteDateTimeComparisonIT (72) and CalciteDateTimeImplementationIT (16) \u2014 cross-type datetime comparisons and datetime implementation",
+      "acceptanceCriteria": [
+        "CalciteDateTimeComparisonIT failures reduced significantly",
+        "CalciteDateTimeImplementationIT failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 1,
       "passes": true,
-      "notes": "75 regressions fixed. CalciteDateTimeComparisonIT: all 191 pass. CalciteDateTimeImplementationIT: 3 regressions fixed (4/17 pass total — remaining 13 are NOT regressions, they were also failing with old transpiler). Changes: promoteDatetimeOperands for cross-type comparisons, datetime(2 args)→NULL, visitSpan FLOOR fix."
+      "notes": "75 regressions fixed. CalciteDateTimeComparisonIT: all 191 pass. CalciteDateTimeImplementationIT: 3 regressions fixed (4/17 pass total \u2014 remaining 13 are NOT regressions, they were also failing with old transpiler). Changes: promoteDatetimeOperands for cross-type comparisons, datetime(2 args)\u2192NULL, visitSpan FLOOR fix."
     },
     {
       "id": "V4-002",
       "title": "Fix stats/aggregation and multi-value stats",
       "description": "Fix CalcitePPLAggregationIT (40), CalcitePPLAggregationPaginatingIT (40), CalciteStatsCommandIT (26), CalciteMultiValueStatsIT (31)",
-      "acceptanceCriteria": ["Aggregation test failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Aggregation test failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 2,
       "passes": true,
-      "notes": "71 regressions fixed across 3 classes. CalcitePPLAggregationIT: 40→15 failures. CalcitePPLAggregationPaginatingIT: 40→15 failures. CalciteStatsCommandIT: 24→3 failures. CalciteMultiValueStatsIT: 31→31 (list/values functions — separate feature, V4-006 scope). Fixes: COUNT DISTINCT functionQuantifier, AVG CAST to DOUBLE, PERCENTILE_APPROX uppercase registration."
+      "notes": "71 regressions fixed across 3 classes. CalcitePPLAggregationIT: 40\u219215 failures. CalcitePPLAggregationPaginatingIT: 40\u219215 failures. CalciteStatsCommandIT: 24\u21923 failures. CalciteMultiValueStatsIT: 31\u219231 (list/values functions \u2014 separate feature, V4-006 scope). Fixes: COUNT DISTINCT functionQuantifier, AVG CAST to DOUBLE, PERCENTILE_APPROX uppercase registration."
     },
     {
       "id": "V4-003",
       "title": "Fix datetime and now-like function regressions",
       "description": "Fix CalciteDateTimeFunctionIT (52), CalciteNowLikeFunctionIT (12), CalciteConvertTZFunctionIT (14)",
-      "acceptanceCriteria": ["Datetime function failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Datetime function failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 3,
       "passes": true,
       "notes": "22 of 31 regressions fixed. CalciteNowLikeFunctionIT: 12/12 all pass. CalciteDateTimeFunctionIT: 24/65 pass (8 regressions fixed). CalciteConvertTZFunctionIT: 2/14 pass (2 regressions fixed). Remaining 9 regressions are engine-level TIME handling bugs (CAST to TIME fails at runtime with 'Invalid DATE value')."
@@ -37,25 +50,38 @@
       "id": "V4-004",
       "title": "Fix bin/span and chart/timechart commands",
       "description": "Fix CalciteBinCommandIT (42), CalciteChartCommandIT (15), CalciteTimechartCommandIT (18), CalciteTimechartPerFunctionIT (12)",
-      "acceptanceCriteria": ["Bin and chart failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Bin and chart failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 4,
       "passes": true,
-      "notes": "253 new tests passing. Rate: 41.3%→52.4%. CalciteBinCommandIT: 1→32 pass (11 fail, 27 skip). CalciteChartCommandIT: 0→6 pass (9 fail). CalciteTimechartCommandIT: 0→10 pass (8 fail). CalciteTimechartPerFunctionIT: 0→0 (per functions need eval override). Fixes: FLOOR syntax (SqlIntervalQualifier), CountBin/MinSpanBin/RangeBin/DefaultBin, visitChart, null handling, VARCHAR casting. Remaining: chart limit/useother, aligntime, per functions."
+      "notes": "253 new tests passing. Rate: 41.3%\u219252.4%. CalciteBinCommandIT: 1\u219232 pass (11 fail, 27 skip). CalciteChartCommandIT: 0\u21926 pass (9 fail). CalciteTimechartCommandIT: 0\u219210 pass (8 fail). CalciteTimechartPerFunctionIT: 0\u21920 (per functions need eval override). Fixes: FLOOR syntax (SqlIntervalQualifier), CountBin/MinSpanBin/RangeBin/DefaultBin, visitChart, null handling, VARCHAR casting. Remaining: chart limit/useother, aligntime, per functions."
     },
     {
       "id": "V4-005",
       "title": "Fix search command and relevance functions",
       "description": "Fix CalciteSearchCommandIT (48), CalciteRelevanceFunctionIT (14), and related match/query_string classes (~20)",
-      "acceptanceCriteria": ["Search and relevance failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "V4 error handling wrapped with ResponseException in PPLIntegTestCase",
+        "Search and relevance failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 5,
       "passes": false,
-      "notes": "~82 failures. Search/relevance may need special handling for full-text queries."
+      "notes": "~82 failures. Before working on search/relevance fixes, do these first: (1) Wrap V4 transpilation errors with ResponseException in PPLIntegTestCase.executeQuery() and executeQueryToString() \u2014 currently V4 throws client-side exceptions (SyntaxCheckException, IllegalArgumentException) instead of ResponseException, failing all error-handling tests. Add try-catch around transpileV4() that catches Exception and wraps in ResponseException. (2) Search/relevance functions (match, query_string) may need UDF/TVF registration \u2014 if blocked, skip and move to V4-006."
     },
     {
       "id": "V4-006",
       "title": "Fix array and MV (multi-value) functions",
       "description": "Fix CalciteArrayFunctionIT (59), CalciteMVAppendFunctionIT (15), CalciteMvExpandCommandIT (14), CalciteNoMvCommandIT (19), CalciteMvCombineCommandIT (if any)",
-      "acceptanceCriteria": ["Array and MV function failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Array and MV function failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 6,
       "passes": false,
       "notes": "~107 failures. Array/MV functions may need new SqlNode patterns."
@@ -64,7 +90,11 @@
       "id": "V4-007",
       "title": "Fix null handling and builtin function regressions",
       "description": "Fix CalcitePPLBuiltinFunctionsNullIT (39), CalcitePPLBuiltinFunctionIT (10), CalcitePPLConditionBuiltinFunctionIT (12), CalcitePPLCastFunctionIT (15)",
-      "acceptanceCriteria": ["Null handling and builtin function failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Null handling and builtin function failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 7,
       "passes": false,
       "notes": "76 failures total."
@@ -73,7 +103,11 @@
       "id": "V4-008",
       "title": "Fix join, lookup, and subquery issues",
       "description": "Fix CalcitePPLJoinIT (36), CalcitePPLLookupIT (12), CalcitePPLExistsSubqueryIT (14), CalcitePPLScalarSubqueryIT (10), CalcitePPLInSubqueryIT (if any)",
-      "acceptanceCriteria": ["Join, lookup, and subquery failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Join, lookup, and subquery failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 8,
       "passes": false,
       "notes": "~72 failures total."
@@ -82,7 +116,11 @@
       "id": "V4-009",
       "title": "Fix fields, rename, replace, basic, and eval commands",
       "description": "Fix CalciteFieldsCommandIT (25), CalcitePPLRenameIT (20), CalciteReplaceCommandIT (21), CalcitePPLBasicIT (22), CalciteEvalCommandIT (4), CalciteFillNullCommandIT (13)",
-      "acceptanceCriteria": ["Command-level failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Command-level failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 9,
       "passes": false,
       "notes": "~105 failures total."
@@ -91,7 +129,11 @@
       "id": "V4-010",
       "title": "Fix streamstats, graph lookup, and new commands",
       "description": "Fix CalciteStreamstatsCommandIT (18), CalcitePPLGraphLookupIT (21), CalciteNewAddedCommandsIT (10), CalciteRexCommandIT (17), CalcitePPLPatternsIT (15), CalciteMultisearchCommandIT (15)",
-      "acceptanceCriteria": ["Advanced command failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Advanced command failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 10,
       "passes": false,
       "notes": "~96 failures. Some commands (graph lookup, rex, patterns, multisearch) may need new visitor methods."
@@ -100,7 +142,11 @@
       "id": "V4-011",
       "title": "Fix math, string, text, operator, and JSON functions",
       "description": "Fix CalciteMathematicalFunctionIT, CalcitePPLStringBuiltinFunctionIT, CalciteTextFunctionIT, CalciteOperatorIT, CalcitePPLJsonBuiltinFunctionIT (17), CalcitePPLEvalMaxMinFunctionIT, CalcitePPLCaseFunctionIT, CalcitePPLCryptographicFunctionIT",
-      "acceptanceCriteria": ["Function-level failures reduced significantly", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Function-level failures reduced significantly",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 11,
       "passes": false,
       "notes": "~60 failures across multiple function test classes."
@@ -109,10 +155,222 @@
       "id": "V4-012",
       "title": "Fix remaining scattered failures to reach 85%",
       "description": "Fix remaining failures across CalciteSortCommandIT, CalciteTopCommandIT, CalciteRareCommandIT, CalcitePPLEventstatsIT, CalcitePPLSpathCommandIT, CalciteExpandCommandIT, CalciteFlattenCommandIT, CalciteTransposeCommandIT, CalcitePPLAppendPipeCommandIT, CalcitePPLEnhancedCoalesceIT, CalciteParseCommandIT, CalciteObjectFieldOperateIT, CalciteDataTypeIT, and all other small classes",
-      "acceptanceCriteria": ["Integration test pass rate >= 85%", "Build passes", "Unit tests pass"],
+      "acceptanceCriteria": [
+        "Integration test pass rate >= 85%",
+        "Build passes",
+        "Unit tests pass"
+      ],
       "priority": 12,
       "passes": false,
       "notes": "~150+ failures across 40+ classes with 1-10 failures each. This is the long-tail cleanup."
+    },
+    {
+      "id": "V4-013",
+      "title": "Implement array functions",
+      "description": "Implement CalciteArrayFunctionIT support \u2014 array, exists, filter, forAll, mvdedup, etc.",
+      "acceptanceCriteria": [
+        "CalciteArrayFunctionIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "59 failures. Needs ARRAY type handling and array function SQL patterns."
+    },
+    {
+      "id": "V4-014",
+      "title": "Implement MV (multi-value) commands",
+      "description": "Implement CalciteMvExpandCommandIT, CalciteNoMvCommandIT, CalciteMvCombineCommandIT, CalciteMVAppendFunctionIT",
+      "acceptanceCriteria": [
+        "MV command pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "54 failures (14+19+6+15). Needs UNNEST/ARRAY_AGG patterns."
+    },
+    {
+      "id": "V4-015",
+      "title": "Implement chart command",
+      "description": "Implement CalciteChartCommandIT support \u2014 chart command visitor method",
+      "acceptanceCriteria": [
+        "CalciteChartCommandIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "15 failures. New visitor method needed."
+    },
+    {
+      "id": "V4-016",
+      "title": "Implement timechart commands",
+      "description": "Implement CalciteTimechartCommandIT and CalciteTimechartPerFunctionIT support",
+      "acceptanceCriteria": [
+        "Timechart pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "30 failures (18+12). Related to chart command."
+    },
+    {
+      "id": "V4-017",
+      "title": "Implement JSON functions",
+      "description": "Implement CalcitePPLJsonBuiltinFunctionIT support \u2014 JSON_VALUE, JSON_EXTRACT patterns",
+      "acceptanceCriteria": [
+        "CalcitePPLJsonBuiltinFunctionIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "17 failures."
+    },
+    {
+      "id": "V4-018",
+      "title": "Implement rex command",
+      "description": "Implement CalciteRexCommandIT support \u2014 REGEXP_EXTRACT variant for rex",
+      "acceptanceCriteria": [
+        "CalciteRexCommandIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "17 failures."
+    },
+    {
+      "id": "V4-019",
+      "title": "Implement patterns command",
+      "description": "Implement CalcitePPLPatternsIT support \u2014 pattern extraction",
+      "acceptanceCriteria": [
+        "CalcitePPLPatternsIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "15 failures."
+    },
+    {
+      "id": "V4-020",
+      "title": "Implement multisearch command",
+      "description": "Implement CalciteMultisearchCommandIT support \u2014 multi-index query",
+      "acceptanceCriteria": [
+        "CalciteMultisearchCommandIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "15 failures."
+    },
+    {
+      "id": "V4-021",
+      "title": "Implement spath command",
+      "description": "Implement CalcitePPLSpathCommandIT support \u2014 JSON path extraction",
+      "acceptanceCriteria": [
+        "CalcitePPLSpathCommandIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "14 failures."
+    },
+    {
+      "id": "V4-022",
+      "title": "Implement addtotals and addcoltotals commands",
+      "description": "Implement CalciteAddTotalsCommandIT and CalciteAddColTotalsCommandIT support",
+      "acceptanceCriteria": [
+        "AddTotals/AddColTotals pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "14 failures (8+6). Related commands."
+    },
+    {
+      "id": "V4-023",
+      "title": "Implement expand, flatten, transpose, and reverse commands",
+      "description": "Implement CalciteExpandCommandIT, CalciteFlattenCommandIT, CalciteTransposeCommandIT, CalciteReverseCommandIT",
+      "acceptanceCriteria": [
+        "Structural transform command pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "19 failures (5+4+4+6). Structural transform commands."
+    },
+    {
+      "id": "V4-024",
+      "title": "Implement geo functions",
+      "description": "Implement CalciteGeoIpFunctionsIT, CalciteGeoPointFormatsIT, CalciteIPComparisonIT, CalciteIPFunctionsIT, CalcitePPLIPFunctionIT",
+      "acceptanceCriteria": [
+        "Geo function pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "21 failures (6+8+6+1). Geo-specific functions."
+    },
+    {
+      "id": "V4-025",
+      "title": "Fix remaining long-tail failures",
+      "description": "Fix remaining scattered failures across small classes to maximize pass rate",
+      "acceptanceCriteria": [
+        "Overall pass rate maximized",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": "~50 failures across many classes with 1-4 failures each."
+    },
+    {
+      "id": "V4-026",
+      "title": "[DEFERRED] Search command + query_string",
+      "description": "Implement CalciteSearchCommandIT support \u2014 requires UDF/TVF registry in Calcite SQL engine (out of scope for converter PoC)",
+      "acceptanceCriteria": [
+        "CalciteSearchCommandIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": "46 failures. BLOCKED: requires full-text search UDF registration in Calcite SQL engine. Will be addressed separately."
+    },
+    {
+      "id": "V4-027",
+      "title": "[DEFERRED] Graph lookup TVF",
+      "description": "Implement CalcitePPLGraphLookupIT support \u2014 requires TVF registry in Calcite SQL engine (out of scope for converter PoC)",
+      "acceptanceCriteria": [
+        "CalcitePPLGraphLookupIT pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": "21 failures. BLOCKED: requires TVF registration in Calcite SQL engine. Will be addressed separately."
+    },
+    {
+      "id": "V4-028",
+      "title": "[DEFERRED] Relevance/match functions",
+      "description": "Implement CalciteRelevanceFunctionIT, CalciteMatchIT, CalciteMatchBoolPrefixIT, CalciteMatchPhraseIT, CalciteMatchPhrasePrefixIT, CalciteMultiMatchIT, CalciteQueryStringIT, CalciteSimpleQueryStringIT, CalciteLikeQueryIT \u2014 requires UDF registry in Calcite SQL engine (out of scope for converter PoC)",
+      "acceptanceCriteria": [
+        "Relevance/match pass rate improved",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": "43 failures. BLOCKED: requires full-text relevance UDF registration in Calcite SQL engine. Will be addressed separately."
     }
   ]
 }
