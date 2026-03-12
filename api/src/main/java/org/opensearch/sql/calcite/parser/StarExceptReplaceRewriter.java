@@ -102,13 +102,36 @@ public class StarExceptReplaceRewriter extends SqlShuttle {
       SqlIdentifier alias = call.operand(1);
       if (tableNode instanceof SqlIdentifier tableId) {
         tableMap.put(alias.getSimple(), tableId.getSimple());
+      } else if (tableNode instanceof SqlSelect subSelect) {
+        // Trace through subquery to find the underlying table
+        String resolved = resolveSubqueryTable(subSelect);
+        if (resolved != null) {
+          tableMap.put(alias.getSimple(), resolved);
+        }
       }
-      // If tableNode is a subquery, we can't resolve columns — skip it
     } else if (from instanceof SqlJoin join) {
       collectTables(join.getLeft(), tableMap);
       collectTables(join.getRight(), tableMap);
     }
-    // For SqlSelect (subquery in FROM), we can't resolve columns without validation — skip
+  }
+
+  /** Recursively resolve the underlying table name from a subquery chain. */
+  private String resolveSubqueryTable(SqlSelect select) {
+    SqlNode from = select.getFrom();
+    if (from instanceof SqlIdentifier id) {
+      return id.getSimple();
+    }
+    if (from instanceof SqlBasicCall call
+        && call.getOperator() == SqlStdOperatorTable.AS) {
+      SqlNode tableNode = call.operand(0);
+      if (tableNode instanceof SqlIdentifier tableId) {
+        return tableId.getSimple();
+      }
+      if (tableNode instanceof SqlSelect subSelect) {
+        return resolveSubqueryTable(subSelect);
+      }
+    }
+    return null;
   }
 
   private void expandStarExceptReplace(

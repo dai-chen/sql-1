@@ -106,7 +106,6 @@ import org.opensearch.sql.ast.tree.SubqueryAlias;
 import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Window;
-import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.calcite.utils.SqlNodeDSL;
 import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.opensearch.sql.calcite.utils.WildcardUtils;
@@ -405,6 +404,29 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   private static final java.time.format.DateTimeFormatter TS_FMT =
       java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+  private static final DateTimeFormatter EARLIEST_LATEST_FMT =
+      DateTimeFormatter.ofPattern("MM/dd/yyyy:HH:mm:ss");
+
+  /** Resolve time argument for earliest/latest filter functions to ISO timestamp string. */
+  private static String resolveFilterTimeArg(SqlNode node) {
+    String raw = null;
+    if (node instanceof SqlLiteral) {
+      raw = ((SqlLiteral) node).toValue();
+    }
+    if (raw == null) return resolveDateMathToTimestamp("now");
+    // Try MM/dd/yyyy:HH:mm:ss format
+    try {
+      LocalDateTime dt = LocalDateTime.parse(raw, EARLIEST_LATEST_FMT);
+      return dt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    } catch (Exception ignored) {}
+    // Normalize @ to / for date math snap syntax, and prepend 'now' for relative expressions
+    String normalized = raw.replace('@', '/');
+    if (normalized.startsWith("-") || normalized.startsWith("+")) {
+      normalized = "now" + normalized;
+    }
+    return resolveDateMathToTimestamp(normalized);
+  }
 
   /** Resolve an OpenSearch date math expression to an actual timestamp string. */
   private static String resolveDateMathToTimestamp(String dateMath) {
@@ -1805,6 +1827,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           mod(args.get(0), args.get(1)));
     }
     // Special-case rewrites
+    // earliest/latest as filter functions (2-arg form):
+    // earliest(timeStr, field) → field >= resolved_time (field is at or after the earliest boundary)
+    // latest(timeStr, field) → field <= resolved_time (field is at or before the latest boundary)
+    if ("earliest".equals(name) && args.size() == 2) {
+      String timeStr = resolveFilterTimeArg(args.get(0));
+      return gte(args.get(1), cast(literal(timeStr), typeSpec(SqlTypeName.TIMESTAMP)));
+    }
+    if ("latest".equals(name) && args.size() == 2) {
+      String timeStr = resolveFilterTimeArg(args.get(0));
+      return lte(args.get(1), cast(literal(timeStr), typeSpec(SqlTypeName.TIMESTAMP)));
+    }
     if ("if".equals(name))
       return caseWhen(List.of(args.get(0)), List.of(castVarcharIfStringLiteral(args.get(1))), castVarcharIfStringLiteral(args.get(2)));
     if ("ifnull".equals(name)) return call("COALESCE", args.get(0), args.get(1));

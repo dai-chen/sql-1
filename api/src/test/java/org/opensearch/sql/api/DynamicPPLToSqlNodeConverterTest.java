@@ -90,9 +90,9 @@ public class DynamicPPLToSqlNodeConverterTest {
 
   @Test
   public void testEvalColumnOverride() {
-    // eval a = b → explicit column list with override instead of SELECT *, expr
+    // eval a = b → SELECT * REPLACE to avoid column ambiguity
     ppl("source=t | eval a = b").shouldTranslateTo("""
-        SELECT "b" AS "a", "b", "c"
+        SELECT * REPLACE ("b" AS "a")
         FROM (SELECT *
         FROM "t") AS "_t1\"""");
   }

@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.JoinType;
@@ -28,6 +29,7 @@ import org.apache.calcite.sql.parser.SqlParserPos;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.QualifiedName;
+import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
@@ -57,12 +59,25 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     if (tableName == null) return Collections.emptyList();
     Table table = defaultSchema.getTable(tableName);
     if (table == null) {
+      // Try case-insensitive lookup via getTableNames
       for (String name : defaultSchema.getTableNames()) {
         if (name.equalsIgnoreCase(tableName)) {
           table = defaultSchema.getTable(name);
           break;
         }
       }
+    }
+    if (table == null) {
+      // SchemaPlus.getTable() may not trigger lazy fetch in AbstractSchema.getTableMap().
+      // Access the underlying Schema object directly via CalciteSchema.
+      try {
+        org.apache.calcite.jdbc.CalciteSchema cs =
+            org.apache.calcite.jdbc.CalciteSchema.from(defaultSchema);
+        Schema underlying = cs.schema;
+        if (underlying != null) {
+          table = underlying.getTable(tableName);
+        }
+      } catch (Exception ignored) {}
     }
     if (table == null) return Collections.emptyList();
     return table.getRowType(typeFactory).getFieldList().stream()
@@ -198,14 +213,18 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       }
     }
 
-    List<SqlNode> selectItems = new ArrayList<>();
-    for (String col : allCols) {
-      if (overrides.containsKey(col)) {
-        selectItems.add(as(overrides.get(col), col));
-      } else {
-        selectItems.add(identifier(col));
-      }
+    // Use SELECT * REPLACE(...) to avoid column ambiguity when eval
+    // expression references the same column it overrides (e.g. eval date=WEEKDAY(date))
+    List<SqlNode> replaceClauses = new ArrayList<>();
+    for (Map.Entry<String, SqlNode> entry : overrides.entrySet()) {
+      replaceClauses.add(as(entry.getValue(), entry.getKey()));
     }
+    SqlNode starReplace = new SqlStarExceptReplace(
+        SqlParserPos.ZERO, star(), null,
+        new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(starReplace);
     for (String col : newCols) {
       selectItems.add(as(evalAliases.get(col), col));
     }
