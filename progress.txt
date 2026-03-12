@@ -35,6 +35,14 @@
 ## Codebase Patterns
 
 ### PPL AST Structure
+
+### Schema Resolution (CRITICAL)
+- `SchemaPlus.getTable()` does NOT trigger lazy `HashMap.get()` in `AbstractSchema.getTableMap()` — it goes through `CalciteSchema.tables()` Lookup which bypasses the override
+- Must use `CalciteSchema.from(schemaPlus).schema.getTable(tableName)` to access the underlying Schema directly
+- This affects ALL schema-dependent operations: eval override, fields-, rename wildcard, fillnull all-fields
+- Unit tests work because they use simple in-memory schemas; integration tests use lazy-loading AbstractSchema
+
+### PPL AST Structure
 - PPL parser always wraps plans in Project(AllFields) — treat as passthrough
 - PPL count() AST uses Literal(1) not AllFields — check for both
 - Pipe commands chain as nested AST: Sort(Aggregation(Filter(Relation))) — process inside-out
@@ -422,4 +430,42 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Lambda/higher-order functions (forall, exists, filter, transform, reduce, mvmap) have no SQL equivalent — they need V3 engine UDFs (PPLFuncImpTable).
   - The subagent expanded scope beyond V4-006 to fix V4-007 issues (null handling, builtins, cast). This was beneficial — 28 new passes from CalcitePPLBuiltinFunctionsNullIT alone.
   - CAST to BOOLEAN in Calcite doesn't follow Spark/Postgres semantics — need custom CASE WHEN logic.
+---
+
+## 2026-03-12T20:31 - V4-007: Fix null handling and builtin function regressions
+- **What was fixed**: 7 new tests passing across 3 test classes
+  - **resolveColumns schema fix**: `CalciteSchema.from(defaultSchema).schema.getTable(tableName)` bypasses the `SchemaPlus` caching layer that prevented lazy table fetch in `AbstractSchema.getTableMap()`. The `SchemaPlus.getTable()` goes through `CalciteSchema.tables()` Lookup which doesn't trigger the lazy `HashMap.get()` override in the test's `AbstractSchema.getTableMap()`. By accessing the underlying `Schema` object directly via `CalciteSchema.from()`, the lazy fetch works correctly. This fix unblocks ALL schema-dependent operations in `DynamicPPLToSqlNodeConverter` (eval override, fields-, rename wildcard, fillnull all-fields).
+  - **SELECT * REPLACE for eval column overrides**: `DynamicPPLToSqlNodeConverter.visitEval` now uses `SqlStarExceptReplace` node to generate `SELECT * REPLACE(expr AS col)` instead of explicit column enumeration. This avoids column ambiguity when eval alias matches field name (e.g., `eval date=WEEKDAY(date)`, `eval age=cast(age as STRING)`).
+  - **StarExceptReplaceRewriter subquery tracing**: Enhanced `collectTables()` to recursively resolve underlying table names through subquery chains (`SELECT * FROM (SELECT * FROM "table" AS "_t1") AS "_t2"`). Added `resolveSubqueryTable()` helper.
+  - **earliest/latest filter functions**: Added 2-arg handling in `visitFunction` for `earliest(timeStr, field)` → `field >= CAST(resolved AS TIMESTAMP)` and `latest(timeStr, field)` → `field <= CAST(resolved AS TIMESTAMP)`. Added `resolveFilterTimeArg()` helper that parses MM/dd/yyyy:HH:mm:ss format and delegates to `resolveDateMathToTimestamp()` for other formats.
+- **Test results**:
+  - CalcitePPLBuiltinFunctionsNullIT: 60→63 pass (71 total, 8 fail) — 3 fixed (testWeekDayNull, testUnixTimestampNull, testToSecondsNull)
+  - CalcitePPLCastFunctionIT: 9→11 pass (21 total, 10 fail) — 2 fixed (testCastOverriding, testChainedCast)
+  - CalcitePPLConditionBuiltinFunctionIT: 15→17 pass (22 total, 5 fail) — 2 fixed (testEarliest, testLatest)
+  - CalcitePPLBuiltinFunctionIT: 18→18 pass (26 total, 8 fail) — 0 fixed (all engine-level)
+- **Remaining 31 failures** (all engine-level, not converter-fixable):
+  - CONV function not registered (3): testConvAndLower, testConvNegateValue, testConvWithInvalidRadix
+  - TYPEOF signature only accepts VARIANT (2): testTypeOfBasic, testTypeOfDateTime
+  - MOD type widening (2): testModShouldReturnWiderTypes (bigint→int), testModFloatAndNegative (float→double)
+  - Division precision (1): testDivide (float precision truncation)
+  - Cast formatting (3): testCastDoubleAsString (0E0 vs 0.0), testCastDecimal (.99 vs 0.99), testCastNumericSTRING (float precision)
+  - Invalid date compile errors (5): testDayInvalid, testDateInvalid, testStrTDateInvalid2, testConvertTZInvalid, testDatetimeInvalid
+  - Timestamp precision parsing (4): testCastTimestamp, testCastTime, testIsNullWithStruct, testIsNotNullWithStruct
+  - IP cast not supported (3): testCastIpToString, testCastToIP, testCastIntegerToIp
+  - Expected exceptions not thrown (3): testHourInvalid, testTimeInvalid, testCastBOOLEAN
+  - Nested array type (2): testIsNullWithNested, testIsNotNullWithNested
+  - ADDDATE return type (1): testAddSubDateNull (time vs timestamp)
+  - testEarliestWithEval (1): complex time modifier semantics with eval'd field
+  - testCastDate (1): invalid date literal handling
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+21/-7: resolveColumns fix, visitEval REPLACE)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+35/-1: earliest/latest filter, resolveFilterTimeArg)
+  - api/src/main/java/org/opensearch/sql/calcite/parser/StarExceptReplaceRewriter.java (+25/-2: subquery tracing)
+  - api/src/test/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverterTest.java (+2/-2: updated expected SQL)
+- **Learnings for future iterations:**
+  - `SchemaPlus.getTable()` goes through `CalciteSchema.tables()` Lookup which does NOT trigger lazy `HashMap.get()` override in `AbstractSchema.getTableMap()`. Must use `CalciteSchema.from(schemaPlus).schema.getTable()` to access the underlying Schema directly.
+  - This resolveColumns fix is CRITICAL — it was silently breaking ALL schema-dependent operations (eval override, fields-, rename wildcard, fillnull all-fields) in integration tests. The unit tests worked because they use a simple in-memory schema, not the lazy-loading AbstractSchema.
+  - `earliest(timeStr, field)` means "field is at or after the earliest boundary" = `field >= time`. `latest(timeStr, field)` means "field is at or before the latest boundary" = `field <= time`. Counter-intuitive naming.
+  - `StarExceptReplaceRewriter.collectTables()` needs to trace through subquery chains to find the underlying table name for column resolution. Without this, `SELECT * REPLACE(...)` can't expand the wildcard.
+  - The resolveColumns fix will likely improve pass rates for V4-009 (fields/rename/replace) and other schema-dependent stories significantly.
 ---
