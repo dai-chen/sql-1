@@ -19,13 +19,20 @@ import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.Table;
+import org.apache.calcite.sql.JoinType;
+import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlNodeList;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.calcite.sql.parser.SqlParserPos;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
+import org.opensearch.sql.ast.tree.MvCombine;
+import org.opensearch.sql.ast.tree.MvExpand;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
@@ -47,6 +54,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   private List<String> resolveColumns(String tableName) {
+    if (tableName == null) return Collections.emptyList();
     Table table = defaultSchema.getTable(tableName);
     if (table == null) {
       for (String name : defaultSchema.getTableNames()) {
@@ -149,6 +157,12 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   public SqlNode visitEval(Eval node, Void ctx) {
     List<String> allCols = resolveColumns(tableName);
+    if (allCols.isEmpty()) {
+      // No schema columns available — delegate to base which handles
+      // in-place SELECT list replacement for overrides
+      return super.visitEval(node, ctx);
+    }
+
     Set<String> existingCols = new HashSet<>(allCols);
     boolean hasOverride = false;
     for (Let let : node.getExpressionList()) {
@@ -200,8 +214,105 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   @Override
+  public SqlNode visitMvCombine(MvCombine node, Void ctx) {
+    String fieldName = node.getField().getField().toString();
+    List<String> allCols = new ArrayList<>(resolveColumns(tableName));
+
+    // Fallback: extract columns from the current pipe's SELECT list
+    if (allCols.isEmpty() && pipe instanceof org.apache.calcite.sql.SqlSelect) {
+      org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+      SqlNodeList selectList = sel.getSelectList();
+      if (selectList != null) {
+        allCols = new ArrayList<>();
+        for (SqlNode item : selectList) {
+          String colName = extractColumnName(item);
+          if (colName != null) allCols.add(colName);
+        }
+      }
+    }
+
+    // GROUP BY all columns except the target field
+    List<SqlNode> groupByCols = new ArrayList<>();
+    List<SqlNode> selectItems = new ArrayList<>();
+    for (String col : allCols) {
+      if (col.equals(fieldName)) {
+        selectItems.add(as(call("ARRAY_AGG", identifier(col)), col));
+      } else {
+        selectItems.add(identifier(col));
+        groupByCols.add(identifier(col));
+      }
+    }
+
+    if (selectItems.isEmpty()) {
+      // Last resort: just ARRAY_AGG the target field
+      selectItems.add(as(call("ARRAY_AGG", identifier(fieldName)), fieldName));
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    } else if (groupByCols.isEmpty()) {
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    } else {
+      pipe = select(selectItems.toArray(new SqlNode[0]))
+          .from(wrapAsSubquery())
+          .groupBy(groupByCols.toArray(new SqlNode[0]))
+          .build();
+    }
+    return pipe;
+  }
+
+  private String extractColumnName(SqlNode node) {
+    if (node instanceof org.apache.calcite.sql.SqlIdentifier) {
+      org.apache.calcite.sql.SqlIdentifier id = (org.apache.calcite.sql.SqlIdentifier) node;
+      if (id.isStar()) return null; // Skip bare * — not a real column name
+      return id.names.get(id.names.size() - 1);
+    }
+    if (node instanceof org.apache.calcite.sql.SqlBasicCall) {
+      org.apache.calcite.sql.SqlBasicCall call = (org.apache.calcite.sql.SqlBasicCall) node;
+      if ("AS".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
+        return extractColumnName(call.operand(1));
+      }
+    }
+    return null;
+  }
+
+  @Override
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
     DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema);
     return sub.convert(plan);
+  }
+
+  @Override
+  public SqlNode visitMvExpand(MvExpand node, Void ctx) {
+    String fieldName = node.getField().getField().toString();
+    List<String> allCols = resolveColumns(tableName);
+    if (allCols.isEmpty()) return pipe;
+
+    // Build: SELECT cols..., _u.field FROM (pipe) CROSS JOIN UNNEST(field) AS _u(field)
+    String unnestAlias = "_u";
+    SqlNode unnest = new SqlBasicCall(
+        SqlStdOperatorTable.UNNEST,
+        new SqlNode[]{identifier(fieldName)},
+        SqlParserPos.ZERO);
+    // AS _u(field) — multi-column alias
+    SqlNode aliasedUnnest = new SqlBasicCall(
+        SqlStdOperatorTable.AS,
+        new SqlNode[]{unnest, identifier(unnestAlias), identifier(fieldName)},
+        SqlParserPos.ZERO);
+
+    // Build select list: replace array field with unnested value
+    List<SqlNode> selectItems = new ArrayList<>();
+    for (String col : allCols) {
+      if (col.equals(fieldName)) {
+        selectItems.add(as(identifier(unnestAlias, fieldName), fieldName));
+      } else {
+        selectItems.add(identifier(col));
+      }
+    }
+
+    SqlNode joinNode = join(wrapAsSubquery(), JoinType.CROSS, aliasedUnnest, null);
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
+
+    if (node.getLimit() != null) {
+      pipe = select(star()).from(wrapAsSubquery()).limit(intLiteral(node.getLimit())).build();
+    }
+    return pipe;
   }
 }

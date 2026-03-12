@@ -163,6 +163,7 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
       } catch (ResponseException e) {
         throw e;
       } catch (Exception e) {
+        LOG.error("[V4] Transpilation error for PPL: {}", query, e);
         throw createSyntheticResponseException(e);
       }
     }
@@ -331,7 +332,47 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     try {
       return new JSONObject(text);
     } catch (JSONException e) {
-      throw new IllegalStateException(String.format("Failed to transform %s to JSON format", text));
+      // Response may contain unescaped newlines in data values (e.g., from ARRAY_JOIN with '\n')
+      // Try escaping newlines within string values before re-parsing
+      try {
+        String escaped = text.replaceAll("(?<=\\[|,|:)\"((?:[^\"\\\\]|\\\\.)*)\"", 
+            java.util.regex.Matcher.quoteReplacement("$0"));
+        // Simpler approach: escape all newlines that are inside JSON string values
+        // by replacing literal newlines (not \n sequences) with \\n
+        StringBuilder sb = new StringBuilder();
+        boolean inString = false;
+        boolean escaped2 = false;
+        for (int i = 0; i < text.length(); i++) {
+          char c = text.charAt(i);
+          if (escaped2) {
+            sb.append(c);
+            escaped2 = false;
+            continue;
+          }
+          if (c == '\\') {
+            sb.append(c);
+            escaped2 = true;
+            continue;
+          }
+          if (c == '"') {
+            inString = !inString;
+            sb.append(c);
+            continue;
+          }
+          if (inString && c == '\n') {
+            sb.append("\\n");
+            continue;
+          }
+          if (inString && c == '\r') {
+            sb.append("\\r");
+            continue;
+          }
+          sb.append(c);
+        }
+        return new JSONObject(sb.toString());
+      } catch (Exception e2) {
+        throw new IllegalStateException(String.format("Failed to transform %s to JSON format", text));
+      }
     }
   }
 

@@ -334,3 +334,48 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - SearchLiteral stores the OS date math string (not the original PPL modifier). The original PPL modifier is lost after `resolveTimeModifier` in the parser.
   - Error-handling tests now catch ResponseException correctly via the wrapping, but many still fail on `verifyErrorMessageContains` because the V4 engine returns generic "Failed to plan query" instead of specific error messages.
 ---
+
+## Round Summary (all stories complete, iteration 1)
+
+### Progress
+- **Completed this round**: V4-005 (search command + ResponseException wrapping, +33 tests, 52.4%→53.9%). This was the only story attempted this iteration. ResponseException wrapping now converts client-side transpilation exceptions into synthetic ResponseException via reflection, fixing ~26 error-handling tests across multiple classes. visitSearch added for Search AST node handling with date math resolution.
+- **Remaining**: 23 stories still incomplete (V4-006 through V4-028):
+  - V4-006: Array/MV functions (~107 failures) — needs ARRAY type handling, array function SQL patterns
+  - V4-007: Null handling/builtin functions (~76 failures) — likely function mapping additions
+  - V4-008: Join/lookup/subquery (~72 failures) — structurally complex, scope resolution issues
+  - V4-009: Fields/rename/replace/basic/eval (~105 failures) — schema-aware SELECT * EXCEPT/REPLACE, high-ROI
+  - V4-010: Streamstats/graph lookup/new commands (~96 failures) — needs new visitor methods
+  - V4-011: Math/string/text/operator/JSON functions (~60 failures) — mostly function mappings
+  - V4-012: Long-tail cleanup (~150+ failures across 40+ classes)
+  - V4-013 through V4-025: Feature implementations (array, MV, chart enhancements, rex, patterns, etc.)
+  - V4-026 through V4-028: DEFERRED — blocked on engine-level UDF/TVF registration
+- **Blockers**:
+  - Engine-level TIME casting bug: `CAST('17:30:00' AS TIME)` fails at runtime with "Invalid DATE value" — blocks 9 datetime regressions permanently. Not converter-fixable.
+  - Engine-level nanosecond timestamp parsing: `timestampStringToEpochMillis` throws NumberFormatException on nano-precision timestamps — blocks 38 CalciteSearchCommandIT tests and ~7 aggregation tests.
+  - LIST/VALUES aggregate functions not registered in engine — blocks all 31 CalciteMultiValueStatsIT tests.
+  - V4-026/V4-027/V4-028 (search UDFs, graph lookup TVF, relevance functions) are DEFERRED — require engine-level UDF/TVF registration outside converter scope.
+
+### PoC Direction Check
+- **Approach validation**: The SqlNode-based converter continues to prove viable. Across the full round (V4-001 through V4-005), rate moved from 41.3% to 53.9% (+12.6pp, +286 net new passing tests). The subquery-wrapping pattern for pipe stages, SqlNodeDSL for declarative construction, and PPLTypeCoercion for implicit coercion are all holding up well. No architectural dead ends encountered.
+- **Surprises**:
+  - Easier than expected: Bin/chart/timechart (V4-004) was the biggest single win (+253 tests) — the FLOOR-with-SqlIntervalQualifier pattern unlocked a large surface area. ResponseException wrapping (V4-005) was a clean reflection-based fix that unblocked error-handling tests across many classes.
+  - Harder than expected: Engine-level runtime bugs (TIME casting, nanosecond parsing) create a hard ceiling the converter cannot breach. These account for ~54 permanently blocked tests. The Search command's OS date math resolution required custom parsing logic since the format differs from PPL's date math format.
+  - Assumptions invalidated: Now-like SQL keywords (CURRENT_TIMESTAMP etc.) don't serialize properly through Calcite's JSON response path — had to generate UTC string literals. SqlPrettyWriter uppercases ALL function names, breaking lowercase-only UDF registrations.
+- **Alternative approaches**: No fundamental pivot needed. The architecture is sound. One consideration: for the remaining ~1044 failing tests, the mix shifts from "fix regressions vs string transpiler" to "implement new features the string transpiler also didn't support" (V4-013 through V4-025). These may require different patterns (new visitor methods, custom operators) rather than just function mappings.
+- **Risk areas**:
+  - V4-008 (join/lookup/subquery): "Column is ambiguous" errors suggest scope resolution issues in nested subqueries. Join semantics are structurally complex.
+  - V4-009 (fields/rename/replace): Heavy reliance on DynamicPPLToSqlNodeConverter's schema-aware SELECT * EXCEPT/REPLACE — bugs here cascade to many downstream commands.
+  - V4-012 (long-tail): 150+ failures across 40+ classes with diminishing returns per fix. May be hard to reach 85% without addressing engine-level bugs.
+  - Engine ceiling: ~54 tests blocked by engine bugs (TIME casting, nanosecond parsing) represent ~2.4% of the total. If more engine-level issues surface in remaining stories, the 85% target may require engine fixes.
+- **Open questions**:
+  - Should engine-level bugs (TIME casting, nanosecond parsing) be fixed in a parallel workstream? They block ~54 tests (~2.4%) permanently.
+  - Should DEFERRED stories (V4-026/V4-027/V4-028, ~110 tests) be excluded from the 85% denominator since they require engine changes outside converter scope?
+  - V4-009 (fields/rename/replace) vs V4-007 (null handling) — which is higher ROI for the next round? V4-009 affects more downstream commands but is more complex.
+
+### Recommended Next Steps
+1. **V4-006 (array/MV functions)** is next by priority. Run CalciteArrayFunctionIT and CalciteMvExpandCommandIT first to categorize failures. May need ARRAY type handling and UNNEST/ARRAY_AGG patterns.
+2. **V4-007 (null handling/builtins)** is likely quick wins — mostly function mapping additions similar to V4-003's datetime function batch.
+3. **V4-009 (fields/rename/replace/basic)** is high-ROI since these are fundamental commands. Consider prioritizing if V4-006 proves blocked by engine limitations.
+4. **V4-011 (math/string/functions)** is another quick-win candidate — function mappings that can be batch-added.
+5. **Engine bug fix**: Consider a parallel human intervention to fix the nanosecond timestamp parsing bug — it blocks 38+ tests across CalciteSearchCommandIT alone.
+6. **Target for next round**: Reach ~60-65% (need ~140-250 more tests passing from current 1220/2264). Focus on V4-006 through V4-009 for maximum coverage gain.

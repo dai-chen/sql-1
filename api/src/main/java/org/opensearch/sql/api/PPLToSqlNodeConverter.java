@@ -88,6 +88,8 @@ import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.MinSpanBin;
+import org.opensearch.sql.ast.tree.MvExpand;
+import org.opensearch.sql.ast.tree.NoMv;
 import org.opensearch.sql.ast.tree.Parse;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.RangeBin;
@@ -195,6 +197,20 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     FUNC_MAP.put("avg", "AVG");
     FUNC_MAP.put("min", "MIN");
     FUNC_MAP.put("max", "MAX");
+    // Array/MV functions
+    FUNC_MAP.put("mvjoin", "ARRAY_JOIN");
+    FUNC_MAP.put("mvdedup", "ARRAY_DISTINCT");
+    FUNC_MAP.put("array_compact", "ARRAY_COMPACT");
+    FUNC_MAP.put("array_length", "ARRAY_LENGTH");
+    FUNC_MAP.put("split", "SPLIT");
+    FUNC_MAP.put("mvappend", "MVAPPEND");
+    FUNC_MAP.put("mvfind", "MVFIND");
+    FUNC_MAP.put("mvindex", "MVINDEX");
+    FUNC_MAP.put("mvzip", "MVZIP");
+    FUNC_MAP.put("mvmap", "MVMAP");
+    FUNC_MAP.put("mvsort", "SORT_ARRAY");
+    FUNC_MAP.put("array_slice", "ARRAY_SLICE");
+    FUNC_MAP.put("array", "ARRAY");
   }
 
   private static final Set<String> SQL_DATETIME_KEYWORDS =
@@ -591,8 +607,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitEval(Eval node, Void ctx) {
     Map<String, SqlNode> evalAliases = new java.util.LinkedHashMap<>();
-    List<SqlNode> items = new ArrayList<>();
-    items.add(star());
+    // Collect eval expressions
+    List<Map.Entry<String, SqlNode>> evalEntries = new ArrayList<>();
     for (Let let : node.getExpressionList()) {
       String varName = let.getVar().getField().toString();
       SqlNode expr = let.getExpression().accept(this, null);
@@ -608,10 +624,112 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         });
       }
       evalAliases.put(varName, expr);
-      items.add(as(expr, varName));
+      evalEntries.add(Map.entry(varName, expr));
     }
-    pipe = select(items.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+
+    // Check if any eval variable overrides an existing column in the pipe's SELECT list
+    Set<String> pipeColNames = new java.util.HashSet<>();
+    if (pipe instanceof org.apache.calcite.sql.SqlSelect) {
+      org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+      if (sel.getSelectList() != null) {
+        for (SqlNode item : sel.getSelectList()) {
+          String name = extractPipeColumnName(item);
+          if (name != null) pipeColNames.add(name);
+        }
+      }
+    }
+
+    boolean hasOverride = false;
+    for (var entry : evalEntries) {
+      if (pipeColNames.contains(entry.getKey())) {
+        hasOverride = true;
+        break;
+      }
+    }
+
+    if (hasOverride && pipe instanceof org.apache.calcite.sql.SqlSelect) {
+      // Override case: modify the pipe's SELECT list in-place to replace
+      // overridden columns, then add new columns. This avoids the ambiguity
+      // from SELECT *, expr AS col where col already exists in the subquery.
+      org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+      SqlNodeList oldList = sel.getSelectList();
+
+      // Build a map of existing column name -> expression (for substitution)
+      Map<String, SqlNode> existingExprs = new java.util.HashMap<>();
+      for (SqlNode item : oldList) {
+        String name = extractPipeColumnName(item);
+        if (name != null && item instanceof SqlBasicCall) {
+          SqlBasicCall asCall = (SqlBasicCall) item;
+          if ("AS".equals(asCall.getOperator().getName()) && asCall.operandCount() >= 2) {
+            existingExprs.put(name, asCall.operand(0)); // the expression before AS
+          }
+        }
+      }
+
+      Map<String, SqlNode> overrideMap = new java.util.HashMap<>();
+      List<String> newCols = new ArrayList<>();
+      for (var entry : evalEntries) {
+        if (pipeColNames.contains(entry.getKey())) {
+          SqlNode newExpr = entry.getValue();
+          // Substitute references to the overridden column with the old expression
+          SqlNode oldExpr = existingExprs.get(entry.getKey());
+          if (oldExpr != null) {
+            final String colName = entry.getKey();
+            final SqlNode replacement = oldExpr;
+            newExpr = newExpr.accept(new org.apache.calcite.sql.util.SqlShuttle() {
+              @Override
+              public SqlNode visit(org.apache.calcite.sql.SqlIdentifier id) {
+                if (id.isSimple() && id.getSimple().equals(colName)) {
+                  return replacement;
+                }
+                return id;
+              }
+            });
+          }
+          overrideMap.put(entry.getKey(), as(newExpr, entry.getKey()));
+        } else {
+          newCols.add(entry.getKey());
+        }
+      }
+      List<SqlNode> newItems = new ArrayList<>();
+      for (SqlNode item : oldList) {
+        String name = extractPipeColumnName(item);
+        if (name != null && overrideMap.containsKey(name)) {
+          newItems.add(overrideMap.get(name));
+        } else {
+          newItems.add(item);
+        }
+      }
+      for (String col : newCols) {
+        newItems.add(as(evalAliases.get(col), col));
+      }
+      sel.setSelectList(new SqlNodeList(newItems, SqlParserPos.ZERO));
+    } else {
+      // Simple case: no overrides, just add new columns
+      List<SqlNode> items = new ArrayList<>();
+      items.add(star());
+      for (var entry : evalEntries) {
+        items.add(as(entry.getValue(), entry.getKey()));
+      }
+      pipe = select(items.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    }
     return pipe;
+  }
+
+  /** Extract column name from a SELECT list item (AS alias or plain identifier). */
+  protected String extractPipeColumnName(SqlNode node) {
+    if (node instanceof SqlIdentifier) {
+      SqlIdentifier id = (SqlIdentifier) node;
+      if (id.isStar()) return null;
+      return id.names.get(id.names.size() - 1);
+    }
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) node;
+      if ("AS".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
+        return extractPipeColumnName(call.operand(1));
+      }
+    }
+    return null;
   }
 
   @Override
@@ -1680,13 +1798,28 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           List.of(literal(null)),
           divide(args.get(0), args.get(1)));
     }
-    if ("%".equals(name) && args.size() == 2) return mod(args.get(0), args.get(1));
+    if ("%".equals(name) && args.size() == 2) {
+      return caseWhen(
+          List.of(eq(args.get(1), literal(0))),
+          List.of(literal(null)),
+          mod(args.get(0), args.get(1)));
+    }
     // Special-case rewrites
     if ("if".equals(name))
-      return caseWhen(List.of(args.get(0)), List.of(args.get(1)), args.get(2));
+      return caseWhen(List.of(args.get(0)), List.of(castVarcharIfStringLiteral(args.get(1))), castVarcharIfStringLiteral(args.get(2)));
     if ("ifnull".equals(name)) return call("COALESCE", args.get(0), args.get(1));
     if ("isnull".equals(name) || "is null".equals(name)) return isNull(args.get(0));
     if ("isnotnull".equals(name) || "is not null".equals(name)) return isNotNull(args.get(0));
+    if ("ispresent".equals(name)) return isNotNull(args.get(0));
+    if ("isempty".equals(name)) return or(isNull(args.get(0)), eq(args.get(0), literal("")));
+    if ("isblank".equals(name)) return or(isNull(args.get(0)), eq(call("TRIM", args.get(0)), literal("")));
+    if ("e".equals(name) && args.isEmpty()) return call("EXP", literal(1));
+    if ("mod".equals(name) && args.size() == 2) {
+      return caseWhen(
+          List.of(eq(args.get(1), literal(0))),
+          List.of(literal(null)),
+          mod(args.get(0), args.get(1)));
+    }
     if ("log".equals(name)) {
       if (args.size() == 2) return divide(call("LN", args.get(1)), call("LN", args.get(0)));
       return call("LN", args.get(0));
@@ -1751,27 +1884,27 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return castExtract("MICROSECOND", args.get(0));
     // date_add / adddate
     if ("date_add".equals(name) || "adddate".equals(name)) {
-      SqlNode dateArg = ensureTimestamp(args.get(0));
       SqlNode intervalArg = args.get(1);
       if (intervalArg instanceof SqlBasicCall && ((SqlBasicCall) intervalArg).getOperator().getName().startsWith("INTERVAL_")) {
         String unit = ((SqlBasicCall) intervalArg).getOperator().getName().substring(9);
         SqlNode value = ((SqlBasicCall) intervalArg).operand(0);
-        return cast(call("TIMESTAMPADD", identifier(unit), value, dateArg), typeSpec(SqlTypeName.TIMESTAMP));
+        return cast(call("TIMESTAMPADD", identifier(unit), value, ensureTimestamp(args.get(0))), typeSpec(SqlTypeName.TIMESTAMP));
       }
-      // Plain days → return DATE
-      return cast(call("TIMESTAMPADD", identifier("DAY"), intervalArg, dateArg), typeSpec(SqlTypeName.DATE));
+      // Plain days → preserve input type, but cast TIME to TIMESTAMP
+      SqlNode dateArg = isAlreadyCastToTime(args.get(0)) ? ensureTimestamp(args.get(0)) : args.get(0);
+      return call("TIMESTAMPADD", identifier("DAY"), intervalArg, dateArg);
     }
     // date_sub / subdate
     if ("date_sub".equals(name) || "subdate".equals(name)) {
-      SqlNode dateArg = ensureTimestamp(args.get(0));
       SqlNode intervalArg = args.get(1);
       if (intervalArg instanceof SqlBasicCall && ((SqlBasicCall) intervalArg).getOperator().getName().startsWith("INTERVAL_")) {
         String unit = ((SqlBasicCall) intervalArg).getOperator().getName().substring(9);
         SqlNode value = ((SqlBasicCall) intervalArg).operand(0);
-        return cast(call("TIMESTAMPADD", identifier(unit), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{value}, POS), dateArg), typeSpec(SqlTypeName.TIMESTAMP));
+        return cast(call("TIMESTAMPADD", identifier(unit), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{value}, POS), ensureTimestamp(args.get(0))), typeSpec(SqlTypeName.TIMESTAMP));
       }
-      // Plain days → return DATE
-      return cast(call("TIMESTAMPADD", identifier("DAY"), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{intervalArg}, POS), dateArg), typeSpec(SqlTypeName.DATE));
+      // Plain days → preserve input type, but cast TIME to TIMESTAMP
+      SqlNode dateArg = isAlreadyCastToTime(args.get(0)) ? ensureTimestamp(args.get(0)) : args.get(0);
+      return call("TIMESTAMPADD", identifier("DAY"), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{intervalArg}, POS), dateArg);
     }
     // datediff
     if ("datediff".equals(name))
@@ -1796,9 +1929,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           List.of(eq(dow, intLiteral(1)), eq(dow, intLiteral(2)), eq(dow, intLiteral(3)),
                   eq(dow, intLiteral(4)), eq(dow, intLiteral(5)), eq(dow, intLiteral(6)),
                   eq(dow, intLiteral(7))),
-          List.of(literal("Sunday"), literal("Monday"), literal("Tuesday"),
-                  literal("Wednesday"), literal("Thursday"), literal("Friday"),
-                  literal("Saturday")),
+          List.of(cast(literal("Sunday"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("Monday"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("Tuesday"), typeSpec(SqlTypeName.VARCHAR)),
+                  cast(literal("Wednesday"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("Thursday"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("Friday"), typeSpec(SqlTypeName.VARCHAR)),
+                  cast(literal("Saturday"), typeSpec(SqlTypeName.VARCHAR))),
           cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR)));
     }
     if ("monthname".equals(name)) {
@@ -1809,10 +1942,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
                   eq(mo, intLiteral(4)), eq(mo, intLiteral(5)), eq(mo, intLiteral(6)),
                   eq(mo, intLiteral(7)), eq(mo, intLiteral(8)), eq(mo, intLiteral(9)),
                   eq(mo, intLiteral(10)), eq(mo, intLiteral(11)), eq(mo, intLiteral(12))),
-          List.of(literal("January"), literal("February"), literal("March"),
-                  literal("April"), literal("May"), literal("June"),
-                  literal("July"), literal("August"), literal("September"),
-                  literal("October"), literal("November"), literal("December")),
+          List.of(cast(literal("January"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("February"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("March"), typeSpec(SqlTypeName.VARCHAR)),
+                  cast(literal("April"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("May"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("June"), typeSpec(SqlTypeName.VARCHAR)),
+                  cast(literal("July"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("August"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("September"), typeSpec(SqlTypeName.VARCHAR)),
+                  cast(literal("October"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("November"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("December"), typeSpec(SqlTypeName.VARCHAR))),
           cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR)));
     }
     // weekday: 0=Monday...6=Sunday from DAYOFWEEK (1=Sunday...7=Saturday)
@@ -1913,7 +2046,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     // addtime
     if ("addtime".equals(name)) {
-      SqlNode ts = cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlNode ts = args.get(0);
       SqlNode h = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), args.get(1)}, POS);
       SqlNode m = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), args.get(1)}, POS);
       SqlNode s = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.SECOND, null, POS), args.get(1)}, POS);
@@ -1922,7 +2055,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     // subtime
     if ("subtime".equals(name)) {
-      SqlNode ts = cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlNode ts = args.get(0);
       SqlNode h = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), args.get(1)}, POS);
       SqlNode m = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), args.get(1)}, POS);
       SqlNode s = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.SECOND, null, POS), args.get(1)}, POS);
@@ -2018,6 +2151,33 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return literal(utcNow.toLocalDate().toString());
     if (Set.of("curtime", "current_time", "utc_time").contains(name))
       return literal(utcNow.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
+    // mvindex: 0-based PPL indexing → 1-based Calcite ITEM / ARRAY_SLICE
+    if ("mvindex".equals(name)) {
+      SqlNode arr = args.get(0);
+      SqlNode idx = args.get(1);
+      if (args.size() == 2) {
+        // Single element: arr[idx+1] for positive, arr[ARRAY_LENGTH(arr)+idx+1] for negative
+        SqlNode posIdx = plus(idx, intLiteral(1));
+        SqlNode negIdx = plus(call("ARRAY_LENGTH", arr), plus(idx, intLiteral(1)));
+        SqlNode adjustedIdx = caseWhen(
+            List.of(lt(idx, intLiteral(0))),
+            List.of(negIdx),
+            posIdx);
+        return new SqlBasicCall(SqlStdOperatorTable.ITEM, new SqlNode[]{arr, adjustedIdx}, POS);
+      }
+      // Range: mvindex(arr, start, end) → ARRAY_SLICE(arr, start+1, end-start+1)
+      SqlNode end = args.get(2);
+      return call("ARRAY_SLICE", arr, plus(idx, intLiteral(1)), plus(minus(end, idx), intLiteral(1)));
+    }
+    // mvappend: single arg → ARRAY(arg), multiple → ARRAY_CONCAT(args...)
+    if ("mvappend".equals(name)) {
+      if (args.size() == 1) return call("ARRAY", args.get(0));
+      return call("ARRAY_CONCAT", args.toArray(new SqlNode[0]));
+    }
+    // mvzip: map to ARRAYS_ZIP
+    if ("mvzip".equals(name)) {
+      return call("ARRAYS_ZIP", args.get(0), args.get(1));
+    }
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     return call(sqlName, args.toArray(new SqlNode[0]));
@@ -2060,6 +2220,19 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       List<UnresolvedExpression> args = node.getArgList();
       SqlNode size = (args != null && !args.isEmpty()) ? args.get(0).accept(this, null) : intLiteral(10);
       return call("TAKE", field, size);
+    }
+    if ("list".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      return call("LIST", field);
+    }
+    if ("values".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      List<UnresolvedExpression> args = node.getArgList();
+      if (args != null && !args.isEmpty()) {
+        SqlNode limit = args.get(0).accept(this, null);
+        return call("VALUES", field, limit);
+      }
+      return call("VALUES", field);
     }
     if ("median".equals(name))
       return call("percentile_approx", node.getField().accept(this, null), intLiteral(50));
@@ -2142,10 +2315,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     List<SqlNode> thens = new ArrayList<>();
     for (When w : node.getWhenClauses()) {
       whens.add(w.getCondition().accept(this, null));
-      thens.add(w.getResult().accept(this, null));
+      thens.add(castVarcharIfStringLiteral(w.getResult().accept(this, null)));
     }
     SqlNode elseExpr =
-        node.getElseClause().map(e -> e.accept(this, null)).orElse(literal(null));
+        node.getElseClause().map(e -> castVarcharIfStringLiteral(e.accept(this, null))).orElse(literal(null));
     return caseWhen(whens, thens, elseExpr);
   }
 
@@ -2156,8 +2329,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     SqlTypeName sqlType;
     switch (typeName) {
       case "STRING":
-        sqlType = SqlTypeName.VARCHAR;
-        break;
+        return cast(expr, typeSpec(SqlTypeName.VARCHAR));
       case "INT":
       case "INTEGER":
         sqlType = SqlTypeName.INTEGER;
@@ -2172,8 +2344,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         sqlType = SqlTypeName.DOUBLE;
         break;
       case "BOOLEAN":
-        sqlType = SqlTypeName.BOOLEAN;
-        break;
+        // Calcite's CAST(int AS BOOLEAN) doesn't follow Spark/Postgres semantics.
+        // Numeric: non-zero → true, zero → false
+        // String: '1'/'true' → true, '0'/'false' → false, else → null
+        // Field ref: try numeric comparison, fall back to string matching
+        return castToBoolean(node, expr);
       case "DATE":
         sqlType = SqlTypeName.DATE;
         break;
@@ -2193,6 +2368,46 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   private static SqlDataTypeSpec typeSpec(SqlTypeName typeName) {
     return new SqlDataTypeSpec(new SqlBasicTypeNameSpec(typeName, POS), POS);
+  }
+
+  /** Wrap string literals in CAST(... AS VARCHAR) to prevent Calcite CHAR(N) padding in CASE WHEN. */
+  private static SqlNode castVarcharIfStringLiteral(SqlNode node) {
+    if (node instanceof SqlLiteral && ((SqlLiteral) node).getTypeName() == SqlTypeName.CHAR) {
+      return cast(node, typeSpec(SqlTypeName.VARCHAR));
+    }
+    return node;
+  }
+
+  /** CAST to BOOLEAN with Spark/Postgres semantics. */
+  private SqlNode castToBoolean(Cast node, SqlNode expr) {
+    UnresolvedExpression src = node.getExpression();
+    if (src instanceof Literal) {
+      Object val = ((Literal) src).getValue();
+      if (val instanceof Number) {
+        return neq(expr, literal(0));
+      }
+      if (val instanceof String) {
+        return caseWhen(
+            List.of(or(eq(expr, literal("1")), eq(call("UPPER", expr), literal("TRUE")))),
+            List.of(literal(true)),
+            caseWhen(
+                List.of(or(eq(expr, literal("0")), eq(call("UPPER", expr), literal("FALSE")))),
+                List.of(literal(false)),
+                literal(null)));
+      }
+    }
+    // Field reference: string-based boolean matching, null for non-boolean-like values
+    SqlNode upper = call("UPPER", cast(expr, typeSpec(SqlTypeName.VARCHAR)));
+    return caseWhen(
+        List.of(isNull(expr)),
+        List.of(literal(null)),
+        caseWhen(
+            List.of(or(eq(upper, literal("1")), eq(upper, literal("TRUE")))),
+            List.of(literal(true)),
+            caseWhen(
+                List.of(or(eq(upper, literal("0")), eq(upper, literal("FALSE")))),
+                List.of(literal(false)),
+                literal(null))));
   }
 
   private SqlNode ensureTimestamp(SqlNode node) {
@@ -2393,6 +2608,19 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       builder = builder.where(filter);
     }
     pipe = builder.build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitNoMv(NoMv node, Void ctx) {
+    // NoMv always overrides an existing field — delegate to visitEval which handles overrides
+    return visitEval((Eval) node.rewriteAsEval(), ctx);
+  }
+
+  @Override
+  public SqlNode visitMvExpand(MvExpand node, Void ctx) {
+    // MvExpand needs schema to enumerate columns — delegate to DynamicPPLToSqlNodeConverter
+    // Base converter: just pass through (no-op for non-array fields)
     return pipe;
   }
 
