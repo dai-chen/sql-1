@@ -54,6 +54,13 @@ import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.ParseMethod;
 import org.opensearch.sql.ast.expression.QualifiedName;
+import org.opensearch.sql.ast.expression.SearchAnd;
+import org.opensearch.sql.ast.expression.SearchComparison;
+import org.opensearch.sql.ast.expression.SearchExpression;
+import org.opensearch.sql.ast.expression.SearchGroup;
+import org.opensearch.sql.ast.expression.SearchLiteral;
+import org.opensearch.sql.ast.expression.SearchNot;
+import org.opensearch.sql.ast.expression.SearchOr;
 import org.opensearch.sql.ast.expression.Span;
 import org.opensearch.sql.ast.expression.SpanUnit;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
@@ -88,6 +95,7 @@ import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Replace;
+import org.opensearch.sql.ast.tree.Search;
 import org.opensearch.sql.ast.tree.ReplacePair;
 import org.opensearch.sql.ast.tree.Sort;
 import org.opensearch.sql.ast.tree.SpanBin;
@@ -317,6 +325,154 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     String tableName = node.getTableQualifiedName().toString();
     pipe = select(star()).from(table(tableName)).build();
     return pipe;
+  }
+
+  @Override
+  public SqlNode visitSearch(Search node, Void ctx) {
+    SearchExpression expr = node.getOriginalExpression();
+    if (expr != null) {
+      SqlNode condition = convertSearchExpr(expr);
+      if (condition != null) {
+        pipe = select(star()).from(wrapAsSubquery()).where(condition).build();
+      }
+    }
+    return pipe;
+  }
+
+  private SqlNode convertSearchExpr(SearchExpression expr) {
+    if (expr instanceof SearchComparison) {
+      SearchComparison cmp = (SearchComparison) expr;
+      String fieldName = cmp.getField().getField().toString();
+      SqlNode field = identifier(fieldName);
+      String rawValue = ((Literal) ((SearchLiteral) cmp.getValue()).getLiteral()).getValue().toString();
+      SqlNode valueLiteral;
+      if ("@timestamp".equals(fieldName)) {
+        // Time modifier field — resolve date math to actual timestamp string
+        String resolved = resolveDateMathToTimestamp(rawValue);
+        valueLiteral = SqlLiteral.createCharString(resolved, POS);
+      } else {
+        // Regular field comparison — use string literal
+        valueLiteral = SqlLiteral.createCharString(rawValue, POS);
+      }
+      switch (cmp.getOperator()) {
+        case GREATER_OR_EQUAL: return gte(field, valueLiteral);
+        case LESS_OR_EQUAL: return lte(field, valueLiteral);
+        case GREATER_THAN: return gt(field, valueLiteral);
+        case LESS_THAN: return lt(field, valueLiteral);
+        case EQUALS: return eq(field, valueLiteral);
+        case NOT_EQUALS: return neq(field, valueLiteral);
+        default: return null;
+      }
+    } else if (expr instanceof SearchAnd) {
+      SearchAnd and = (SearchAnd) expr;
+      SqlNode left = convertSearchExpr(and.getLeft());
+      SqlNode right = convertSearchExpr(and.getRight());
+      if (left == null) return right;
+      if (right == null) return left;
+      return and(left, right);
+    } else if (expr instanceof SearchOr) {
+      SearchOr or = (SearchOr) expr;
+      SqlNode left = convertSearchExpr(or.getLeft());
+      SqlNode right = convertSearchExpr(or.getRight());
+      if (left == null) return right;
+      if (right == null) return left;
+      return or(left, right);
+    } else if (expr instanceof SearchGroup) {
+      return convertSearchExpr(((SearchGroup) expr).getExpression());
+    } else if (expr instanceof SearchNot) {
+      SqlNode inner = convertSearchExpr(((SearchNot) expr).getExpression());
+      return inner != null ? not(inner) : null;
+    }
+    // SearchLiteral, SearchIn — not supported in V4 yet
+    return null;
+  }
+
+  private static final java.time.format.DateTimeFormatter TS_FMT =
+      java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+  /** Resolve an OpenSearch date math expression to an actual timestamp string. */
+  private static String resolveDateMathToTimestamp(String dateMath) {
+    java.time.ZonedDateTime now = java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC);
+    if (dateMath == null || dateMath.isEmpty()) return now.format(TS_FMT);
+    if ("now".equals(dateMath) || "now()".equals(dateMath)) return now.format(TS_FMT);
+    // Unix millis
+    if (dateMath.matches("^\\d+(\\.\\d+)?$")) {
+      long millis = new java.math.BigDecimal(dateMath).longValue();
+      return java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneOffset.UTC).format(TS_FMT);
+    }
+    // ISO timestamp
+    if (dateMath.contains("T") || dateMath.matches("^\\d{4}-\\d{2}-\\d{2}.*")) {
+      try {
+        return java.time.ZonedDateTime.parse(dateMath,
+            java.time.format.DateTimeFormatter.ISO_DATE_TIME).format(TS_FMT);
+      } catch (Exception e) {
+        try {
+          return java.time.LocalDateTime.parse(dateMath,
+              java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")).format(TS_FMT);
+        } catch (Exception e2) { return dateMath; }
+      }
+    }
+    // OS date math: now[/unit][+-Nunit]...
+    if (dateMath.startsWith("now")) {
+      return resolveOsDateMath(dateMath.substring(3), now).format(TS_FMT);
+    }
+    return dateMath;
+  }
+
+  /** Parse and resolve OS date math operations: /unit for snap, +/-Nunit for offset. */
+  private static java.time.ZonedDateTime resolveOsDateMath(String ops, java.time.ZonedDateTime t) {
+    int i = 0;
+    while (i < ops.length()) {
+      char c = ops.charAt(i);
+      if (c == '/') {
+        // Snap: /unit
+        int j = i + 1;
+        while (j < ops.length() && Character.isLetterOrDigit(ops.charAt(j))) j++;
+        t = applyOsSnap(t, ops.substring(i + 1, j));
+        i = j;
+      } else if (c == '+' || c == '-') {
+        // Offset: +/-Nunit
+        int j = i + 1;
+        while (j < ops.length() && Character.isDigit(ops.charAt(j))) j++;
+        int val = (j > i + 1) ? Integer.parseInt(ops.substring(i + 1, j)) : 1;
+        int k = j;
+        while (k < ops.length() && Character.isLetter(ops.charAt(k))) k++;
+        String unit = ops.substring(j, k);
+        t = applyOsOffset(t, c == '+' ? val : -val, unit);
+        i = k;
+      } else {
+        break;
+      }
+    }
+    return t;
+  }
+
+  private static java.time.ZonedDateTime applyOsSnap(java.time.ZonedDateTime t, String unit) {
+    return switch (unit) {
+      case "s" -> t.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+      case "m" -> t.truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
+      case "h", "H" -> t.truncatedTo(java.time.temporal.ChronoUnit.HOURS);
+      case "d" -> t.truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+      case "w" -> t.minusDays((t.getDayOfWeek().getValue() % 7))
+          .truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+      case "M" -> t.withDayOfMonth(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+      case "y" -> t.withDayOfYear(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+      default -> t;
+    };
+  }
+
+  private static java.time.ZonedDateTime applyOsOffset(
+      java.time.ZonedDateTime t, int val, String unit) {
+    return switch (unit) {
+      case "s" -> t.plusSeconds(val);
+      case "m" -> t.plusMinutes(val);
+      case "h", "H" -> t.plusHours(val);
+      case "d" -> t.plusDays(val);
+      case "w" -> t.plusWeeks(val);
+      case "M" -> t.plusMonths(val);
+      case "y" -> t.plusYears(val);
+      default -> t;
+    };
   }
 
   @Override

@@ -71,7 +71,7 @@
       ],
       "priority": 5,
       "passes": false,
-      "notes": "~82 failures. Before working on search/relevance fixes, do these first: (1) Wrap V4 transpilation errors with ResponseException in PPLIntegTestCase.executeQuery() and executeQueryToString() \u2014 currently V4 throws client-side exceptions (SyntaxCheckException, IllegalArgumentException) instead of ResponseException, failing all error-handling tests. Add try-catch around transpileV4() that catches Exception and wraps in ResponseException. (2) Search/relevance functions (match, query_string) may need UDF/TVF registration \u2014 if blocked, skip and move to V4-006."
+      "notes": "~82 failures. Before working on search/relevance fixes, do these first: (1) Wrap V4 transpilation errors with ResponseException in PPLIntegTestCase.executeQuery() and executeQueryToString() \u2014 currently V4 throws client-side exceptions (SyntaxCheckException, IllegalArgumentException) instead of ResponseException, failing all error-handling tests. Add try-catch around transpileV4() that catches Exception and wraps in ResponseException. (Only wrap without any fallback logic!) (2) Search/relevance functions (match, query_string) may need UDF/TVF registration \u2014 if blocked, skip and move to V4-006."
     },
     {
       "id": "V4-006",

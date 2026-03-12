@@ -109,6 +109,35 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     return sqlNode.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
   }
 
+  private static ResponseException createSyntheticResponseException(Exception cause) {
+    try {
+      String errorBody = new JSONObject()
+          .put("error", new JSONObject()
+              .put("reason", "V4 transpilation error")
+              .put("details", cause.getMessage())
+              .put("type", cause.getClass().getSimpleName()))
+          .put("status", 400)
+          .toString();
+      org.apache.hc.core5.http.message.RequestLine requestLine =
+          new org.apache.hc.core5.http.message.RequestLine("POST", "/_plugins/_ppl",
+              org.apache.hc.core5.http.HttpVersion.HTTP_1_1);
+      org.apache.hc.core5.http.HttpHost host = new org.apache.hc.core5.http.HttpHost("localhost");
+      org.apache.hc.core5.http.message.BasicClassicHttpResponse httpResponse =
+          new org.apache.hc.core5.http.message.BasicClassicHttpResponse(400, "Bad Request");
+      httpResponse.setEntity(new org.apache.hc.core5.http.io.entity.StringEntity(
+          errorBody, org.apache.hc.core5.http.ContentType.APPLICATION_JSON));
+      java.lang.reflect.Constructor<Response> ctor = Response.class.getDeclaredConstructor(
+          org.apache.hc.core5.http.message.RequestLine.class,
+          org.apache.hc.core5.http.HttpHost.class,
+          org.apache.hc.core5.http.ClassicHttpResponse.class);
+      ctor.setAccessible(true);
+      Response response = ctor.newInstance(requestLine, host, httpResponse);
+      return new ResponseException(response);
+    } catch (Exception e) {
+      throw new RuntimeException("Failed to create synthetic ResponseException", e);
+    }
+  }
+
   @Override
   protected void init() throws Exception {
     super.init();
@@ -121,15 +150,21 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
 
   protected JSONObject executeQuery(String query) throws IOException {
     if (V4_ENABLED) {
-      query = query.replace("\\\"", "\"");
-      String sql = transpileV4(query);
-      LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
-      Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
-      request.setJsonEntity(new JSONObject().put("query", sql).toString());
-      Response response = client().performRequest(request);
-      Assert.assertEquals(200, response.getStatusLine().getStatusCode());
-      String body = getResponseBody(response, true);
-      return stripMetadataColumns(jsonify(body), sql);
+      try {
+        query = query.replace("\\\"", "\"");
+        String sql = transpileV4(query);
+        LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
+        Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
+        request.setJsonEntity(new JSONObject().put("query", sql).toString());
+        Response response = client().performRequest(request);
+        Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+        String body = getResponseBody(response, true);
+        return stripMetadataColumns(jsonify(body), sql);
+      } catch (ResponseException e) {
+        throw e;
+      } catch (Exception e) {
+        throw createSyntheticResponseException(e);
+      }
     }
     return jsonify(executeQueryToString(query));
   }
@@ -148,14 +183,20 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
         Assert.assertEquals(200, response.getStatusLine().getStatusCode());
         return getResponseBody(response, true);
       }
-      query = query.replace("\\\"", "\"");
-      String sql = transpileV4(query);
-      LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
-      Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
-      request.setJsonEntity(new JSONObject().put("query", sql).toString());
-      Response response = client().performRequest(request);
-      Assert.assertEquals(200, response.getStatusLine().getStatusCode());
-      return getResponseBody(response, true);
+      try {
+        query = query.replace("\\\"", "\"");
+        String sql = transpileV4(query);
+        LOG.info("[V4] PPL: {} -> SQL: {}", query, sql);
+        Request request = new Request("POST", "/_plugins/_sql?format=jdbc");
+        request.setJsonEntity(new JSONObject().put("query", sql).toString());
+        Response response = client().performRequest(request);
+        Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+        return getResponseBody(response, true);
+      } catch (ResponseException e) {
+        throw e;
+      } catch (Exception e) {
+        throw createSyntheticResponseException(e);
+      }
     }
     Response response = client().performRequest(buildRequest(query, QUERY_API_ENDPOINT));
     Assert.assertEquals(200, response.getStatusLine().getStatusCode());
