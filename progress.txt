@@ -668,3 +668,46 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Brain pattern method requires ML/clustering logic that cannot be expressed in pure SQL — correctly throws UnsupportedOperationException.
   - showNumberedToken in patterns requires the PATTERN_PARSER UDF which returns a struct — not expressible in the SqlNode→SQL string path.
 ---
+
+## Round Summary (all stories complete, iteration 1)
+
+### Progress
+- **Completed this round**: V4-010 (streamstats/new commands, +49 tests, 60.1%→62.2%). Streamstats PARTITION BY fix (removed `|| node.isGlobal()` suppression). visitRex, visitPatterns, visitMultisearch committed from working tree. CalciteStreamstatsCommandIT: 19→33 pass. Rex 10/18, Patterns 3/15, Multisearch 4/17, NewAdded 14/22.
+- **Remaining**: 18 stories still incomplete (V4-011 through V4-028):
+  - V4-011: Math/string/text/operator/JSON functions (~60 failures) — mostly function mappings, next by priority
+  - V4-012: Long-tail cleanup (~150+ failures across 40+ classes) — diminishing returns per fix
+  - V4-013: Array functions (59 failures) — partially blocked by missing lambda functions (forall, exists, filter, transform, reduce)
+  - V4-014: MV commands (54 failures) — needs UNNEST/ARRAY_AGG patterns
+  - V4-015/V4-016: Chart/timechart enhancements (45 failures) — limit/useother, per functions, aligntime
+  - V4-017–V4-025: Feature implementations (JSON, rex, patterns, multisearch, spath, addtotals, expand/flatten/transpose, geo, long-tail)
+  - V4-026/V4-027/V4-028: DEFERRED — blocked on engine-level UDF/TVF registration
+- **Blockers**:
+  - Streamstats global+window+by (6 tests): requires correlate/self-join approach, not expressible as simple window function
+  - Streamstats reset_before/reset_after (4 tests): requires segment ID computation via cumulative sums
+  - Rex backslash double-escaping: SqlCharStringLiteral escapes `\d` → `\\d`, breaking 4 regex tests
+  - Patterns brain method (7 tests): requires ML/clustering logic, not expressible in SQL
+  - Patterns showNumberedToken (5 tests): requires PATTERN_PARSER UDF returning struct
+  - Engine-level TIME casting, nanosecond parsing (fixed by human intervention), LIST/VALUES aggregate still unregistered
+
+### PoC Direction Check
+- **Approach validation**: Still solid. The nanosecond timestamp engine fix (human intervention) unblocked ~45 tests, and the MULTISET→ARRAY type mapping fix unblocked ~20 more. These engine-side fixes combined with the converter work should push the effective rate higher when next measured. The SqlNode converter architecture continues to handle new command types (rex, patterns, multisearch, streamstats) without structural issues.
+- **Surprises**:
+  - Easier than expected: The streamstats PARTITION BY fix was a one-line change (`|| node.isGlobal()` removal) that fixed 14 tests. The visitRex/visitPatterns/visitMultisearch were already in the working tree — just needed committing.
+  - Harder than expected: Streamstats global+window+by is fundamentally not expressible as a SQL window function — it requires the correlate/self-join approach from CalciteRelNodeVisitor. Rex backslash escaping is a systemic issue affecting all regex commands.
+  - Assumption confirmed: Error message format mismatches (~30 tests) are architecturally unfixable in the converter — V4 produces different exception types than the PPL engine. Human intervention confirmed these should be excluded from the 85% target.
+- **Alternative approaches**: For streamstats global+window+by, the CalciteRelNodeVisitor has a complete implementation using `buildStreamWindowJoinPlan()` — porting to SqlNode form would require generating LATERAL JOINs or correlated subqueries. Worth considering if these 6 tests matter for the 85% target. For rex backslash escaping, may need a custom SqlCharStringLiteral subclass or pre-processing to prevent double-escaping.
+- **Risk areas**:
+  - V4-011 (function mappings) should be straightforward but the ~60 failures span many function categories — need to triage which are simple FUNC_MAP additions vs engine-level issues.
+  - V4-012 (long-tail) is the biggest remaining block at ~150+ failures. Many are 1-2 per class, making them expensive to diagnose individually.
+  - The gap from 62.2% to 85% requires ~516 more tests passing. With ~110 DEFERRED (V4-026–V4-028) and ~30 error-message-format tests excluded, effective target is ~85% of ~2124 = ~1805, needing ~396 more from current 1409. Still a significant lift.
+- **Open questions**:
+  - With the engine nanosecond fix and MULTISET→ARRAY fix now in place, what's the actual current pass rate? The 62.2% was measured before these engine fixes. A fresh `ppl_it_rate.sh` run would likely show a higher baseline.
+  - Should V4-011 (function mappings) or V4-012 (long-tail) be prioritized next? V4-011 is bounded and predictable; V4-012 has higher total test count but diminishing returns.
+  - Rex backslash escaping: fix in SqlCharStringLiteral, or pre-process regex strings before passing to literal()? The latter is simpler but may miss edge cases.
+
+### Recommended Next Steps
+1. **Re-measure baseline**: Run `ppl_it_rate.sh` to capture the actual rate after engine fixes (nanosecond timestamp + MULTISET→ARRAY). Likely 64-66% already.
+2. **V4-011** (math/string/text/operator/JSON functions) is next by priority. Run CalciteMathematicalFunctionIT, CalcitePPLStringBuiltinFunctionIT, CalciteTextFunctionIT, CalciteOperatorIT, CalcitePPLJsonBuiltinFunctionIT first. Most should be FUNC_MAP additions or minor visitFunction tweaks.
+3. **V4-012** (long-tail) after V4-011 — many scattered failures may already be fixed by V4-011's function mappings.
+4. **Rex backslash fix**: Investigate SqlCharStringLiteral escaping behavior. A targeted fix here would recover 4 rex tests and potentially help patterns/parse commands too.
+5. **Target**: Reach ~70% by end of next round (need ~175+ more tests from current ~1409, or ~110+ from post-engine-fix baseline).
