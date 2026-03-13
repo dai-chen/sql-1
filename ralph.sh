@@ -8,6 +8,7 @@
 set -e
 
 AGENT="sisyphus"
+MODEL="claude-opus-4.6-1m"
 MAX_ITERATIONS=0  # 0 = unlimited (use STOP_RALPH to stop)
 
 while [[ $# -gt 0 ]]; do
@@ -105,7 +106,7 @@ summarize() {
   echo "  Ralph Summary — $REASON after $ITERATION iterations"
   echo "==============================================================="
 
-  kiro-cli chat --agent "$AGENT" --no-interactive --trust-all-tools \
+  kiro-cli chat --agent "$AGENT" --model "$MODEL" --no-interactive --trust-all-tools \
     "Read prd.json, progress.txt, and ralph-prompt.md. The Ralph loop just stopped ($REASON after $ITERATION iterations). Append a round summary to progress.txt with these sections:
 
 ## Round Summary ($REASON, iteration $ITERATION)
@@ -146,7 +147,7 @@ while [ ! -f "$SCRIPT_DIR/STOP_RALPH" ]; do
   echo "  Ralph Iteration $ITERATION — $REMAINING stories remaining"
   echo "==============================================================="
 
-  OUTPUT=$(kiro-cli chat --agent "$AGENT" --no-interactive --trust-all-tools \
+  OUTPUT=$(kiro-cli chat --agent "$AGENT" --model "$MODEL" --no-interactive --trust-all-tools \
     "Read ralph-prompt.md, prd.json, and progress.txt. Pick the next incomplete story, implement it, verify, update state. One task only." \
     2>&1 | tee /dev/stderr) || true
 
