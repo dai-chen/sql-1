@@ -1,0 +1,267 @@
+{
+  "project": "PoC: Unified Query Pipeline for Analytics Engine Integration",
+  "branchName": "poc/analytics-integ-unified-query-pipeline",
+  "description": "Validate the end-to-end flow of PPL and SQL queries against a Parquet-backed index through the SQL/PPL plugin, with RelNode handoff to the analytics-plugin. See docs/plans/poc-option-b.md for full plan.",
+  "buildCommand": "./gradlew build -x integTest",
+  "testCommand": "./gradlew test",
+  "verifyCommand": "",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create analytics-engine-stub Gradle submodule",
+      "description": "As a developer, I want a new analytics-engine-stub/ Gradle submodule so that analytics engine SPI interfaces and mock implementations are clearly separated from SQL/PPL plugin code.",
+      "acceptanceCriteria": [
+        "New analytics-engine-stub/ directory exists with build.gradle",
+        "Module is registered in settings.gradle",
+        "Module compiles with Calcite dependency",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Copy SPI interfaces from analytics engine PoC",
+      "description": "As a developer, I want the analytics engine SPI interfaces (EngineCapabilities, QueryPlanExecutor, SchemaProvider) copied into analytics-engine-stub/ so the SQL/PPL plugin can depend on them.",
+      "acceptanceCriteria": [
+        "EngineCapabilities.java copied into analytics-engine-stub/ with correct package",
+        "QueryPlanExecutor.java copied into analytics-engine-stub/",
+        "SchemaProvider.java copied into analytics-engine-stub/",
+        "All interfaces compile without modification",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Source: https://github.com/mch2/OpenSearch/tree/planning-poc/sandbox/libs/analytics-framework/src/main/java/org/opensearch/analytics"
+    },
+    {
+      "id": "US-003",
+      "title": "Add query routing logic for Parquet indices in PPL REST handler",
+      "description": "As a developer, I want the PPL REST handler to detect when a query targets a Parquet-backed index and route it to a new code path, so that Parquet queries can be handled differently from Lucene queries.",
+      "acceptanceCriteria": [
+        "PPL REST handler extracts target index name from the query",
+        "A hardcoded flag or mock index setting determines Lucene vs Parquet",
+        "Parquet index queries enter a new code path (returns placeholder error or empty response for now)",
+        "Lucene index queries are completely unaffected — existing pipeline unchanged",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Phase 1. Use hardcoded flag if no real Parquet index setting available. Reference RestUnifiedSQLQueryAction from ANSI SQL PoC for wiring pattern."
+    },
+    {
+      "id": "US-004",
+      "title": "Add query routing logic for Parquet indices in SQL REST handler",
+      "description": "As a developer, I want the SQL REST handler to detect when a query targets a Parquet-backed index and route it to a new code path, same as the PPL handler.",
+      "acceptanceCriteria": [
+        "SQL REST handler extracts target index name from the query",
+        "Same routing mechanism as PPL (shared logic where possible)",
+        "Parquet index queries enter the new code path",
+        "Lucene index queries are completely unaffected",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Phase 1. Same routing logic as US-003 but for SQL endpoint."
+    },
+    {
+      "id": "US-005",
+      "title": "Wire Parquet path with stub response and JDBC formatting",
+      "description": "As a developer, I want the Parquet code path to return a valid JDBC-formatted response with hardcoded schema and rows, so that the end-to-end REST round-trip works before real RelNode logic is added.",
+      "acceptanceCriteria": [
+        "POST _plugins/_ppl with a Parquet index query returns valid JDBC JSON response",
+        "POST _plugins/_sql with a Parquet index query returns valid JDBC JSON response",
+        "Response contains schema (column names and types) and datarows",
+        "Response format is indistinguishable from a Lucene query response in structure",
+        "Uses existing response formatter infrastructure (not custom formatting)",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Phase 2. Stub returns hardcoded schema + rows. This establishes the response formatting path."
+    },
+    {
+      "id": "US-006",
+      "title": "Add basic explain API support for Parquet path",
+      "description": "As a developer, I want the _explain endpoint to return a placeholder plan for Parquet queries, so that explain works end-to-end before real RelNode logic is added.",
+      "acceptanceCriteria": [
+        "POST _plugins/_ppl/_explain with a Parquet index query returns a valid explain response",
+        "POST _plugins/_sql/_explain with a Parquet index query returns a valid explain response",
+        "Explain response contains a placeholder plan description",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Phase 2."
+    },
+    {
+      "id": "US-007",
+      "title": "Add integration test scaffold for Parquet query path",
+      "description": "As a developer, I want integration tests in integ-test/ covering the full REST round-trip for Parquet queries (query, explain, error cases), so that subsequent phases can add real logic while keeping ITs green.",
+      "acceptanceCriteria": [
+        "New IT class in integ-test/ for Parquet query path",
+        "IT covers: PPL query returns valid response, SQL query returns valid response",
+        "IT covers: PPL explain returns valid response, SQL explain returns valid response",
+        "IT covers: Lucene query still works (no regression)",
+        "All ITs pass with ./gradlew :integ-test:integTest",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Phase 2. This scaffold will be extended in later phases. Tests use stub responses for now."
+    },
+    {
+      "id": "US-008",
+      "title": "Implement mock Calcite Schema for Parquet index",
+      "description": "As a developer, I want a mock Calcite Schema in analytics-engine-stub/ that defines a test Parquet index with representative column types, so that RelNode generation can be tested against it.",
+      "acceptanceCriteria": [
+        "Mock Schema defines a test table with columns: string, long, timestamp (standard Calcite SqlTypeName), boolean",
+        "Schema uses standard Calcite types (TIMESTAMP, VARCHAR, BIGINT, BOOLEAN) — NOT OpenSearch UDTs",
+        "Schema can be registered in a Calcite FrameworkConfig",
+        "Unit test validates type mapping",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Phase 3. In analytics-engine-stub/ module. Use standard Calcite SqlTypeName, not OpenSearch EXPR_TIMESTAMP UDT."
+    },
+    {
+      "id": "US-009",
+      "title": "Implement EngineCapabilities for mock Parquet adapter",
+      "description": "As a developer, I want an EngineCapabilities implementation that declares which operators and functions the mock Parquet adapter supports, so that pushdown decisions can be tested.",
+      "acceptanceCriteria": [
+        "EngineCapabilities declares support for: LogicalFilter, LogicalProject, LogicalAggregate, LogicalSort",
+        "EngineCapabilities declares supported standard functions (basic math, string, comparison)",
+        "EngineCapabilities does NOT declare support for full-text search functions (match, match_phrase)",
+        "Unit test validates supportsOperator() and supportsAllFunctions() behavior",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Phase 3. In analytics-engine-stub/ module."
+    },
+    {
+      "id": "US-010",
+      "title": "Implement absorption rules for mock Parquet adapter",
+      "description": "As a developer, I want absorption rules (filter, project, sort, aggregate pushdown) gated by EngineCapabilities, so that supported operators are pushed into the boundary scan node.",
+      "acceptanceCriteria": [
+        "Absorption rules push filter, project, sort, aggregate into boundary scan when EngineCapabilities supports them",
+        "Unsupported operators remain as Calcite logical nodes above the boundary",
+        "Unit tests validate pushdown for each operator type",
+        "Unit test validates that unsupported operator stays above boundary",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 3. In analytics-engine-stub/ module."
+    },
+    {
+      "id": "US-011",
+      "title": "Wire PPL V3 RelNode generation with mock Parquet Schema",
+      "description": "As a developer, I want PPL V3 queries to generate a Calcite RelNode using the mock Parquet Schema and absorption rules, replacing the stub response from Phase 2.",
+      "acceptanceCriteria": [
+        "PPL query 'source = parquet_index | where status = 200 | fields timestamp, status, message' generates RelNode with filter + project absorbed",
+        "PPL query 'source = parquet_index | stats count() by status' generates RelNode with aggregate absorbed",
+        "PPL query 'source = parquet_index | sort timestamp | head 100' generates RelNode with sort + limit absorbed",
+        "Phase 2 ITs updated to use real RelNode generation and still pass",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Phase 4. Wire UnifiedQueryPlanner with mock Schema from analytics-engine-stub/."
+    },
+    {
+      "id": "US-012",
+      "title": "Verify fail-fast for unsupported PPL operations on Parquet",
+      "description": "As a developer, I want unsupported PPL operations to fail fast with a clear error when targeting a Parquet index, so that users get immediate feedback instead of silent incorrect results.",
+      "acceptanceCriteria": [
+        "PPL query with match() on Parquet index returns clear error message (not Calcite in-memory fallback)",
+        "PPL query with function not in EngineCapabilities returns clear error message",
+        "Error messages indicate the operation is not supported for Parquet indices",
+        "IT added for fail-fast error cases",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Phase 4. Test queries: 'source = parquet_index | where match(message, \"error\")' and 'source = parquet_index | eval new_field = upper(message)' (if upper not in EngineCapabilities)."
+    },
+    {
+      "id": "US-013",
+      "title": "Verify datetime functions work without UDT interference on Parquet",
+      "description": "As a developer, I want to verify that PPL datetime functions work correctly with standard Calcite TIMESTAMP types and are not broken by PPL V3's custom UDT overrides.",
+      "acceptanceCriteria": [
+        "PPL query 'source = parquet_index | eval hour = hour(timestamp) | where timestamp > \"2024-01-01\"' generates correct RelNode",
+        "PPL query 'source = parquet_index | stats count() by span(timestamp, 1h)' generates correct RelNode",
+        "No errors from UDT type mismatch (EXPR_TIMESTAMP vs standard TIMESTAMP)",
+        "ITs added for datetime queries",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Phase 4. Critical validation — PPL V3 overwrites all datetime functions with UDT-based implementations. Parquet schema uses native Calcite types."
+    },
+    {
+      "id": "US-014",
+      "title": "Wire ANSI SQL RelNode generation with mock Parquet Schema",
+      "description": "As a developer, I want ANSI SQL queries to generate a Calcite RelNode using Calcite's native SQL parser and the mock Parquet Schema.",
+      "acceptanceCriteria": [
+        "SQL query 'SELECT timestamp, status FROM parquet_index WHERE status = 200' generates RelNode with filter + project absorbed",
+        "SQL query 'SELECT count(*) FROM parquet_index GROUP BY status' generates RelNode with aggregate absorbed",
+        "Datetime functions work correctly with standard Calcite types (same as PPL validation)",
+        "SQL ITs added to integ-test/ and pass",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Phase 5. Reference ANSI SQL PoC at https://github.com/dai-chen/sql-1/tree/poc/unified-sql-support for Calcite SqlParser integration pattern."
+    },
+    {
+      "id": "US-015",
+      "title": "Verify search function handling in SQL on Parquet",
+      "description": "As a developer, I want full-text search functions in SQL queries to be handled correctly — absorbed into boundary scan when supported, or fail-fast when not.",
+      "acceptanceCriteria": [
+        "SQL query 'SELECT * FROM parquet_index WHERE match(message, \"error\")' fails fast with clear error on Parquet (no inverted index)",
+        "match_phrase registered as custom SqlBasicFunction in Calcite operator table",
+        "IT added for SQL search function handling",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Phase 5. Reference ANSI SQL PoC for match_phrase registration pattern."
+    },
+    {
+      "id": "US-016",
+      "title": "Implement stub transport action for RelNode handoff",
+      "description": "As a developer, I want a stub analytics-plugin transport action (test plugin in integ-test/) that accepts a serialized RelNode and returns mock results, so that the full round-trip can be validated.",
+      "acceptanceCriteria": [
+        "Stub transport action registered in a test plugin in integ-test/",
+        "Transport action accepts a serialized RelNode and query parameters",
+        "Transport action returns hardcoded schema + rows (mock execution)",
+        "SQL/PPL plugin hands off the optimized RelNode via this transport action",
+        "Full round-trip works: REST → routing → RelNode → transport action → stub execution → response",
+        "All existing ITs updated to go through transport action path and still pass",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Phase 6. Use Java serialization for RelNode in PoC. This is the final integration point."
+    }
+  ]
+}
