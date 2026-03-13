@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 52.4% (1187/2264, 144 skipped)
+- Current rate: 60.1% (1360/2264, 144 skipped)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -85,7 +85,13 @@
 - eval column overriding: SELECT * REPLACE(expr AS col)
 - bin field replacement: SELECT * REPLACE(bin_expr AS field) when alias matches field
 - fillnull all-fields: SELECT * REPLACE(COALESCE(col, val) AS col, ...)
+- fillnull per-field: SELECT * REPLACE(COALESCE(field, value) AS field) via SqlStarExceptReplace
+- replace command: SELECT * REPLACE(REPLACE(field, pattern, replacement) AS field) via SqlStarExceptReplace
+- rename: SELECT * EXCEPT(old_col), old_col AS new_name — or explicit column list when resolveColumns available
 - rename: subquery wrap with alias mapping
+- IMPORTANT: SqlStarExceptReplace with REPLACE works without resolveColumns() — the StarExceptReplaceRewriter expands * during validation when schema IS available
+- IMPORTANT: For narrowed pipes (after fields command), * REPLACE doesn't work — use extractPipeColumns() to get actual column list from pipe's SELECT list
+- resolveColumns() returns metadata fields (_id, _index, _score, etc.) — always filter with !name.startsWith("_")
 
 ### Test Harness
 - V4 mode throws exceptions client-side (SyntaxCheckException, IllegalArgumentException) not server-side (ResponseException) — error-handling tests systematically fail
@@ -519,4 +525,43 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Calcite auto-renames duplicate columns (country → country0). To preserve expected names, add explicit AS aliases only for the SECOND occurrence of duplicate leaf names.
   - Multi-join chains (3+ joins) require careful alias management — each join level introduces new aliases that must be tracked through the pipe chain.
   - The max option (subsearch max=N) requires ROW_NUMBER windowing on the right side of the join — not yet implemented.
+---
+
+## 2026-03-13T00:02 - V4-009: Fix fields/rename/replace/basic/eval/fillnull commands
+- **What was fixed**: 94 new tests passing across 6+ test classes
+  - **SqlNodeDSL.between() fix**: Removed spurious `SqlLiteral.createBoolean(false, POS)` operand. Calcite BETWEEN expects 3 operands [expr, low, high], not 4. The boolean was being interpreted as the lower bound. Fixed 8 CalcitePPLBasicIT failures.
+  - **Wildcard field expansion**: Added wildcard pattern matching in `DynamicPPLToSqlNodeConverter.visitProject()`. When field names contain `*` (e.g., `*name`, `account*`, `*a*e`), resolves all columns from schema and filters by regex. Fixed 13 CalciteFieldsCommandIT failures.
+  - **SqlStarExceptReplace for rename/replace/fillnull**: Replaced `SELECT *, expr AS col` pattern (which produced duplicate columns) with `SELECT * REPLACE(expr AS col)` using SqlStarExceptReplace node. The StarExceptReplaceRewriter expands this during validation when the schema IS available. For narrowed pipes (after `fields` command), uses `extractPipeColumns()` to get column names from the pipe's SELECT list. Fixed 37 failures across CalcitePPLRenameIT (+15), CalciteReplaceCommandIT (+11), CalciteFillNullCommandIT (+11).
+  - **String concatenation**: In `visitFunction()`, when `+` operator has a string literal operand, uses `CONCAT()` instead of arithmetic addition. Fixed 2 CalciteEvalCommandIT failures.
+  - **resolveColumns metadata filtering**: Added `.filter(n -> !n.startsWith("_"))` to exclude OpenSearch metadata fields (`_id`, `_index`, `_score`, `_maxscore`, `_sort`, `_routing`) from column resolution.
+  - **extractPipeColumns helper**: New method to extract column names from the pipe's SELECT list for narrowed pipes (after `fields` command).
+- **Pass rate change**: 55.9% (1266/2264) → 60.1% (1360/2264) = +4.2pp, +94 tests
+- **Per-class results** (before → after):
+  - CalcitePPLBasicIT: 24→34 pass (42 total, 8 fail)
+  - CalciteFieldsCommandIT: 14→27 pass (39 total, 12 fail)
+  - CalcitePPLRenameIT: 4→19 pass (22 total, 3 fail)
+  - CalciteReplaceCommandIT: 5→16 pass (21 total, 5 fail)
+  - CalciteEvalCommandIT: 0→2 pass (4 total, 2 fail)
+  - CalciteFillNullCommandIT: 0→11 pass (13 total, 2 fail)
+  - +32 bonus passes across other classes from spillover effects (rename/replace/fillnull used in many tests)
+- **Remaining 32 failures across 6 classes**:
+  - CalciteFieldsCommandIT (12): wildcard edge cases — mixed wildcards with comma-delimited fields, duplicate wildcard matches, no-matching wildcards, fields-minus with wildcards
+  - CalcitePPLBasicIT (8): error message format mismatches (4), fields-plus-then-minus (1), dotted field names (1), decimal precision (1), alias data type (1)
+  - CalciteReplaceCommandIT (5): escape sequence handling (3), error message format (2)
+  - CalcitePPLRenameIT (3): wildcard pattern different counts (1), chained rename with wildcard (1), ref renamed field (1)
+  - CalciteEvalCommandIT (2): string concat with existing data and literals (CONCAT works for literal+field but not field+field or literal+literal)
+  - CalciteFillNullCommandIT (2): type validation errors (fillnull string on numeric fields should throw but doesn't)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/calcite/utils/SqlNodeDSL.java (between fix)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (string concat detection, isStringLiteral helper)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (wildcard field expansion, visitRename/visitReplace/visitFillNull overrides with SqlStarExceptReplace, extractPipeColumns, resolveColumns metadata filtering)
+  - api/src/test/java/org/opensearch/sql/api/PPLToSqlNodeConverterTest.java (between test expected output)
+  - api/src/test/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverterTest.java (fillnull all-fields expected output)
+- **Learnings for future iterations:**
+  - SqlStarExceptReplace with REPLACE clauses is the correct pattern for any command that modifies column values in-place (eval, replace, fillnull). The StarExceptReplaceRewriter expands `*` during validation when the schema is available — this avoids the resolveColumns() timing issue.
+  - For narrowed pipes (after `fields` command), `SELECT * REPLACE(...)` doesn't work because the rewriter expands `*` from the underlying table, not the subquery's columns. Use `extractPipeColumns()` to get the actual column list from the pipe's SELECT list.
+  - resolveColumns() returns OpenSearch metadata fields (`_id`, `_index`, etc.) which Calcite can't find in subqueries. Always filter these out.
+  - Calcite BETWEEN expects exactly 3 operands [value, lower, upper]. The SYMMETRIC flag is NOT an operand — it's part of the operator itself (BETWEEN vs BETWEEN ASYMMETRIC vs BETWEEN SYMMETRIC).
+  - String concatenation with `+` in PPL should use CONCAT when either operand is a string literal. But detecting string-typed fields (not just literals) requires type information not available at converter time.
+  - Wildcard field expansion needs case-insensitive matching for some edge cases (mixed wildcards with comma-delimited fields).
 ---
