@@ -282,7 +282,7 @@ public final class SqlNodeDSL {
   public static SqlNode between(SqlNode expr, SqlNode low, SqlNode high) {
     return new SqlBasicCall(
         SqlStdOperatorTable.BETWEEN,
-        new SqlNode[] {expr, SqlLiteral.createBoolean(false, POS), low, high},
+        new SqlNode[] {expr, low, high},
         POS);
   }
 

@@ -148,7 +148,7 @@ public class PPLToSqlNodeConverterTest {
         SELECT *
         FROM (SELECT *
         FROM "t") AS "_t1"
-        WHERE "a" BETWEEN ASYMMETRIC FALSE AND 1""");
+        WHERE "a" BETWEEN ASYMMETRIC 1 AND 10""");
   }
 
   @Test

@@ -1886,7 +1886,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
             .map(a -> a.accept(this, null))
             .collect(Collectors.toList());
     // Arithmetic operators
-    if ("+".equals(name) && args.size() == 2) return plus(args.get(0), args.get(1));
+    if ("+".equals(name) && args.size() == 2) {
+      // If either operand is a string literal, use CONCAT instead of +
+      if (isStringLiteral(args.get(0)) || isStringLiteral(args.get(1))) {
+        return call("CONCAT", args.get(0), args.get(1));
+      }
+      return plus(args.get(0), args.get(1));
+    }
     if ("-".equals(name) && args.size() == 2) return minus(args.get(0), args.get(1));
     if ("*".equals(name) && args.size() == 2) return times(args.get(0), args.get(1));
     if ("/".equals(name) && args.size() == 2) {
@@ -2484,6 +2490,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return cast(node, typeSpec(SqlTypeName.VARCHAR));
     }
     return node;
+  }
+
+  /** Check if a SqlNode is a string literal. */
+  private static boolean isStringLiteral(SqlNode node) {
+    return node instanceof SqlLiteral && ((SqlLiteral) node).getTypeName() == SqlTypeName.CHAR;
   }
 
   /** CAST to BOOLEAN with Spark/Postgres semantics. */

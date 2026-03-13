@@ -39,7 +39,10 @@ import org.opensearch.sql.ast.tree.MvExpand;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
+import org.opensearch.sql.ast.tree.Replace;
+import org.opensearch.sql.ast.tree.ReplacePair;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
+import org.opensearch.sql.calcite.utils.WildcardUtils;
 import org.opensearch.sql.utils.WildcardRenameUtils;
 
 /**
@@ -88,6 +91,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     if (table == null) return Collections.emptyList();
     return table.getRowType(typeFactory).getFieldList().stream()
         .map(f -> f.getName())
+        .filter(n -> !n.startsWith("_"))
         .collect(Collectors.toList());
   }
 
@@ -117,11 +121,52 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       pipe = select(cols).from(wrapAsSubquery()).build();
       return pipe;
     }
+    // Check for wildcard patterns in field names
+    boolean hasWildcard = false;
+    for (UnresolvedExpression expr : node.getProjectList()) {
+      if (expr instanceof Field) {
+        String name = ((Field) expr).getField().toString();
+        if (name.contains("*")) {
+          hasWildcard = true;
+          break;
+        }
+      }
+    }
+    if (hasWildcard) {
+      List<String> allCols = resolveColumns(tableName);
+      List<SqlNode> expanded = new ArrayList<>();
+      for (UnresolvedExpression expr : node.getProjectList()) {
+        if (expr instanceof Field) {
+          String name = ((Field) expr).getField().toString();
+          if (name.contains("*")) {
+            String regex = "^" + name.replace("*", ".*") + "$";
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(regex);
+            for (String col : allCols) {
+              if (pattern.matcher(col).matches()) {
+                expanded.add(identifier(col));
+              }
+            }
+            continue;
+          }
+        }
+        expanded.add(expr.accept(this, null));
+      }
+      pipe = select(expanded.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+      return pipe;
+    }
     return super.visitProject(node, ctx);
   }
 
   @Override
   public SqlNode visitRename(Rename node, Void ctx) {
+    // Try to get columns from the pipe's SELECT list first (handles narrowed pipes after fields)
+    List<String> pipeCols = extractPipeColumns();
+    List<String> allCols = pipeCols.isEmpty() ? resolveColumns(tableName) : pipeCols;
+    if (allCols.isEmpty()) {
+      return super.visitRename(node, ctx);
+    }
+
+    // Check for wildcard patterns
     boolean hasWildcard = false;
     for (org.opensearch.sql.ast.expression.Map mapping : node.getRenameList()) {
       if (WildcardRenameUtils.isWildcardPattern(fieldName(mapping.getOrigin()))) {
@@ -129,50 +174,204 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         break;
       }
     }
-    if (!hasWildcard) return super.visitRename(node, ctx);
 
-    pipe = wrapAsSubquery();
-    List<String> allCols = resolveColumns(tableName);
     LinkedHashMap<String, String> mappings = new LinkedHashMap<>();
-    for (org.opensearch.sql.ast.expression.Map mapping : node.getRenameList()) {
-      String sourcePattern = fieldName(mapping.getOrigin());
-      String targetPattern = fieldName(mapping.getTarget());
-      if (WildcardRenameUtils.isWildcardPattern(sourcePattern)) {
-        List<String> matchingFields = WildcardRenameUtils.matchFieldNames(sourcePattern, allCols);
-        for (String fld : matchingFields) {
-          mappings.put(fld, WildcardRenameUtils.applyWildcardTransformation(
-              sourcePattern, targetPattern, fld));
+    if (hasWildcard) {
+      // For wildcard expansion, use table columns if pipe columns are just *
+      List<String> expandCols = pipeCols.isEmpty() ? resolveColumns(tableName) : pipeCols;
+      if (expandCols.isEmpty()) {
+        return super.visitRename(node, ctx);
+      }
+      for (org.opensearch.sql.ast.expression.Map mapping : node.getRenameList()) {
+        String sourcePattern = fieldName(mapping.getOrigin());
+        String targetPattern = fieldName(mapping.getTarget());
+        if (WildcardRenameUtils.isWildcardPattern(sourcePattern)) {
+          List<String> matchingFields = WildcardRenameUtils.matchFieldNames(sourcePattern, expandCols);
+          for (String fld : matchingFields) {
+            mappings.put(fld, WildcardRenameUtils.applyWildcardTransformation(
+                sourcePattern, targetPattern, fld));
+          }
+        } else {
+          mappings.put(sourcePattern, targetPattern);
         }
-      } else {
-        mappings.put(sourcePattern, targetPattern);
+      }
+    } else {
+      for (org.opensearch.sql.ast.expression.Map mapping : node.getRenameList()) {
+        String origin = fieldName(mapping.getOrigin());
+        String target = fieldName(mapping.getTarget());
+        String realOrigin = null;
+        for (Map.Entry<String, String> prev : mappings.entrySet()) {
+          if (prev.getValue().equals(origin)) { realOrigin = prev.getKey(); break; }
+        }
+        if (realOrigin != null) mappings.put(realOrigin, target);
+        else mappings.put(origin, target);
       }
     }
     mappings.entrySet().removeIf(e -> e.getKey().equals(e.getValue()));
     if (mappings.isEmpty()) return pipe;
 
+    // Build explicit SELECT list to preserve column order
+    pipe = wrapAsSubquery();
+    Set<String> renamedTargets = new HashSet<>(mappings.values());
     List<SqlNode> selectItems = new ArrayList<>();
-    selectItems.add(star());
-    for (Map.Entry<String, String> e : mappings.entrySet()) {
-      selectItems.add(as(identifier(e.getKey()), e.getValue()));
+    for (String col : allCols) {
+      if (mappings.containsKey(col)) {
+        selectItems.add(as(identifier(col), mappings.get(col)));
+      } else if (renamedTargets.contains(col)) {
+        continue;
+      } else {
+        selectItems.add(identifier(col));
+      }
     }
     pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  /** Extract column names from the current pipe's SELECT list. Returns empty if pipe is not a SELECT or uses *. */
+  private List<String> extractPipeColumns() {
+    if (!(pipe instanceof org.apache.calcite.sql.SqlSelect)) return Collections.emptyList();
+    org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+    SqlNodeList selectList = sel.getSelectList();
+    if (selectList == null) return Collections.emptyList();
+    List<String> cols = new ArrayList<>();
+    for (SqlNode item : selectList) {
+      String name = extractColumnName(item);
+      if (name == null) return Collections.emptyList(); // has * or unresolvable
+      cols.add(name);
+    }
+    return cols;
+  }
+
+  @Override
+  public SqlNode visitReplace(Replace node, Void ctx) {
+    // Check if pipe has been narrowed (e.g. by fields command)
+    List<String> pipeCols = extractPipeColumns();
+    if (!pipeCols.isEmpty()) {
+      // Pipe is narrowed — use explicit column list
+      pipe = wrapAsSubquery();
+      Map<String, SqlNode> replaceExprs = new LinkedHashMap<>();
+      for (Field field : node.getFieldList()) {
+        String fieldName = field.getField().toString();
+        SqlNode expr = identifier(fieldName);
+        for (ReplacePair pair : node.getReplacePairs()) {
+          String pattern = pair.getPattern().getValue().toString();
+          String replacement = pair.getReplacement().getValue().toString();
+          if (WildcardUtils.containsWildcard(pattern) || WildcardUtils.containsWildcard(replacement)) {
+            WildcardUtils.validateWildcardSymmetry(pattern, replacement);
+            String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
+            String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
+            expr = call("REGEXP_REPLACE", expr, literal(regexPattern), literal(regexReplacement));
+          } else {
+            expr = call("REPLACE", expr, literal(pattern), literal(replacement));
+          }
+        }
+        replaceExprs.put(fieldName, expr);
+      }
+      List<SqlNode> selectItems = new ArrayList<>();
+      for (String col : pipeCols) {
+        if (replaceExprs.containsKey(col)) {
+          selectItems.add(as(replaceExprs.get(col), col));
+        } else {
+          selectItems.add(identifier(col));
+        }
+      }
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+      return pipe;
+    }
+    // Pipe is not narrowed — use SqlStarExceptReplace with REPLACE
+    pipe = wrapAsSubquery();
+    List<SqlNode> replaceClauses = new ArrayList<>();
+    for (Field field : node.getFieldList()) {
+      String fieldName = field.getField().toString();
+      SqlNode expr = identifier(fieldName);
+      for (ReplacePair pair : node.getReplacePairs()) {
+        String pattern = pair.getPattern().getValue().toString();
+        String replacement = pair.getReplacement().getValue().toString();
+        if (WildcardUtils.containsWildcard(pattern) || WildcardUtils.containsWildcard(replacement)) {
+          WildcardUtils.validateWildcardSymmetry(pattern, replacement);
+          String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
+          String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
+          expr = call("REGEXP_REPLACE", expr, literal(regexPattern), literal(regexReplacement));
+        } else {
+          expr = call("REPLACE", expr, literal(pattern), literal(replacement));
+        }
+      }
+      replaceClauses.add(as(expr, fieldName));
+    }
+    SqlNode starReplace = new SqlStarExceptReplace(
+        SqlParserPos.ZERO, star(), null,
+        new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+    pipe = select(starReplace).from(pipe).build();
     return pipe;
   }
 
   @Override
   public SqlNode visitFillNull(FillNull node, Void ctx) {
     if (node.getReplacementForAll().isPresent()) {
+      // All-fields fillnull needs to know ALL column names
+      List<String> pipeCols = extractPipeColumns();
+      List<String> allCols = pipeCols.isEmpty() ? resolveColumns(tableName) : pipeCols;
+      if (allCols.isEmpty()) {
+        return super.visitFillNull(node, ctx);
+      }
       pipe = wrapAsSubquery();
       SqlNode value = node.getReplacementForAll().get().accept(this, null);
-      List<String> allCols = resolveColumns(tableName);
-      List<SqlNode> selectItems = new ArrayList<>();
+      List<SqlNode> replaceClauses = new ArrayList<>();
       for (String col : allCols) {
-        selectItems.add(as(call("COALESCE", identifier(col), value), col));
+        replaceClauses.add(as(call("COALESCE", identifier(col), value), col));
       }
-      pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+      if (!pipeCols.isEmpty()) {
+        // Pipe is narrowed — use explicit column list
+        pipe = select(replaceClauses.toArray(new SqlNode[0])).from(pipe).build();
+      } else {
+        SqlNode starReplace = new SqlStarExceptReplace(
+            SqlParserPos.ZERO, star(), null,
+            new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+        pipe = select(starReplace).from(pipe).build();
+      }
       return pipe;
     }
-    return super.visitFillNull(node, ctx);
+    // Per-field fillnull
+    List<org.apache.commons.lang3.tuple.Pair<Field, UnresolvedExpression>> pairs =
+        node.getReplacementPairs();
+    if (!pairs.isEmpty()) {
+      // Check if pipe has been narrowed (e.g. by fields command)
+      List<String> pipeCols = extractPipeColumns();
+      if (!pipeCols.isEmpty()) {
+        // Pipe is narrowed — use explicit column list to avoid rewriter issues
+        pipe = wrapAsSubquery();
+        Map<String, SqlNode> fillExprs = new LinkedHashMap<>();
+        for (org.apache.commons.lang3.tuple.Pair<Field, UnresolvedExpression> pair : pairs) {
+          String fieldName = pair.getLeft().getField().toString();
+          SqlNode value = pair.getRight().accept(this, null);
+          fillExprs.put(fieldName, call("COALESCE", identifier(fieldName), value));
+        }
+        List<SqlNode> selectItems = new ArrayList<>();
+        for (String col : pipeCols) {
+          if (fillExprs.containsKey(col)) {
+            selectItems.add(as(fillExprs.get(col), col));
+          } else {
+            selectItems.add(identifier(col));
+          }
+        }
+        pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+        return pipe;
+      }
+      // Pipe is not narrowed — use SqlStarExceptReplace with REPLACE
+      pipe = wrapAsSubquery();
+      List<SqlNode> replaceClauses = new ArrayList<>();
+      for (org.apache.commons.lang3.tuple.Pair<Field, UnresolvedExpression> pair : pairs) {
+        String fieldName = pair.getLeft().getField().toString();
+        SqlNode value = pair.getRight().accept(this, null);
+        replaceClauses.add(as(call("COALESCE", identifier(fieldName), value), fieldName));
+      }
+      SqlNode starReplace = new SqlStarExceptReplace(
+          SqlParserPos.ZERO, star(), null,
+          new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+      pipe = select(starReplace).from(pipe).build();
+      return pipe;
+    }
+    return pipe;
   }
 
   @Override

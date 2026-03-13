@@ -81,9 +81,9 @@ public class DynamicPPLToSqlNodeConverterTest {
 
   @Test
   public void testFillNullAllFields() {
-    // fillnull without field list → COALESCE every column from schema
+    // fillnull without field list → COALESCE every column from schema via * REPLACE
     ppl("source=t | fillnull value=0").shouldTranslateTo("""
-        SELECT COALESCE("a", 0) AS "a", COALESCE("b", 0) AS "b", COALESCE("c", 0) AS "c"
+        SELECT * REPLACE (COALESCE("a", 0) AS "a", COALESCE("b", 0) AS "b", COALESCE("c", 0) AS "c")
         FROM (SELECT *
         FROM "t") AS "_t1\"""");
   }
