@@ -6,6 +6,7 @@
 package org.opensearch.sql.calcite.utils;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicFunction;
@@ -127,15 +128,17 @@ public final class SqlNodeDSL {
 
   public static SqlIdentifier identifier(String... names) {
     if (names.length == 1) {
-      return new SqlIdentifier(names[0], POS);
+      return new SqlIdentifier(names[0], SqlParserPos.QUOTED_ZERO);
     }
-    return new SqlIdentifier(Arrays.asList(names), POS);
+    return new SqlIdentifier(Arrays.asList(names),
+        null, SqlParserPos.QUOTED_ZERO,
+        Collections.nCopies(names.length, SqlParserPos.QUOTED_ZERO));
   }
 
   public static SqlNode[] identifiers(String... names) {
     SqlNode[] result = new SqlNode[names.length];
     for (int i = 0; i < names.length; i++) {
-      result[i] = new SqlIdentifier(names[i], POS);
+      result[i] = new SqlIdentifier(names[i], SqlParserPos.QUOTED_ZERO);
     }
     return result;
   }

@@ -461,8 +461,31 @@ public class PPLToSqlNodeConverterTest {
   public void testParse() {
     // parse with named groups → REGEXP_EXTRACT per group
     ppl("source=t | parse msg '(?<year>\\d{4})-(?<month>\\d{2})'").shouldTranslateTo("""
-        SELECT *, COALESCE(REGEXP_EXTRACT("msg", '(\\d{4})-(?:\\d{2})'), '') AS "year", \
-        COALESCE(REGEXP_EXTRACT("msg", '(?:\\d{4})-(\\d{2})'), '') AS "month"
+        SELECT *, COALESCE(REGEXP_EXTRACT("msg", '(\\d{4})-(?:\\d{2})', 1), '') AS "year", \
+        COALESCE(REGEXP_EXTRACT("msg", '(?:\\d{4})-(\\d{2})', 1), '') AS "month"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
+  }
+
+  @Test
+  public void testRexBasic() {
+    ppl("source=t | rex field=email \"(?<user>[^@]+)@(?<domain>.+)\"").shouldTranslateTo("""
+        SELECT *, COALESCE(REGEXP_EXTRACT("email", '([^@]+)@(?:.+)', 1), '') AS "user", \
+        COALESCE(REGEXP_EXTRACT("email", '(?:[^@]+)@(.+)', 1), '') AS "domain"
+        FROM (SELECT *
+        FROM "t") AS "_t1\"""");
+  }
+
+  @Test
+  public void testRexWithBackslashes() {
+    // PPL: rex field=address "(?<streetnum>\\d+)\\s+(?<streetname>.+)"
+    // After PPL parser unquoteText: (?<streetnum>\d+)\s+(?<streetname>.+)
+    // The \d and \s are regex escape sequences (single backslash)
+    // In Java source, \\d represents the string \d (single backslash + d)
+    // In the SQL output, toSqlString doubles backslashes: \d -> \\d
+    ppl("source=t | rex field=address \"(?<streetnum>\\\\d+)\\\\s+(?<streetname>.+)\"").shouldTranslateTo("""
+        SELECT *, COALESCE(REGEXP_EXTRACT("address", '(\\d+)\\s+(?:.+)', 1), '') AS "streetnum", \
+        COALESCE(REGEXP_EXTRACT("address", '(?:\\d+)\\s+(.+)', 1), '') AS "streetname"
         FROM (SELECT *
         FROM "t") AS "_t1\"""");
   }

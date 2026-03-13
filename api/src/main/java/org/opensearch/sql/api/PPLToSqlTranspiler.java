@@ -119,7 +119,7 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
             case PATTERN_METHOD:
               return (T) "simple_pattern";
             case PATTERN_MODE:
-              return (T) "regex";
+              return (T) "LABEL";
             case PATTERN_MAX_SAMPLE_COUNT:
               return (T) Integer.valueOf(10);
             case PATTERN_BUFFER_LIMIT:

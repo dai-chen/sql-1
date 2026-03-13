@@ -55,6 +55,8 @@ import org.opensearch.sql.ast.expression.Interval;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.ParseMethod;
+import org.opensearch.sql.ast.expression.PatternMethod;
+import org.opensearch.sql.ast.expression.PatternMode;
 import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.ast.expression.SearchAnd;
 import org.opensearch.sql.ast.expression.SearchComparison;
@@ -91,14 +93,17 @@ import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.MinSpanBin;
 import org.opensearch.sql.ast.tree.MvExpand;
+import org.opensearch.sql.ast.tree.Multisearch;
 import org.opensearch.sql.ast.tree.NoMv;
 import org.opensearch.sql.ast.tree.Parse;
+import org.opensearch.sql.ast.tree.Patterns;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.RangeBin;
 import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Replace;
+import org.opensearch.sql.ast.tree.Rex;
 import org.opensearch.sql.ast.tree.Search;
 import org.opensearch.sql.ast.tree.ReplacePair;
 import org.opensearch.sql.ast.tree.Sort;
@@ -110,6 +115,7 @@ import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Window;
 import org.opensearch.sql.calcite.utils.SqlNodeDSL;
 import org.opensearch.sql.expression.function.PPLBuiltinOperators;
+import org.opensearch.sql.expression.parse.RegexCommonUtils;
 import org.opensearch.sql.calcite.utils.WildcardUtils;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
@@ -253,7 +259,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
             case PATTERN_METHOD:
               return (T) "simple_pattern";
             case PATTERN_MODE:
-              return (T) "regex";
+              return (T) "LABEL";
             case PATTERN_MAX_SAMPLE_COUNT:
               return (T) Integer.valueOf(10);
             case PATTERN_BUFFER_LIMIT:
@@ -1601,20 +1607,24 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     List<SqlNode> selectItems = new ArrayList<>();
     selectItems.add(star());
     for (int i = 0; i < groupNames.size(); i++) {
-      // Build pattern with only target group as capturing, others as non-capturing
       String singleGroupPattern = pattern;
+      String groupName = groupNames.get(i);
+      // Convert other named groups to non-capturing
       for (int j = 0; j < groupNames.size(); j++) {
         String gn = groupNames.get(j);
-        if (j == i) {
-          singleGroupPattern = singleGroupPattern.replace("(?<" + gn + ">", "(");
-        } else {
+        if (j != i) {
           singleGroupPattern = singleGroupPattern.replace("(?<" + gn + ">", "(?:");
         }
       }
+      // Convert remaining unnamed capturing groups to non-capturing
+      singleGroupPattern =
+          singleGroupPattern.replaceAll("(?<!\\\\)\\((?!\\?)", "(?:");
+      // Convert target named group to unnamed capturing group
+      singleGroupPattern = singleGroupPattern.replace("(?<" + groupName + ">", "(");
       SqlNode regexExpr = call("COALESCE",
-          call("REGEXP_EXTRACT", sourceField, literal(singleGroupPattern)),
+          call("REGEXP_EXTRACT", sourceField, literal(singleGroupPattern), literal(1)),
           literal(""));
-      selectItems.add(as(regexExpr, groupNames.get(i)));
+      selectItems.add(as(regexExpr, groupName));
     }
     pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
     return pipe;
@@ -1634,7 +1644,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return count(args.get(0).accept(this, null));
     }
     if ("dc".equals(name) || "distinct_count".equals(name))
-      return count(distinct(args.get(0).accept(this, null)));
+      return new SqlBasicCall(
+          SqlStdOperatorTable.COUNT,
+          new SqlNode[] {args.get(0).accept(this, null)},
+          POS,
+          SqlLiteral.createSymbol(SqlSelectKeyword.DISTINCT, POS));
     if ("avg".equals(name))
       return agg("AVG", cast(args.get(0).accept(this, null), typeSpec(SqlTypeName.DOUBLE)));
     if ("var_samp".equals(name))
@@ -1647,6 +1661,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return agg("STDDEV_POP", cast(args.get(0).accept(this, null), typeSpec(SqlTypeName.DOUBLE)));
     if ("first".equals(name)) return call("PPL_FIRST", args.get(0).accept(this, null));
     if ("last".equals(name)) return call("PPL_LAST", args.get(0).accept(this, null));
+    if ("earliest".equals(name))
+      return call("ARG_MIN", args.get(0).accept(this, null), identifier("@timestamp"));
+    if ("latest".equals(name))
+      return call("ARG_MAX", args.get(0).accept(this, null), identifier("@timestamp"));
 
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     if (args.isEmpty()) {
@@ -2740,6 +2758,180 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   public SqlNode visitMvExpand(MvExpand node, Void ctx) {
     // MvExpand needs schema to enumerate columns — delegate to DynamicPPLToSqlNodeConverter
     // Base converter: just pass through (no-op for non-array fields)
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitPatterns(Patterns node, Void ctx) {
+    if (node.getPatternMethod() == PatternMethod.BRAIN) {
+      throw new UnsupportedOperationException(
+          "Brain pattern method not supported in V4 converter");
+    }
+
+    pipe = wrapAsSubquery();
+    SqlNode sourceField = node.getSourceField().accept(this, null);
+    String alias = node.getAlias() != null ? node.getAlias() : "patterns_field";
+    boolean showNumbered = false;
+    if (node.getShowNumberedToken() instanceof Literal) {
+      Object val = ((Literal) node.getShowNumberedToken()).getValue();
+      showNumbered = Boolean.TRUE.equals(val) || "true".equalsIgnoreCase(String.valueOf(val));
+    }
+    String defaultPattern = showNumbered ? "[a-zA-Z]+" : "[a-zA-Z0-9]+";
+    String pattern =
+        node.getArguments().containsKey("pattern")
+            ? node.getArguments().get("pattern").getValue().toString()
+            : defaultPattern;
+
+    // CASE WHEN sourceField IS NULL OR sourceField = '' THEN '' ELSE REGEXP_REPLACE(...) END
+    SqlNode caseExpr =
+        caseWhen(
+            List.of(or(isNull(sourceField), eq(sourceField, literal("")))),
+            List.of(literal("")),
+            call("REGEXP_REPLACE", sourceField, literal(pattern), literal("<*>")));
+
+    if (node.getPatternMode() == PatternMode.LABEL) {
+      pipe =
+          select(star(), as(caseExpr, alias))
+              .from(pipe)
+              .build();
+    } else {
+      // AGGREGATION mode: wrap label query, then GROUP BY + COUNT + TAKE
+      pipe = select(star(), as(caseExpr, alias)).from(pipe).build();
+      pipe = subquery(pipe, nextAlias());
+
+      SqlNode patternsFieldId = identifier(alias);
+      int maxSampleCount = 5;
+      if (node.getPatternMaxSampleCount() instanceof Literal) {
+        Object val = ((Literal) node.getPatternMaxSampleCount()).getValue();
+        if (val instanceof Number) maxSampleCount = ((Number) val).intValue();
+      }
+
+      List<SqlNode> selectItems = new ArrayList<>();
+      List<SqlNode> groupByItems = new ArrayList<>();
+
+      // Add partition-by fields first
+      if (node.getPartitionByList() != null) {
+        for (UnresolvedExpression partExpr : node.getPartitionByList()) {
+          SqlNode partField = partExpr.accept(this, null);
+          selectItems.add(partField);
+          groupByItems.add(partField);
+        }
+      }
+
+      selectItems.add(patternsFieldId);
+      groupByItems.add(patternsFieldId);
+      selectItems.add(
+          as(
+              new SqlBasicCall(
+                  SqlStdOperatorTable.COUNT, new SqlNode[] {patternsFieldId}, POS),
+              "pattern_count"));
+      selectItems.add(as(call("TAKE", sourceField, literal(maxSampleCount)), "sample_logs"));
+
+      pipe =
+          select(selectItems.toArray(new SqlNode[0]))
+              .from(pipe)
+              .groupBy(groupByItems.toArray(new SqlNode[0]))
+              .build();
+    }
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitRex(Rex node, Void ctx) {
+    pipe = wrapAsSubquery();
+    SqlNode sourceField = node.getField().accept(this, null);
+    String pattern = ((Literal) node.getPattern()).getValue().toString();
+
+    if (node.getMode() == Rex.RexMode.SED) {
+      SqlNode replacement = parseSedToRegexpReplace(sourceField, pattern);
+      String fieldName = getFieldName(node.getField());
+      List<SqlNode> selectItems = new ArrayList<>();
+      selectItems.add(star());
+      selectItems.add(as(replacement, fieldName));
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+      return pipe;
+    }
+
+    // EXTRACT mode
+    // Validate group names (throws IllegalArgumentException for invalid names)
+    RegexCommonUtils.getNamedGroupCandidates(pattern);
+
+    java.util.regex.Pattern namedGroupPattern =
+        java.util.regex.Pattern.compile("\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>");
+    java.util.regex.Matcher matcher = namedGroupPattern.matcher(pattern);
+    List<String> groupNames = new ArrayList<>();
+    while (matcher.find()) groupNames.add(matcher.group(1));
+
+    if (groupNames.isEmpty()) {
+      throw new IllegalArgumentException(
+          "Rex pattern must contain at least one named capture group");
+    }
+
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(star());
+    for (int i = 0; i < groupNames.size(); i++) {
+      String groupName = groupNames.get(i);
+      // Step 1: Convert other named groups to non-capturing
+      String singleGroupPattern = pattern;
+      for (int j = 0; j < groupNames.size(); j++) {
+        if (j != i) {
+          singleGroupPattern = singleGroupPattern.replace("(?<" + groupNames.get(j) + ">", "(?:");
+        }
+      }
+      // Step 2: Convert all unnamed capturing groups to non-capturing.
+      // The target (?<name> starts with "(?" so it is NOT matched by this regex.
+      singleGroupPattern =
+          singleGroupPattern.replaceAll("(?<!\\\\)\\((?!\\?)", "(?:");
+      // Step 3: Convert target named group to the sole unnamed capturing group.
+      singleGroupPattern = singleGroupPattern.replace("(?<" + groupName + ">", "(");
+
+      SqlNode regexExpr = call("COALESCE",
+          call("REGEXP_EXTRACT", sourceField, literal(singleGroupPattern), literal(1)),
+          literal(""));
+      SqlIdentifier quotedAlias = new SqlIdentifier(groupName, SqlParserPos.QUOTED_ZERO);
+      selectItems.add(new SqlBasicCall(SqlStdOperatorTable.AS,
+          new SqlNode[] {regexExpr, quotedAlias}, POS));
+    }
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+    return pipe;
+  }
+
+  private SqlNode parseSedToRegexpReplace(SqlNode field, String sedExpr) {
+    if (sedExpr.startsWith("s") && sedExpr.length() > 1) {
+      char delim = sedExpr.charAt(1);
+      String rest = sedExpr.substring(2);
+      int idx1 = rest.indexOf(delim);
+      if (idx1 >= 0) {
+        String pat = rest.substring(0, idx1);
+        String rest2 = rest.substring(idx1 + 1);
+        int idx2 = rest2.indexOf(delim);
+        String repl, flags;
+        if (idx2 >= 0) {
+          repl = rest2.substring(0, idx2);
+          flags = rest2.substring(idx2 + 1);
+        } else {
+          repl = rest2;
+          flags = "";
+        }
+        if (!flags.isEmpty()) {
+          return call("REGEXP_REPLACE", field, literal(pat), literal(repl), literal(flags));
+        }
+        return call("REGEXP_REPLACE", field, literal(pat), literal(repl));
+      }
+    }
+    return field;
+  }
+
+  @Override
+  public SqlNode visitMultisearch(Multisearch node, Void ctx) {
+    List<UnresolvedPlan> subsearches = node.getSubsearches();
+    if (subsearches.isEmpty()) return pipe;
+
+    SqlNode result = convertSubPlan(subsearches.get(0));
+    for (int i = 1; i < subsearches.size(); i++) {
+      result = unionAll(result, convertSubPlan(subsearches.get(i)));
+    }
+    pipe = select(star()).from(subquery(result, nextAlias())).build();
     return pipe;
   }
 
