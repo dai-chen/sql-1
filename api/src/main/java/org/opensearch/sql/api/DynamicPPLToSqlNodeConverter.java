@@ -33,6 +33,7 @@ import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
+import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.MvCombine;
 import org.opensearch.sql.ast.tree.MvExpand;
 import org.opensearch.sql.ast.tree.Project;
@@ -52,6 +53,11 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   protected String tableName;
 
   public DynamicPPLToSqlNodeConverter(SchemaPlus defaultSchema) {
+    this.defaultSchema = defaultSchema;
+  }
+
+  private DynamicPPLToSqlNodeConverter(SchemaPlus defaultSchema, java.util.concurrent.atomic.AtomicInteger sharedCounter) {
+    super(sharedCounter);
     this.defaultSchema = defaultSchema;
   }
 
@@ -293,8 +299,68 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   @Override
+  public SqlNode visitLookup(Lookup node, Void ctx) {
+    Map<String, String> outputMap = node.getOutputAliasMap();
+    if (outputMap.isEmpty() || node.getOutputStrategy() != Lookup.OutputStrategy.APPEND) {
+      return super.visitLookup(node, ctx);
+    }
+
+    // APPEND mode with schema: only COALESCE columns that exist in the source table
+    Set<String> sourceCols = new HashSet<>(resolveColumns(tableName));
+
+    String leftAlias = "_l";
+    String rightAlias = "_r";
+    SqlNode leftSide = subquery(pipe, leftAlias);
+
+    Relation lookupRel = extractRelation(node.getLookupRelation());
+    String lookupTable = lookupRel != null
+        ? lookupRel.getTableQualifiedName().toString()
+        : node.getLookupRelation().toString();
+    SqlNode rightSide = subquery(
+        select(star()).from(table(lookupTable)).build(), rightAlias);
+
+    SqlNode onCondition = null;
+    for (Map.Entry<String, String> e : node.getMappingAliasMap().entrySet()) {
+      SqlNode cond = eq(
+          identifier(leftAlias, e.getValue()),
+          identifier(rightAlias, e.getKey()));
+      onCondition = onCondition == null ? cond : and(onCondition, cond);
+    }
+
+    SqlNode joinNode = join(leftSide, JoinType.LEFT, rightSide, onCondition);
+
+    List<SqlNode> selectItems = new ArrayList<>();
+    selectItems.add(new org.apache.calcite.sql.SqlIdentifier(
+        java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO));
+    for (Map.Entry<String, String> e : outputMap.entrySet()) {
+      SqlNode rRef = identifier(rightAlias, e.getKey());
+      if (sourceCols.contains(e.getValue())) {
+        selectItems.add(as(call("COALESCE", identifier(leftAlias, e.getValue()), rRef), e.getValue()));
+      } else {
+        selectItems.add(as(rRef, e.getValue()));
+      }
+    }
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
+    return pipe;
+  }
+
+  private static Relation extractRelation(UnresolvedPlan plan) {
+    if (plan instanceof Relation) return (Relation) plan;
+    if (plan instanceof Project) {
+      Project proj = (Project) plan;
+      if (proj.getProjectList().size() == 1
+          && proj.getProjectList().get(0) instanceof org.opensearch.sql.ast.expression.AllFields
+          && !proj.getChild().isEmpty()) {
+        UnresolvedPlan child = (UnresolvedPlan) proj.getChild().get(0);
+        if (child instanceof Relation) return (Relation) child;
+      }
+    }
+    return null;
+  }
+
+  @Override
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
-    DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema);
+    DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter);
     return sub.convert(plan);
   }
 

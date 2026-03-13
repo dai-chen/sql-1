@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.apache.calcite.avatica.util.TimeUnit;
@@ -25,6 +26,7 @@ import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.JoinType;
+import org.apache.calcite.sql.SqlJoin;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
@@ -220,7 +222,18 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           "LOCALTIMESTAMP",
           "LOCALTIME");
 
-  private int aliasCounter = 0;
+  protected final AtomicInteger aliasCounter;
+
+  /** When true, the next wrapAsSubquery() call is skipped (used after JOIN to preserve aliases). */
+  protected boolean skipNextWrap = false;
+
+  public PPLToSqlNodeConverter() {
+    this.aliasCounter = new AtomicInteger(0);
+  }
+
+  protected PPLToSqlNodeConverter(AtomicInteger sharedCounter) {
+    this.aliasCounter = sharedCounter;
+  }
 
   private static final Settings DEFAULT_SETTINGS =
       new Settings() {
@@ -283,6 +296,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (pendingOrderBy != null || pendingFetch != null) {
       current = applyPendingOrderBy(current);
     }
+    // If the final result is a raw SqlJoin (from visitJoin), wrap it in SELECT *
+    if (current instanceof SqlJoin) {
+      current = select(star()).from(current).build();
+    }
     return current;
   }
 
@@ -316,7 +333,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   protected final Map<String, SqlNode> binReplacements = new HashMap<>();
 
   private String nextAlias() {
-    return "_t" + (++aliasCounter);
+    return "_t" + aliasCounter.incrementAndGet();
   }
 
   /** Flatten AST linked list from outermost to leaf, then reverse so leaf (Relation) is first. */
@@ -330,7 +347,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   /** Wrap current pipe as a subquery with a generated alias. */
   protected SqlNode wrapAsSubquery() {
+    skipNextWrap = false;
     return subquery(pipe, nextAlias());
+  }
+
+  /** Consume the skipNextWrap flag and return pipe directly (used by visitProject after JOIN). */
+  private SqlNode consumeSkipWrap() {
+    skipNextWrap = false;
+    return pipe;
   }
 
   // -- Visitor methods --
@@ -525,21 +549,37 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (node.getProjectList().size() == 1 && node.getProjectList().get(0) instanceof AllFields) {
       return pipe;
     }
-    SqlNode[] cols =
-        node.getProjectList().stream()
-            .map(expr -> {
-              SqlNode col = expr.accept(this, null);
-              // If this is a bin-replaced field, alias it back to the original name
-              if (expr instanceof Field) {
-                String name = ((Field) expr).getField().toString();
-                if (binReplacements.containsKey(name)) {
-                  return as(col, name);
-                }
-              }
-              return col;
-            })
-            .toArray(SqlNode[]::new);
-    pipe = select(cols).from(wrapAsSubquery()).build();
+    // Track seen leaf column names to detect duplicates (e.g. a.country vs b.country)
+    Map<String, Integer> leafNameCount = new java.util.LinkedHashMap<>();
+    for (UnresolvedExpression expr : node.getProjectList()) {
+      if (expr instanceof Field) {
+        String name = ((Field) expr).getField().toString();
+        String leaf = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1) : name;
+        leafNameCount.merge(leaf, 1, Integer::sum);
+      }
+    }
+    Set<String> seenLeafNames = new java.util.HashSet<>();
+    List<SqlNode> colList = new ArrayList<>();
+    for (UnresolvedExpression expr : node.getProjectList()) {
+      SqlNode col = expr.accept(this, null);
+      if (expr instanceof Field) {
+        String name = ((Field) expr).getField().toString();
+        if (binReplacements.containsKey(name)) {
+          colList.add(as(col, name));
+          continue;
+        }
+        if (name.contains(".")) {
+          String leaf = name.substring(name.lastIndexOf('.') + 1);
+          if (leafNameCount.getOrDefault(leaf, 0) > 1 && !seenLeafNames.add(leaf)) {
+            // Duplicate leaf name: alias with qualified name (e.g. b.country)
+            colList.add(as(col, name));
+            continue;
+          }
+        }
+      }
+      colList.add(col);
+    }
+    pipe = select(colList.toArray(new SqlNode[0])).from(skipNextWrap ? consumeSkipWrap() : wrapAsSubquery()).build();
     return pipe;
   }
 
@@ -835,16 +875,28 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitJoin(Join node, Void ctx) {
     String leftAlias = node.getLeftAlias().orElse(null);
-    SqlNode leftSide = leftAlias != null ? subquery(pipe, leftAlias) : wrapAsSubquery();
+    String effectiveLeftAlias;
+    SqlNode leftSide;
+    if (leftAlias != null) {
+      leftSide = subquery(pipe, leftAlias);
+      effectiveLeftAlias = leftAlias;
+    } else {
+      String genAlias = nextAlias();
+      leftSide = subquery(pipe, genAlias);
+      effectiveLeftAlias = genAlias;
+    }
 
-    SqlNode rightSide = resolveJoinRight(node.getRight(), node.getRightAlias().orElse(null));
+    String rightAlias = node.getRightAlias().orElse(null);
+    SqlNode rightSide = resolveJoinRight(node.getRight(), rightAlias);
+    String effectiveRightAlias = rightAlias != null ? rightAlias : extractAlias(rightSide);
 
     SqlNode condition = null;
     if (node.getJoinCondition().isPresent()) {
       condition = node.getJoinCondition().get().accept(this, null);
     } else if (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
       condition = buildFieldListCondition(node.getJoinFields().get(),
-          node.getLeftAlias().orElse(null), node.getRightAlias().orElse(null));
+          node.getLeftAlias().orElse(effectiveLeftAlias),
+          node.getRightAlias().orElse(effectiveRightAlias));
     }
 
     Join.JoinType jt = node.getJoinType();
@@ -867,8 +919,31 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       default: calciteJoinType = condition != null ? JoinType.INNER : JoinType.CROSS; break;
     }
 
-    pipe = select(star()).from(SqlNodeDSL.join(leftSide, calciteJoinType, rightSide, condition)).build();
+    SqlNode joinNode = SqlNodeDSL.join(leftSide, calciteJoinType, rightSide, condition);
+
+    // Set pipe to raw SqlJoin so aliases stay visible to downstream stages.
+    // Column deduplication for field-list joins is handled by DynamicPPLToSqlNodeConverter
+    // which has schema access to enumerate columns explicitly.
+    pipe = joinNode;
+    skipNextWrap = true;
     return pipe;
+  }
+
+  /** Extract alias from a SqlNode that is an AS expression (e.g., subquery(..., alias)). */
+  private static String extractAlias(SqlNode node) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) node;
+      if ("AS".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
+        SqlNode aliasNode = call.operand(1);
+        if (aliasNode instanceof SqlIdentifier) {
+          return ((SqlIdentifier) aliasNode).getSimple();
+        }
+      }
+    }
+    if (node instanceof SqlIdentifier) {
+      return ((SqlIdentifier) node).getSimple();
+    }
+    return null;
   }
 
   @Override
@@ -2658,7 +2733,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   }
 
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
-    PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter();
+    PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter(aliasCounter);
     return sub.convert(plan);
   }
 }
