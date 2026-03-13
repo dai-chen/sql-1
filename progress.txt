@@ -622,3 +622,22 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
 3. **V4-012** (long-tail) should be attempted after V4-010 and V4-011 — many of those scattered failures may already be fixed by function mappings and new visitors from the prior stories.
 4. **Triage engine-blocked tests**: Before pushing for 85%, enumerate exactly which remaining failures are engine-blocked vs converter-fixable. This determines whether 85% is achievable without engine changes.
 5. **Target for next round**: Reach ~68-72% (need ~180-270 more tests passing from 1360/2264). V4-010 + V4-011 + V4-012 spillover should get there if the function mapping batch is large enough.
+
+## Human Intervention — Engine Fixes + Converter Guidance (2026-03-12)
+
+### Engine Fix 1: Nanosecond timestamp parsing (DONE, ~45 tests unblocked)
+- **Root cause**: `CalciteNoPushdownIndexScan.timestampStringToEpochMillis()` line 254 used `DateTimeFormatter.ofPattern("yyyy-MM-dd['T'][ ]HH:mm:ss[.SSS][.SSSSSS]")` which only matches exactly 3 or 6 fractional digits. OpenSearch `date_nanos` fields return 9-digit nanosecond timestamps (e.g., `2024-01-15 10:30:25.678901234`) which matched neither optional group, causing all fallback parsers to fail and ultimately throwing `NumberFormatException` from `Long.parseLong()`.
+- **Fix**: Replaced hardcoded pattern with `DateTimeFormatterBuilder.appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)` which handles 0-9 fractional digits. The codebase already had this exact pattern in `DateTimeFormatters.DATE_TIME_FORMATTER_VARIABLE_NANOS`.
+- **File changed**: `opensearch/src/main/java/org/opensearch/sql/opensearch/storage/scan/CalciteNoPushdownIndexScan.java`
+- **Impact**: Unblocks ~45 tests across CalciteSearchCommandIT (38), CalcitePPLAggregationIT (~7), and others that query `date_nanos` fields through the no-pushdown scan path.
+
+### Engine Fix 2: MULTISET→ARRAY type mapping (DONE, ~20 tests unblocked)
+- **Root cause**: `OpenSearchTypeFactory.convertSqlTypeNameToExprType()` line 226 grouped `MULTISET` with `CHAR, VARCHAR` → `STRING`. Some Calcite operators return `MULTISET` instead of `ARRAY` for collection types, causing array functions (ARRAY(), SPLIT(), ARRAY_DISTINCT(), ARRAY_JOIN()) to report `type=string` instead of `type=array` in JSON response metadata.
+- **Fix**: Separated `MULTISET` from the `CHAR, VARCHAR` case and mapped it to `ARRAY` instead of `STRING`.
+- **File changed**: `core/src/main/java/org/opensearch/sql/calcite/utils/OpenSearchTypeFactory.java`
+- **Impact**: Unblocks ~20 CalciteArrayFunctionIT tests that assert `verifySchema(actual, schema("result", "array"))`.
+
+### Engine Note: Error message format mismatches (~30 tests, NOT fixable)
+- **Root cause**: V4 transpilation errors produce fundamentally different exception messages than the PPL engine. `createSyntheticResponseException()` wraps raw Java exceptions with `reason: "V4 transpilation error"`, but tests expect PPL-domain-specific messages like `"date:09:07:42 in unsupported format"` or `"function expected {[BOOLEAN,BOOLEAN],...}"`. These are PPL engine error handling tests, not transpilation correctness tests.
+- **Recommendation**: Exclude from 85% target or skip when V4 is enabled. Not worth fixing — the errors are architecturally different.
+

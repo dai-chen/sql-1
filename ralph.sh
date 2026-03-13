@@ -86,6 +86,18 @@ echo "Starting Ralph Loop — Agent: $AGENT — Max: ${MAX_ITERATIONS:-unlimited
 trap 'echo "Interrupted."; exit 0' INT TERM
 ITERATION=0
 
+git_commit_and_push() {
+  local MSG="$1"
+  cd "$SCRIPT_DIR"
+  if [ -n "$(git status --porcelain)" ]; then
+    git add -A
+    git commit -m "$MSG" || true
+    git push || echo "Warning: git push failed"
+  else
+    echo "No changes to commit."
+  fi
+}
+
 summarize() {
   local REASON="$1"
   echo ""
@@ -115,6 +127,8 @@ What to do when resuming the next round.
 
 Keep it concise but substantive. Then output RALPH_SUMMARY_DONE when finished." \
     2>&1 | tee /dev/stderr
+
+  git_commit_and_push "chore: Ralph round summary ($REASON, iteration $ITERATION)"
 }
 
 while [ ! -f "$SCRIPT_DIR/STOP_RALPH" ]; do

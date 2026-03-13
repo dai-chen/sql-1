@@ -11,7 +11,9 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAccessor;
 import java.util.List;
 import org.apache.calcite.adapter.enumerable.EnumerableConvention;
@@ -252,7 +254,10 @@ public class CalciteNoPushdownIndexScan extends CalciteLogicalIndexScan {
       } catch (DateTimeParseException e) {
         try {
           TemporalAccessor ta =
-              DateTimeFormatter.ofPattern("yyyy-MM-dd['T'][ ]HH:mm:ss[.SSS][.SSSSSS]")
+              new DateTimeFormatterBuilder()
+                  .appendPattern("yyyy-MM-dd['T'][ ]HH:mm:ss")
+                  .appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)
+                  .toFormatter()
                   .parseBest(
                       s,
                       Instant::from,
