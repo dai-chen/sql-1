@@ -565,3 +565,60 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - String concatenation with `+` in PPL should use CONCAT when either operand is a string literal. But detecting string-typed fields (not just literals) requires type information not available at converter time.
   - Wildcard field expansion needs case-insensitive matching for some edge cases (mixed wildcards with comma-delimited fields).
 ---
+
+## Round Summary (all stories complete, iteration 7)
+
+### Progress
+- **Completed this round**: V4-005 through V4-009, all passed.
+  - V4-005 (search + ResponseException wrapping): +33 tests, 52.4%→53.9%. Synthetic ResponseException via reflection unblocked ~26 error-handling tests. visitSearch added with OS date math resolution.
+  - V4-006 (array/MV + bonus builtins): +46 tests, 53.9%→55.9%. mvindex, mvappend, mvsort, mvzip. Bonus: castToBoolean, if/case VARCHAR, mod null-on-zero, ispresent/isempty/isblank, e() — 28 CalcitePPLBuiltinFunctionsNullIT fixes alone.
+  - V4-007 (null handling/builtins): +7 tests, resolveColumns schema fix via CalciteSchema.from() unblocked ALL schema-dependent operations. SELECT * REPLACE for eval overrides. earliest/latest filter functions.
+  - V4-008 (join/lookup/subquery): +22 tests. Raw SqlJoin for alias scoping, shared AtomicInteger alias counter, schema-aware visitLookup APPEND, effective aliases for field-list joins, duplicate-detection aliasing.
+  - V4-009 (fields/rename/replace/basic/eval/fillnull): +94 tests, →60.1%. between() fix, wildcard field expansion, SqlStarExceptReplace for rename/replace/fillnull, string concat→CONCAT, resolveColumns metadata filtering, extractPipeColumns for narrowed pipes.
+- **Remaining**: 19 stories incomplete (V4-010 through V4-028):
+  - V4-010: Streamstats/graph lookup/new commands (~96 failures) — needs new visitor methods for rex, patterns, multisearch
+  - V4-011: Math/string/text/operator/JSON functions (~60 failures) — mostly function mappings
+  - V4-012: Long-tail cleanup (~150+ failures across 40+ classes)
+  - V4-013: Array functions (59 failures) — blocked by engine ARRAY type metadata + missing lambda functions
+  - V4-014: MV commands (54 failures) — needs UNNEST/ARRAY_AGG patterns
+  - V4-015/V4-016: Chart/timechart enhancements (45 failures) — limit/useother, per functions, aligntime
+  - V4-017: JSON functions (17 failures)
+  - V4-018: Rex command (17 failures) — REGEXP_EXTRACT variant
+  - V4-019: Patterns command (15 failures)
+  - V4-020: Multisearch (15 failures)
+  - V4-021: Spath (14 failures) — JSON path extraction
+  - V4-022: Addtotals/addcoltotals (14 failures)
+  - V4-023: Expand/flatten/transpose/reverse (19 failures)
+  - V4-024: Geo functions (21 failures)
+  - V4-025: Long-tail remaining (~50 failures)
+  - V4-026/V4-027/V4-028: DEFERRED — search UDFs, graph lookup TVF, relevance functions (~110 failures, blocked on engine UDF/TVF registration)
+- **Blockers**:
+  - Engine-level TIME casting bug: CAST to TIME fails at runtime with "Invalid DATE value" — blocks ~9 datetime tests permanently.
+  - Engine-level nanosecond timestamp parsing: blocks 38 CalciteSearchCommandIT + ~7 aggregation tests.
+  - LIST/VALUES aggregate not registered: blocks 31 CalciteMultiValueStatsIT tests.
+  - ARRAY type metadata: engine returns type=string for array functions — blocks most CalciteArrayFunctionIT tests.
+  - Lambda/higher-order functions (forall, exists, filter, transform, reduce): no SQL equivalent, need V3 UDFs.
+  - V4-026/V4-027/V4-028 DEFERRED: require engine-level UDF/TVF registration outside converter scope.
+
+### PoC Direction Check
+- **Approach validation**: SqlNode-based converter is solidly viable. Rate moved 41.3%→60.1% across two rounds (+18.8pp, +426 tests). The architecture — subquery wrapping for pipe stages, SqlNodeDSL for construction, PPLTypeCoercion for implicit coercion, SqlStarExceptReplace for column manipulation — handles the full breadth of PPL commands without fundamental issues. The two-tier design (base converter + schema-aware subclass) proved essential once the resolveColumns schema fix (V4-007) unblocked all schema-dependent operations.
+- **Surprises**:
+  - Easier: V4-009 was the biggest single-round win (+94 tests) — SqlStarExceptReplace turned out to be a universal pattern for rename/replace/fillnull/eval override, replacing fragile explicit column enumeration. The between() bug fix alone recovered 8 tests.
+  - Harder: V4-007's resolveColumns fix (CalciteSchema.from() bypass) was a subtle caching bug that silently broke all schema-dependent operations in integration tests while unit tests passed fine. This class of "works in unit tests, fails in integration" bugs is dangerous.
+  - Assumption validated: The ResponseException wrapping approach (V4-005) using reflection to create synthetic responses works reliably — no regressions from the wrapping.
+- **Alternative approaches**: No pivot needed. The remaining work splits into two categories: (1) function mappings and new visitor methods (V4-010, V4-011, V4-017–V4-023) which are straightforward extensions, and (2) engine-blocked features (V4-013 array type, V4-014 UNNEST, V4-026–V4-028 UDFs) which the converter cannot fix alone. For category 2, consider whether engine-side fixes should be prioritized in a parallel workstream.
+- **Risk areas**:
+  - V4-012 (long-tail, ~150 failures across 40+ classes): diminishing returns per fix, many 1-2 failure classes. May need a triage pass to identify which are converter-fixable vs engine-blocked.
+  - V4-010 (new commands): rex, patterns, multisearch need entirely new visitor methods — higher implementation risk than function mappings.
+  - Engine ceiling: ~110 DEFERRED tests (V4-026–V4-028) + ~85 engine-blocked tests (TIME casting, nanosecond parsing, LIST/VALUES, ARRAY type) = ~195 tests (~8.6%) that the converter cannot fix. Reaching 85% requires fixing ~560 of the remaining ~710 converter-fixable failures — that's a 79% fix rate on remaining work.
+- **Open questions**:
+  - Should DEFERRED stories (V4-026–V4-028, ~110 tests) be excluded from the 85% denominator? If so, the effective target drops to 85% of 2154 = 1831, and we need 471 more tests (currently at 1360).
+  - Should engine-level bugs (TIME casting, nanosecond parsing, LIST/VALUES, ARRAY type) be fixed in a parallel workstream? They collectively block ~85 tests.
+  - V4-011 (function mappings) vs V4-010 (new visitor methods) — which is higher ROI for the next round? V4-011 is lower risk but V4-010 covers more test classes.
+
+### Recommended Next Steps
+1. **V4-010** (streamstats/graph lookup/new commands) is next by priority. Start with CalciteRexCommandIT and CalcitePPLPatternsIT — these likely need new visitor methods (visitRex, visitPatterns) but the SQL patterns are well-defined (REGEXP_EXTRACT for rex, regex replacement for patterns).
+2. **V4-011** (math/string/text/operator/JSON) is high-ROI quick wins — mostly adding function name mappings to FUNC_MAP, similar to V4-003's datetime batch. Run CalciteMathematicalFunctionIT and CalcitePPLStringBuiltinFunctionIT first to categorize.
+3. **V4-012** (long-tail) should be attempted after V4-010 and V4-011 — many of those scattered failures may already be fixed by function mappings and new visitors from the prior stories.
+4. **Triage engine-blocked tests**: Before pushing for 85%, enumerate exactly which remaining failures are engine-blocked vs converter-fixable. This determines whether 85% is achievable without engine changes.
+5. **Target for next round**: Reach ~68-72% (need ~180-270 more tests passing from 1360/2264). V4-010 + V4-011 + V4-012 spillover should get there if the function mapping batch is large enough.
