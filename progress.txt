@@ -94,6 +94,18 @@
 - JSON escaping: multi-line SQL from toSqlString() breaks JSON response serialization
 - CalcitePPLPluginIT is flaky — ignore ±1 fluctuations
 
+### Join/Subquery Patterns
+- visitJoin sets `pipe = joinNode` (raw SqlJoin, NOT wrapped in SELECT *) to preserve alias visibility
+- `skipNextWrap` flag: set after visitJoin, consumed ONLY by visitProject. Other visitors always wrap.
+- `consumeSkipWrap()`: returns pipe directly without wrapping, used by visitProject when skipNextWrap=true
+- Shared `AtomicInteger aliasCounter`: passed to sub-converters via convertSubPlan() to prevent alias collision (_t1 reuse)
+- Field-list joins: buildFieldListCondition uses effectiveLeftAlias/effectiveRightAlias as fallback when explicit aliases are null
+- extractAlias(SqlNode): extracts alias from AS expressions or bare identifiers
+- Duplicate column aliasing: visitProject pre-scans leaf names, only aliases second occurrence of duplicates
+- EXCEPT/REPLACE with qualified names DOES NOT WORK — parser can't handle dots in EXCEPT/REPLACE clauses
+- convert() wraps raw SqlJoin in SELECT * if it's the final result
+- Lookup APPEND: DynamicPPLToSqlNodeConverter checks schema — COALESCE for columns in both tables, direct _r.col for lookup-only columns
+
 ### Engine Capabilities (do NOT modify engine)
 - SqlLibrary.MYSQL/BIG_QUERY/SPARK/POSTGRESQL all registered — hundreds of functions available
 - OpenSearch date/time fields → standard SQL TIMESTAMP/DATE/TIME (no UDT)
@@ -468,4 +480,43 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - `earliest(timeStr, field)` means "field is at or after the earliest boundary" = `field >= time`. `latest(timeStr, field)` means "field is at or before the latest boundary" = `field <= time`. Counter-intuitive naming.
   - `StarExceptReplaceRewriter.collectTables()` needs to trace through subquery chains to find the underlying table name for column resolution. Without this, `SELECT * REPLACE(...)` can't expand the wildcard.
   - The resolveColumns fix will likely improve pass rates for V4-009 (fields/rename/replace) and other schema-dependent stories significantly.
+---
+
+## 2026-03-12T22:08 - V4-008: Fix join, lookup, and subquery issues
+- **What was fixed**: 22 new tests passing across 5 test classes (28→50)
+  - **Raw SqlJoin for alias scoping**: Changed visitJoin to set `pipe = joinNode` (raw SqlJoin) instead of wrapping in `SELECT * FROM join`. This keeps join aliases (a, b) visible to downstream pipe stages. Added `skipNextWrap` flag consumed only by visitProject; other visitors always wrap via wrapAsSubquery().
+  - **Shared AtomicInteger for alias counter**: Changed `aliasCounter` from `private int` to `protected final AtomicInteger`. Both PPLToSqlNodeConverter.convertSubPlan() and DynamicPPLToSqlNodeConverter.convertSubPlan() pass `this.aliasCounter` to sub-converters, ensuring globally unique alias generation across correlated subqueries.
+  - **Schema-aware visitLookup override**: Overrode visitLookup in DynamicPPLToSqlNodeConverter. For APPEND mode, uses resolveColumns() to check which output columns exist in the source table. COALESCE only for columns in both tables; direct _r.col reference for columns only in lookup table.
+  - **Effective aliases for field-list joins**: In visitJoin, tracks effectiveLeftAlias and effectiveRightAlias. Added extractAlias() helper. Passes effective aliases to buildFieldListCondition as fallback when explicit join aliases are null.
+  - **Duplicate-detection aliasing for qualified fields**: In visitProject, pre-scans field list to count leaf column names. Only aliases the second occurrence of a duplicate leaf name with the qualified name (e.g., `b.country AS "b.country"`). Unique columns remain unaliased.
+  - **convert() final result handling**: If final pipe is a raw SqlJoin, wraps in `SELECT * FROM join` so callers get valid SqlSelect.
+- **Pass rate change**: 55.9% (1266/2264) → ~56.9% (estimated 1288/2264) = +1.0pp, +22 tests
+- **Per-class results** (baseline → now):
+  - CalcitePPLJoinIT: 4→8 pass (39 total, 31 fail) — +4 new passes
+  - CalcitePPLLookupIT: 5→7 pass (17 total, 10 fail) — +2 new passes
+  - CalcitePPLExistsSubqueryIT: 5→14 pass (19 total, 5 fail) — +9 new passes (biggest win)
+  - CalcitePPLScalarSubqueryIT: 4→10 pass (14 total, 4 fail) — +6 new passes
+  - CalcitePPLInSubqueryIT: 10→11 pass (18 total, 6 fail, 1 skip) — +1 new pass
+- **Remaining failures (57)**:
+  - JoinIT 500 errors (16): multi-join chains, self-join disambiguation, cross join, sort-merge join, SubqueryAlias handling (tt vs t2)
+  - JoinIT row count (8): field-list joins return duplicate columns (SELECT * from both sides), max option not implemented
+  - JoinIT column names (5): qualified field aliasing edge cases
+  - JoinIT other (2): data content mismatches
+  - LookupIT 500 errors (4): AS renaming in lookup output (departmentAsCountry pattern)
+  - LookupIT data (4): lookup REPLACE/APPEND semantics edge cases
+  - LookupIT column count (2): lookup with eval'd columns
+  - ExistsSubqueryIT (5): nested exists, subsearch max, conjunction
+  - ScalarSubqueryIT (4): nested scalar, two subqueries in OR
+  - InSubqueryIT (6): two-expression IN/NOT IN, table alias, max
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+119/-23: visitJoin rewrite, shared AtomicInteger, extractAlias, consumeSkipWrap, duplicate-detection aliasing, convert() SqlJoin handling)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+68/-1: visitLookup override, convertSubPlan with shared counter)
+- **Learnings for future iterations:**
+  - Setting pipe to raw SqlJoin (not wrapped in SELECT *) is the correct approach for preserving join alias visibility. The SqlJoin node in Calcite's FROM clause exposes table aliases to the SELECT.
+  - skipNextWrap must be consumed ONLY by visitProject. Other visitors (eval, filter, sort) need subquery wrapping to avoid ambiguous column references, especially in self-joins.
+  - AtomicInteger shared across converter instances prevents alias collision (_t1 reuse) in correlated subqueries. This was the root cause of most EXISTS/scalar subquery failures.
+  - EXCEPT/REPLACE with table-qualified column names doesn't work — the OpenSearch SQL parser can't handle dots in EXCEPT/REPLACE clauses. Must use explicit column enumeration or schema-aware approaches.
+  - Calcite auto-renames duplicate columns (country → country0). To preserve expected names, add explicit AS aliases only for the SECOND occurrence of duplicate leaf names.
+  - Multi-join chains (3+ joins) require careful alias management — each join level introduces new aliases that must be tracked through the pipe chain.
+  - The max option (subsearch max=N) requires ROW_NUMBER windowing on the right side of the join — not yet implemented.
 ---
