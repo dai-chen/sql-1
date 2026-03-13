@@ -194,7 +194,7 @@ If build or tests fail after 3 attempts:
 ## Stop Condition
 
 After completing a story, check if ALL stories have `passes: true`.
-If ALL complete: output **RALPH_COMPLETE**
+If ALL complete: output the exact text `RALPH_COMPLETE` on its own line (no other text on that line).
 Otherwise: end normally.
 
 ## Important

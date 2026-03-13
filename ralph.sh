@@ -151,7 +151,7 @@ while [ ! -f "$SCRIPT_DIR/STOP_RALPH" ]; do
     "Read ralph-prompt.md, prd.json, and progress.txt. Pick the next incomplete story, implement it, verify, update state. One task only." \
     2>&1 | tee /dev/stderr) || true
 
-  if echo "$OUTPUT" | grep -q "RALPH_COMPLETE"; then
+  if echo "$OUTPUT" | grep -qE '^\s*RALPH_COMPLETE\s*$'; then
     echo ""
     echo "All stories complete! Finished at iteration $ITERATION."
     summarize "all stories complete"
