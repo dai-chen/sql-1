@@ -34,6 +34,7 @@ import org.opensearch.sql.legacy.metrics.MetricName;
 import org.opensearch.sql.legacy.metrics.Metrics;
 import org.opensearch.sql.opensearch.response.error.ErrorMessageFactory;
 import org.opensearch.sql.plugin.request.PPLQueryRequestFactory;
+import org.opensearch.sql.plugin.routing.ParquetQueryPlanner;
 import org.opensearch.sql.plugin.transport.PPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryRequest;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
@@ -94,12 +95,25 @@ public class RestPPLQueryAction extends BaseRestHandler {
     if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
       boolean isExplain = request.path().endsWith("/_explain");
       return channel -> {
-        String formattedResult =
-            isExplain
-                ? ParquetStubResponse.formatExplainAsJson()
-                : ParquetStubResponse.formatAsSimpleJson(
-                    ParquetStubResponse.buildStubQueryResult());
-        sendResponse(channel, OK, "application/json", formattedResult);
+        try {
+          if (isExplain) {
+            sendResponse(
+                channel, OK, "application/json", ParquetStubResponse.formatExplainAsJson());
+          } else {
+            org.apache.calcite.rel.RelNode optimized = ParquetQueryPlanner.plan(query);
+            sendResponse(
+                channel, OK, "application/json", ParquetQueryPlanner.formatExplain(optimized));
+          }
+        } catch (Exception e) {
+          LOG.error("Error planning Parquet query", e);
+          sendResponse(
+              channel,
+              BAD_REQUEST,
+              "application/json",
+              "{\"error\":{\"reason\":\""
+                  + e.getMessage().replace("\"", "\\\"")
+                  + "\"},\"status\":400}");
+        }
       };
     }
 

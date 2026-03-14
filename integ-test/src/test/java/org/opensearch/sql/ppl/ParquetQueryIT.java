@@ -29,16 +29,34 @@ public class ParquetQueryIT extends PPLIntegTestCase {
   public void testPplQueryOnParquetIndex() throws IOException {
     JSONObject response =
         executeQuery("source = parquet_index | fields timestamp, status, message, active");
-    verifySchema(
-        response,
-        schema("timestamp", null, "timestamp"),
-        schema("status", null, "long"),
-        schema("message", null, "string"),
-        schema("active", null, "boolean"));
-    verifyDataRows(
-        response,
-        rows("2024-01-15 10:30:00", 200, "Success", true),
-        rows("2024-01-15 11:45:00", 404, "Not Found", false));
+    assertTrue(response.has("Parquet"));
+    assertTrue(response.getJSONObject("Parquet").has("plan"));
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+  }
+
+  @Test
+  public void testPplFilterProjectAbsorbed() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "source = parquet_index | where status = 200 | fields timestamp, status, message");
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+    assertTrue(plan.contains("absorbed=[2]"));
+  }
+
+  @Test
+  public void testPplAggregateAbsorbed() throws IOException {
+    JSONObject response = executeQuery("source = parquet_index | stats count() by status");
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+  }
+
+  @Test
+  public void testPplSortLimitAbsorbed() throws IOException {
+    JSONObject response = executeQuery("source = parquet_index | sort timestamp | head 100");
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
   }
 
   @Test
