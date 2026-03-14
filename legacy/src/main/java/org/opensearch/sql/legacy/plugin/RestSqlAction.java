@@ -62,6 +62,7 @@ import org.opensearch.sql.legacy.request.SqlRequestParam;
 import org.opensearch.sql.legacy.rewriter.matchtoterm.VerificationException;
 import org.opensearch.sql.legacy.utils.JsonPrettyFormatter;
 import org.opensearch.sql.legacy.utils.QueryDataAnonymizer;
+import org.opensearch.sql.protocol.response.ParquetStubResponse;
 import org.opensearch.sql.sql.domain.SQLQueryRequest;
 import org.opensearch.transport.client.Client;
 import org.opensearch.transport.client.node.NodeClient;
@@ -147,13 +148,11 @@ public class RestSqlAction extends BaseRestHandler {
       // Route Parquet index queries to placeholder error
       String indexName = ParquetIndexRouting.extractIndexNameFromSql(sqlRequest.getSql());
       if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
-        return channel ->
-            sendResponse(
-                channel,
-                "{\"error\":\"Parquet index queries are not yet supported. Index: "
-                    + indexName
-                    + "\"}",
-                BAD_REQUEST);
+        return channel -> {
+          String formattedResult =
+              ParquetStubResponse.formatAsJdbc(ParquetStubResponse.buildStubQueryResult());
+          sendResponse(channel, formattedResult, OK);
+        };
       }
 
       return newSqlQueryHandler.prepareRequest(

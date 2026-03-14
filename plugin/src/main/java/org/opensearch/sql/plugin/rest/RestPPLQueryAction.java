@@ -37,6 +37,7 @@ import org.opensearch.sql.plugin.request.PPLQueryRequestFactory;
 import org.opensearch.sql.plugin.transport.PPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryRequest;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
+import org.opensearch.sql.protocol.response.ParquetStubResponse;
 import org.opensearch.transport.client.node.NodeClient;
 
 public class RestPPLQueryAction extends BaseRestHandler {
@@ -91,14 +92,11 @@ public class RestPPLQueryAction extends BaseRestHandler {
     String query = transportPPLQueryRequest.getRequest();
     String indexName = ParquetIndexRouting.extractIndexName(query);
     if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
-      return channel ->
-          sendResponse(
-              channel,
-              BAD_REQUEST,
-              "application/json",
-              "{\"error\":\"Parquet index queries are not yet supported. Index: "
-                  + indexName
-                  + "\"}");
+      return channel -> {
+        String formattedResult =
+            ParquetStubResponse.formatAsSimpleJson(ParquetStubResponse.buildStubQueryResult());
+        sendResponse(channel, OK, "application/json", formattedResult);
+      };
     }
 
     return channel ->

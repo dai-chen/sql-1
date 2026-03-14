@@ -1,0 +1,67 @@
+/*
+ * Copyright OpenSearch Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+package org.opensearch.sql.protocol.response;
+
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import org.opensearch.sql.data.model.ExprBooleanValue;
+import org.opensearch.sql.data.model.ExprLongValue;
+import org.opensearch.sql.data.model.ExprStringValue;
+import org.opensearch.sql.data.model.ExprTimestampValue;
+import org.opensearch.sql.data.model.ExprTupleValue;
+import org.opensearch.sql.data.model.ExprValue;
+import org.opensearch.sql.data.type.ExprCoreType;
+import org.opensearch.sql.executor.ExecutionEngine.Schema;
+import org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
+import org.opensearch.sql.executor.pagination.Cursor;
+import org.opensearch.sql.protocol.response.format.JdbcResponseFormatter;
+import org.opensearch.sql.protocol.response.format.JsonResponseFormatter;
+import org.opensearch.sql.protocol.response.format.SimpleJsonResponseFormatter;
+
+/** Builds stub JDBC/SimpleJson formatted responses for Parquet index queries. */
+public final class ParquetStubResponse {
+
+  private ParquetStubResponse() {}
+
+  /** Builds a stub QueryResult with hardcoded schema and sample data rows. */
+  public static QueryResult buildStubQueryResult() {
+    Schema schema =
+        new Schema(
+            Arrays.asList(
+                new Column("timestamp", null, ExprCoreType.TIMESTAMP),
+                new Column("status", null, ExprCoreType.LONG),
+                new Column("message", null, ExprCoreType.STRING),
+                new Column("active", null, ExprCoreType.BOOLEAN)));
+
+    LinkedHashMap<String, ExprValue> row1 = new LinkedHashMap<>();
+    row1.put("timestamp", new ExprTimestampValue("2024-01-15 10:30:00"));
+    row1.put("status", new ExprLongValue(200));
+    row1.put("message", new ExprStringValue("Success"));
+    row1.put("active", ExprBooleanValue.of(true));
+
+    LinkedHashMap<String, ExprValue> row2 = new LinkedHashMap<>();
+    row2.put("timestamp", new ExprTimestampValue("2024-01-15 11:45:00"));
+    row2.put("status", new ExprLongValue(404));
+    row2.put("message", new ExprStringValue("Not Found"));
+    row2.put("active", ExprBooleanValue.of(false));
+
+    List<ExprValue> rows =
+        Arrays.asList(ExprTupleValue.fromExprValueMap(row1), ExprTupleValue.fromExprValueMap(row2));
+
+    return new QueryResult(schema, rows, Cursor.None);
+  }
+
+  /** Formats a QueryResult as SimpleJson (schema + datarows + total + size). */
+  public static String formatAsSimpleJson(QueryResult queryResult) {
+    return new SimpleJsonResponseFormatter(JsonResponseFormatter.Style.PRETTY).format(queryResult);
+  }
+
+  /** Formats a QueryResult as JDBC (schema + datarows + total + size + status). */
+  public static String formatAsJdbc(QueryResult queryResult) {
+    return new JdbcResponseFormatter(JsonResponseFormatter.Style.PRETTY).format(queryResult);
+  }
+}
