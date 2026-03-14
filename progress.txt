@@ -1050,3 +1050,24 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - For eval-then-expand (`eval addr=address | expand addr`), the eval alias doesn't exist in the table schema. Must check both pipe columns and table schema to build the complete column list.
   - `resolveColumnsWithPipeExtras()` is a useful pattern for any command that follows eval — it merges table schema columns with eval-created aliases from the pipe's SELECT list.
 ---
+
+## 2026-03-14T19:05 - V4-024: Geo/IP functions (triage only — all engine-blocked)
+- **What was fixed**: No code changes — all 24 failures are engine-blocked for the V4 path
+- **Root causes investigated**:
+  1. **CalciteIPComparisonIT (6 tests)**: EXPR_IP type comparisons with CHAR/VARCHAR fail Calcite validation (`Cannot apply '=' to arguments of type '<EXPR_IP> = <CHAR(7)>'`). Three approaches attempted:
+     - ExprIPType.getComparability() → ALL: Passes comparability check but SameOperandTypeChecker rejects EXPR_IP ≠ CHAR
+     - PPLTypeCoercion.commonTypeForBinaryComparison → VARCHAR + needToCast override: Coercion inserts CAST(host AS VARCHAR) which changes comparison semantics (string comparison loses IPv4-mapped IPv6 equivalence like `::ffff:1.2.3.4 = 1.2.3.4`)
+     - DynamicPPLToSqlNodeConverter.visitCompare → IP UDF calls: UDFs serialize as infix operators (`"host" EQUALS_IP '1.2.3.4'`) which the SQL parser can't parse
+     - **Conclusion**: V4 path (PPL → SQL string → SQL endpoint) fundamentally can't handle IP comparisons. The non-V4 path works via PPLFuncImpTable which replaces operators at rel-algebra level.
+  2. **CalciteIPFunctionsIT (1 test) + CalcitePPLIPFunctionIT (1 test)**: CIDRMATCH UDF not in SQL endpoint operator table. Even if registered, UDF calls can't survive SQL string round-trip.
+  3. **CalciteGeoIpFunctionsIT (6 FAIL, 1 PASS)**: `No match found for function signature GEOIP(...)` — GEOIP requires geospatial plugin datasource interaction, no SQL equivalent.
+  4. **CalciteGeoPointFormatsIT (10 FAIL)**: StackOverflowError in JSONObject.wrap → JSONObject.populateMap infinite recursion when serializing geo_point objects. Crashes JVM, cascading to all subsequent tests.
+- **Pass rate change**: No change (69.3%, 1570/2264)
+- **Files changed**: None (prd.json updated only)
+- **Learnings for future iterations:**
+  - The V4 path (PPL → SQL string → SQL endpoint) has a fundamental limitation: it can't use UDFs that don't survive SQL string serialization. IP comparison UDFs (EQUALS_IP, etc.) are designed for the direct rel-algebra path (PPL → AST → RelNode), not the SQL string path.
+  - Calcite's ComparableOperandTypeChecker calls checkType with throwOnFailure=true from SqlOperator.validateOperands. This means type coercion is only attempted AFTER all operands pass the comparability check. The coercion block (binaryComparisonCoercion) is for widening compatible types, not for making incompatible types compatible.
+  - ExprIPType already inherits ALL comparability from RelDataTypeImpl.getComparability(). The issue is at SameOperandTypeChecker level (types must be the SAME after coercion), not at ComparableOperandTypeChecker level.
+  - CAST(EXPR_IP AS VARCHAR) changes comparison semantics — string comparison doesn't handle IPv4-mapped IPv6 equivalence or IP address normalization.
+  - SqlUserDefinedFunction with SqlKind.EQUALS serializes as an infix operator in toSqlString(), which the SQL parser can't parse back.
+---
