@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 69.3% (1570/2264, 144 skipped)
+- Current rate: 74.1% (1672/2255, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -122,6 +122,13 @@
 
 ### Engine Capabilities (do NOT modify engine)
 - SqlLibrary.MYSQL/BIG_QUERY/SPARK/POSTGRESQL all registered — hundreds of functions available
+
+### Object/Dotted Field Names
+- OpenSearch object fields (city.name, employer.name) are single columns with dots — NOT schema-qualified references
+- visitQualifiedName: if first part is in knownAliases → compound SqlIdentifier (table.column). Otherwise → single-part quoted identifier ("city.name")
+- knownAliases tracks: join aliases (effectiveLeftAlias/effectiveRightAlias), subquery aliases (_tN), lookup aliases (_l, _r), table name
+
+### Engine Capabilities (do NOT modify engine)
 - OpenSearch date/time fields → standard SQL TIMESTAMP/DATE/TIME (no UDT)
 - Metadata fields excluded from schema — SELECT * returns only user data columns
 - SELECT * EXCEPT/REPLACE supported at SqlNode layer
@@ -1070,4 +1077,78 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - ExprIPType already inherits ALL comparability from RelDataTypeImpl.getComparability(). The issue is at SameOperandTypeChecker level (types must be the SAME after coercion), not at ComparableOperandTypeChecker level.
   - CAST(EXPR_IP AS VARCHAR) changes comparison semantics — string comparison doesn't handle IPv4-mapped IPv6 equivalence or IP address normalization.
   - SqlUserDefinedFunction with SqlKind.EQUALS serializes as an infix operator in toSqlString(), which the SQL parser can't parse back.
+---
+
+## 2026-03-14T19:05 - V4-012 (Iteration 25): Object field access + wildcard dedup
+- **What was fixed**: 69 new tests passing (1570→1639, 69.3%→72.2%)
+  - **Object/dotted field access**: Added `knownAliases` Set to PPLToSqlNodeConverter that tracks join aliases, subquery aliases (_tN), and lookup aliases (_l, _r). Modified `visitQualifiedName()`: for multi-part names, if `parts.get(0)` is NOT in knownAliases, joins all parts into a single dotted identifier (`"city.name"` as single-part quoted) instead of compound SqlIdentifier (`"city"."name"` as table.column). If first part IS a known alias, keeps compound form for proper table qualification. Updated `nextAlias()`, `visitJoin()`, `visitLookup()` to register aliases in knownAliases.
+  - **Fields wildcard deduplication**: Used `LinkedHashSet<String>` to track already-added columns in wildcard expansion, preventing duplicates while preserving insertion order. Added `anyMatch` check against all columns BEFORE dedup filtering so patterns matching already-added columns don't falsely trigger "no fields" error.
+  - **Wildcard support in fields- exclude**: Changed exclude path from exact `Set.contains()` to regex pattern matching via `noneMatch`, enabling `fields - *name*` patterns.
+  - **No-match wildcard error**: Added `IllegalArgumentException` with message `"wildcard pattern [X] matches no fields"` when a pattern truly matches zero columns.
+- **Pass rate change**: 69.3% (1570/2264) → 72.2% (1639/2270) = +2.9pp, +69 tests
+- **Per-class results** (before → after):
+  - CalciteObjectFieldOperateIT: 0→4 pass (5 total, 1 fail: engine-level nested struct type) — +4
+  - CalciteFieldsCommandIT: 27→39 pass (39 total, 0 fail) ✅ ALL PASS — +12
+  - +53 spillover across other classes from dotted field fix (many tests use object fields like employer.name, city.name)
+- **Remaining CalciteObjectFieldOperateIT failure (1)**:
+  - verify_schema_without_fields: expects 4 top-level struct/array columns but engine returns all 10 columns including nested sub-fields. Engine-level schema flattening issue.
+- **No regressions**: CalciteDateTimeComparisonIT (191/191), CalciteSortCommandIT (30/30), CalcitePPLBasicIT (35/42), CalcitePPLJoinIT (12/39), CalcitePPLRenameIT (19/22), CalciteReplaceCommandIT (16/21), CalciteFillNullCommandIT (11/13) all unchanged.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+20: knownAliases Set, visitQualifiedName dotted field fix, alias tracking in nextAlias/visitJoin/visitLookup)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+14/-5: LinkedHashSet dedup, wildcard exclude regex, no-match error)
+- **Learnings for future iterations:**
+  - OpenSearch object fields (city.name, employer.name) are single columns with dots in the name, NOT schema-qualified references. Calcite SqlIdentifier with multiple parts = table.column. Must use single-part quoted identifier for object fields.
+  - The knownAliases approach (tracking join/subquery/lookup aliases) is the correct way to distinguish between table.column references and dotted field names. If first part is a known alias → compound identifier. Otherwise → single-part quoted.
+  - The dotted field fix had massive spillover (+53 tests beyond the 16 directly targeted) because many test classes use object fields in WHERE, GROUP BY, ORDER BY, and SELECT clauses.
+  - LinkedHashSet is the correct data structure for wildcard dedup — preserves insertion order while eliminating duplicates.
+  - Fields- exclude with wildcards needs regex matching, not exact string matching. The `noneMatch` pattern with compiled regex is clean and efficient.
+---
+
+## 2026-03-14T20:17 - V4-012 (Iteration 26): Fix join/lookup/subquery for long-tail
+- **What was fixed**: 33 new tests passing (1639→1672, 72.2%→74.1%)
+  - **Multi-value IN subquery**: `visitInSubquery` now handles multi-expression IN patterns using `ROW(a, b) IN (subquery)` instead of only single-value IN. Fixed CalcitePPLInSubqueryIT.testTwoExpressionsInSubquery.
+  - **Join SubqueryAlias tracking**: Added `extractSubqueryAliasName()` helper. When PPL has `right = t2` and table `as tt`, both aliases are tracked in `knownAliases` so downstream `visitQualifiedName` correctly resolves `tt.name` as compound identifier. Fixed CalcitePPLJoinIT.testCheckAccessTheReferenceByOverrideSubqueryAliases2.
+  - **Aggregation clears pending ORDER BY**: `visitAggregation` now clears `pendingOrderBy/pendingFetch/pendingOffset` since aggregation resets row order. Fixed nested scalar subqueries where `sort department | stats max(uid)` produced invalid `ORDER BY department` on the stats result. Fixed CalcitePPLScalarSubqueryIT.testNestedScalarSubquery and testTwoCorrelatedScalarSubqueriesInOr.
+  - **Lookup REPLACE/APPEND rewrite**: Complete rewrite of `visitLookup` in DynamicPPLToSqlNodeConverter using SqlStarExceptReplace. Handles: empty outputMap with REPLACE for shared columns + direct _r.col for new columns; explicit outputMap with REPLACE/APPEND semantics; pipe-only target columns (from eval). Fixed 9 CalcitePPLLookupIT tests.
+  - **Field-list join column dedup**: Added `visitJoin` override in DynamicPPLToSqlNodeConverter using SqlStarExceptReplace for field-list joins. Fixed CalcitePPLJoinIT.testJoinWithFieldListSelfJoin.
+  - **extractAlias visibility**: Changed from `private` to `protected` so DynamicPPLToSqlNodeConverter can use it.
+- **Pass rate change**: 72.2% (1639/2270) → 74.1% (1672/2255, excluding 1 consistently crashing class CalciteGeoPointFormatsIT)
+- **Per-class results** (before → after):
+  - CalcitePPLLookupIT: 7→16 pass (17 total, 1 fail) — +9
+  - CalcitePPLScalarSubqueryIT: 10→13 pass (14 total, 1 fail) — +3
+  - CalcitePPLJoinIT: 12→14 pass (39 total, 25 fail) — +2
+  - CalcitePPLInSubqueryIT: 12→13 pass (18 total, 4 fail) — +1
+  - CalcitePPLExistsSubqueryIT: 14→15 pass (19 total, 4 fail) — +1
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalciteTrendlineCommandIT: 5/5 (no regression) ✅
+  - CalcitePPLBasicIT: 35/42 (no regression) ✅
+- **Full suite per-class breakdown** (classes with >5 failures):
+  - CalciteDateTimeFunctionIT: 26/65 (37 fail) — engine-level TIME casting + timezone
+  - CalciteArrayFunctionIT: 30/60 (30 fail) — lambda functions engine-blocked
+  - CalciteSearchCommandIT: 26/52 (25 fail) — nanosecond timestamp engine bug
+  - CalcitePPLJoinIT: 14/39 (25 fail) — multi-join chains, alias override, cross join
+  - CalcitePPLGraphLookupIT: 1/22 (21 fail) — DEFERRED (V4-027)
+  - CalciteMultiValueStatsIT: 13/31 (18 fail) — list/values functions not registered
+  - CalciteRelevanceFunctionIT: 0/15 (14 fail) — DEFERRED (V4-028)
+  - CalciteStreamstatsCommandIT: 33/46 (13 fail) — engine-blocked window semantics
+  - CalciteConvertTZFunctionIT: 2/14 (12 fail) — timezone conversion engine-level
+  - CalciteBinCommandIT: 32/70 (11 fail) — aligntime, nested field, error format
+  - CalcitePPLPatternsIT: 4/15 (11 fail) — BRAIN method engine-blocked
+  - CalcitePPLCastFunctionIT: 11/21 (10 fail) — engine-level type handling
+  - CalciteDateTimeImplementationIT: 7/17 (10 fail) — timezone engine-level
+  - CalciteAliasFieldAggregationIT: 1/9 (8 fail) — alias field aggregation not implemented
+  - CalcitePPLAppendCommandIT: 0/8 (8 fail) — append pipe not implemented
+  - CalciteMatchPhrasePrefixIT: 0/8 (8 fail) — DEFERRED (V4-028)
+  - CalcitePPLBuiltinFunctionsNullIT: 63/71 (8 fail) — engine-level
+  - CalcitePPLBuiltinFunctionIT: 18/26 (8 fail) — engine-level
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+40/-3: multi-value IN, SubqueryAlias tracking, aggregation clears pending ORDER BY, extractAlias protected)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+226/-23: visitLookup rewrite, visitJoin override for field-list dedup)
+- **Learnings for future iterations:**
+  - ROW(a, b) IN (subquery) is the correct Calcite pattern for multi-expression IN. Use SqlStdOperatorTable.ROW to create the row constructor.
+  - SubqueryAlias AST nodes (from `table as alias`) need their alias tracked in knownAliases for downstream visitQualifiedName to correctly resolve qualified references.
+  - Aggregation (stats) resets row order — any pending ORDER BY from a prior sort must be cleared, not carried through. This was causing invalid ORDER BY on aggregation results in correlated subqueries.
+  - Lookup REPLACE/APPEND with SqlStarExceptReplace is cleaner than explicit column enumeration. The StarExceptReplaceRewriter handles expansion during validation.
+  - CalciteGeoPointFormatsIT consistently crashes the test cluster with StackOverflowError in JSONObject.wrap — must be excluded from batch runs or run last.
 ---
