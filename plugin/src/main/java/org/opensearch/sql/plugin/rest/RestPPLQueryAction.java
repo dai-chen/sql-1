@@ -35,7 +35,10 @@ import org.opensearch.sql.legacy.metrics.Metrics;
 import org.opensearch.sql.opensearch.response.error.ErrorMessageFactory;
 import org.opensearch.sql.plugin.request.PPLQueryRequestFactory;
 import org.opensearch.sql.plugin.routing.ParquetQueryPlanner;
+import org.opensearch.sql.plugin.transport.AnalyticsActionRequest;
+import org.opensearch.sql.plugin.transport.AnalyticsActionResponse;
 import org.opensearch.sql.plugin.transport.PPLQueryAction;
+import org.opensearch.sql.plugin.transport.TransportAnalyticsAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryRequest;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
 import org.opensearch.sql.protocol.response.ParquetStubResponse;
@@ -101,8 +104,29 @@ public class RestPPLQueryAction extends BaseRestHandler {
                 channel, OK, "application/json", ParquetStubResponse.formatExplainAsJson());
           } else {
             org.apache.calcite.rel.RelNode optimized = ParquetQueryPlanner.plan(query);
-            sendResponse(
-                channel, OK, "application/json", ParquetQueryPlanner.formatExplain(optimized));
+            String plan = ParquetQueryPlanner.formatExplain(optimized);
+            AnalyticsActionRequest analyticsRequest = new AnalyticsActionRequest(plan, "PPL");
+            nodeClient.execute(
+                TransportAnalyticsAction.ACTION_TYPE,
+                analyticsRequest,
+                new ActionListener<>() {
+                  @Override
+                  public void onResponse(AnalyticsActionResponse response) {
+                    sendResponse(channel, OK, "application/json", response.getResult());
+                  }
+
+                  @Override
+                  public void onFailure(Exception e) {
+                    LOG.error("Error executing Parquet query", e);
+                    sendResponse(
+                        channel,
+                        BAD_REQUEST,
+                        "application/json",
+                        "{\"error\":{\"reason\":\""
+                            + e.getMessage().replace("\"", "\\\"")
+                            + "\"},\"status\":400}");
+                  }
+                });
           }
         } catch (Exception e) {
           LOG.error("Error planning Parquet query", e);

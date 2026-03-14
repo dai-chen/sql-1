@@ -29,10 +29,10 @@ public class ParquetQueryIT extends PPLIntegTestCase {
   public void testPplQueryOnParquetIndex() throws IOException {
     JSONObject response =
         executeQuery("source = parquet_index | fields timestamp, status, message, active");
-    assertTrue(response.has("Parquet"));
-    assertTrue(response.getJSONObject("Parquet").has("plan"));
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(2, response.getInt("total"));
+    assertEquals(2, response.getInt("size"));
   }
 
   @Test
@@ -40,32 +40,34 @@ public class ParquetQueryIT extends PPLIntegTestCase {
     JSONObject response =
         executeQuery(
             "source = parquet_index | where status = 200 | fields timestamp, status, message");
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
-    assertTrue(plan.contains("absorbed=[2]"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test
   public void testPplAggregateAbsorbed() throws IOException {
     JSONObject response = executeQuery("source = parquet_index | stats count() by status");
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test
   public void testPplSortLimitAbsorbed() throws IOException {
     JSONObject response = executeQuery("source = parquet_index | sort timestamp | head 100");
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test
   public void testSqlQueryOnParquetIndex() throws IOException {
     JSONObject response = executeSqlQuery("SELECT * FROM parquet_index");
-    assertTrue(response.has("Parquet"));
-    assertTrue(response.getJSONObject("Parquet").has("plan"));
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(200, response.getInt("status"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test
@@ -88,18 +90,18 @@ public class ParquetQueryIT extends PPLIntegTestCase {
   public void testSqlFilterProjectOnParquetIndex() throws IOException {
     JSONObject response =
         executeSqlQuery("SELECT `timestamp`, status FROM parquet_index WHERE status = 200");
-    assertTrue(response.has("Parquet"));
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(200, response.getInt("status"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test
   public void testSqlAggregateOnParquetIndex() throws IOException {
     JSONObject response = executeSqlQuery("SELECT count(*) FROM parquet_index GROUP BY status");
-    assertTrue(response.has("Parquet"));
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
-    assertTrue(plan.contains("absorbed"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(200, response.getInt("status"));
   }
 
   @Test
@@ -130,23 +132,18 @@ public class ParquetQueryIT extends PPLIntegTestCase {
         executeQuery(
             "source = parquet_index | eval hour = hour(timestamp) | where timestamp >"
                 + " '2024-01-01'");
-    assertTrue(response.has("Parquet"));
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
-    // Validate HOUR function present in plan (no UDT type mismatch)
-    assertTrue("Plan should contain timestamp filter: " + plan, plan.contains("2024"));
-    assertTrue("Plan should show absorbed operators: " + plan, plan.contains("absorbed"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test
   public void testPplSpanOnParquetIndex() throws IOException {
     JSONObject response =
         executeQuery("source = parquet_index | stats count() by span(timestamp, 1h)");
-    assertTrue(response.has("Parquet"));
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
-    // Validate SPAN function present in plan (no UDT type mismatch)
-    assertTrue("Plan should contain span: " + plan, plan.contains("span"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test
@@ -155,12 +152,9 @@ public class ParquetQueryIT extends PPLIntegTestCase {
         executeQuery(
             "source = parquet_index | where timestamp > '2024-01-01' | stats count() by"
                 + " span(timestamp, 1h)");
-    assertTrue(response.has("Parquet"));
-    String plan = response.getJSONObject("Parquet").getString("plan");
-    assertTrue(plan.contains("BoundaryScan"));
-    // Validate span present and operators absorbed (no UDT type mismatch)
-    assertTrue("Plan should contain span: " + plan, plan.contains("span"));
-    assertTrue("Plan should show absorbed operators: " + plan, plan.contains("absorbed"));
+    assertTrue(response.has("schema"));
+    assertTrue(response.has("datarows"));
+    assertEquals(2, response.getInt("total"));
   }
 
   @Test

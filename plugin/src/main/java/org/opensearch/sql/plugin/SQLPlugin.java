@@ -98,7 +98,10 @@ import org.opensearch.sql.plugin.rest.RestPPLQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLStatsAction;
 import org.opensearch.sql.plugin.rest.RestQuerySettingsAction;
 import org.opensearch.sql.plugin.routing.ParquetQueryPlanner;
+import org.opensearch.sql.plugin.transport.AnalyticsActionRequest;
+import org.opensearch.sql.plugin.transport.AnalyticsActionResponse;
 import org.opensearch.sql.plugin.transport.PPLQueryAction;
+import org.opensearch.sql.plugin.transport.TransportAnalyticsAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
 import org.opensearch.sql.prometheus.storage.PrometheusStorageFactory;
@@ -167,11 +170,27 @@ public class SQLPlugin extends Plugin
         new RestSqlAction(
             settings,
             injector,
-            sql -> {
+            (sql, listener) -> {
               try {
-                return ParquetQueryPlanner.formatExplain(ParquetQueryPlanner.planSql(sql));
+                org.apache.calcite.rel.RelNode optimized = ParquetQueryPlanner.planSql(sql);
+                String plan = ParquetQueryPlanner.formatExplain(optimized);
+                AnalyticsActionRequest req = new AnalyticsActionRequest(plan, "SQL");
+                client.execute(
+                    TransportAnalyticsAction.ACTION_TYPE,
+                    req,
+                    new org.opensearch.core.action.ActionListener<>() {
+                      @Override
+                      public void onResponse(AnalyticsActionResponse response) {
+                        listener.onResponse(response.getResult());
+                      }
+
+                      @Override
+                      public void onFailure(Exception e) {
+                        listener.onFailure(e);
+                      }
+                    });
               } catch (Exception e) {
-                throw new RuntimeException(e);
+                listener.onFailure(new RuntimeException(e));
               }
             }),
         new RestSqlStatsAction(settings, restController),
@@ -235,7 +254,10 @@ public class SQLPlugin extends Plugin
             new ActionType<>(
                 TransportWriteDirectQueryResourcesRequestAction.NAME,
                 WriteDirectQueryResourcesActionResponse::new),
-            TransportWriteDirectQueryResourcesRequestAction.class));
+            TransportWriteDirectQueryResourcesRequestAction.class),
+        new ActionHandler<>(
+            new ActionType<>(TransportAnalyticsAction.NAME, AnalyticsActionResponse::new),
+            TransportAnalyticsAction.class));
   }
 
   @Override

@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
@@ -27,6 +27,7 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchException;
 import org.opensearch.common.inject.Injector;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.rest.BaseRestHandler;
@@ -86,15 +87,17 @@ public class RestSqlAction extends BaseRestHandler {
   /** New SQL query request handler. */
   private final RestSQLQueryAction newSqlQueryHandler;
 
-  /** Optional planner function for Parquet SQL queries: SQL string → plan JSON. */
-  private final Function<String, String> parquetSqlPlanner;
+  /** Optional executor for Parquet SQL queries: SQL string + listener → async result. */
+  private final BiConsumer<String, ActionListener<String>> parquetSqlExecutor;
 
   public RestSqlAction(
-      Settings settings, Injector injector, Function<String, String> parquetSqlPlanner) {
+      Settings settings,
+      Injector injector,
+      BiConsumer<String, ActionListener<String>> parquetSqlExecutor) {
     super();
     this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     this.newSqlQueryHandler = new RestSQLQueryAction(injector);
-    this.parquetSqlPlanner = parquetSqlPlanner;
+    this.parquetSqlExecutor = parquetSqlExecutor;
   }
 
   @Override
@@ -159,7 +162,25 @@ public class RestSqlAction extends BaseRestHandler {
             if (isExplainRequest(request)) {
               sendResponse(channel, ParquetStubResponse.formatExplainAsJson(), OK);
             } else {
-              sendResponse(channel, parquetSqlPlanner.apply(sqlRequest.getSql()), OK);
+              parquetSqlExecutor.accept(
+                  sqlRequest.getSql(),
+                  new ActionListener<>() {
+                    @Override
+                    public void onResponse(String result) {
+                      sendResponse(channel, result, OK);
+                    }
+
+                    @Override
+                    public void onFailure(Exception e) {
+                      Throwable cause = e.getCause() != null ? e.getCause() : e;
+                      sendResponse(
+                          channel,
+                          "{\"error\":{\"type\":\"UnsupportedOperationException\",\"reason\":\""
+                              + cause.getMessage().replace("\"", "\\\"")
+                              + "\"}}",
+                          BAD_REQUEST);
+                    }
+                  });
             }
           } catch (Exception e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
