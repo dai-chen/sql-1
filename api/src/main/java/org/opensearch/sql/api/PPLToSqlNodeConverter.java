@@ -679,6 +679,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitAggregation(Aggregation node, Void ctx) {
+    // Aggregation resets row order — discard any pending ORDER BY from a prior sort
+    pendingOrderBy = null;
+    pendingFetch = null;
+    pendingOffset = null;
+
     // Build SELECT items: aggregates first, then span (if any), then group-by fields
     List<SqlNode> selectItems = new ArrayList<>();
     for (UnresolvedExpression expr : node.getAggExprList()) {
@@ -1012,11 +1017,23 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
 
     String rightAlias = node.getRightAlias().orElse(null);
+    // Extract the SubqueryAlias name from the right side (if any) before resolveJoinRight
+    // overrides it with rightAlias. This is needed for downstream references like `fields tt.name`.
+    String subqueryAliasName = extractSubqueryAliasName(node.getRight());
     SqlNode rightSide = resolveJoinRight(node.getRight(), rightAlias);
     String effectiveRightAlias = rightAlias != null ? rightAlias : extractAlias(rightSide);
 
     knownAliases.add(effectiveLeftAlias);
     if (effectiveRightAlias != null) knownAliases.add(effectiveRightAlias);
+    // Also track the SubqueryAlias name if it differs from the effective right alias
+    if (subqueryAliasName != null && !subqueryAliasName.equals(effectiveRightAlias)) {
+      knownAliases.add(subqueryAliasName);
+    }
+    // Track the left SubqueryAlias name too (source = table as tt | JOIN left=t1 ...)
+    String leftSubqueryAlias = extractSubqueryAliasName(node.getLeft());
+    if (leftSubqueryAlias != null && !leftSubqueryAlias.equals(effectiveLeftAlias)) {
+      knownAliases.add(leftSubqueryAlias);
+    }
 
     SqlNode condition = null;
     if (node.getJoinCondition().isPresent()) {
@@ -1050,15 +1067,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     SqlNode joinNode = SqlNodeDSL.join(leftSide, calciteJoinType, rightSide, condition);
 
     // Set pipe to raw SqlJoin so aliases stay visible to downstream stages.
-    // Column deduplication for field-list joins is handled by DynamicPPLToSqlNodeConverter
-    // which has schema access to enumerate columns explicitly.
     pipe = joinNode;
     skipNextWrap = true;
     return pipe;
   }
 
   /** Extract alias from a SqlNode that is an AS expression (e.g., subquery(..., alias)). */
-  private static String extractAlias(SqlNode node) {
+  protected static String extractAlias(SqlNode node) {
     if (node instanceof SqlBasicCall) {
       SqlBasicCall call = (SqlBasicCall) node;
       if ("AS".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
@@ -1070,6 +1085,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     if (node instanceof SqlIdentifier) {
       return ((SqlIdentifier) node).getSimple();
+    }
+    return null;
+  }
+
+  /** Extract SubqueryAlias name from an AST plan node. */
+  private static String extractSubqueryAliasName(UnresolvedPlan plan) {
+    if (plan instanceof SubqueryAlias) {
+      return ((SubqueryAlias) plan).getAlias();
     }
     return null;
   }
@@ -1832,6 +1855,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   private SqlNode resolveJoinRight(UnresolvedPlan plan, String alias) {
     if (plan instanceof SubqueryAlias) {
       SubqueryAlias sa = (SubqueryAlias) plan;
+      // Use the explicit join alias (right=t2) if provided, otherwise use SubqueryAlias name
       String saAlias = alias != null ? alias : sa.getAlias();
       UnresolvedPlan child = (UnresolvedPlan) sa.getChild().get(0);
       Relation rel = extractRelation(child);
@@ -2993,8 +3017,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitInSubquery(InSubquery node, Void ctx) {
     SqlNode sub = convertSubPlan(node.getQuery());
-    SqlNode field = node.getValue().get(0).accept(this, null);
-    return inSub(field, sub);
+    List<UnresolvedExpression> values = node.getValue();
+    if (values.size() == 1) {
+      return inSub(values.get(0).accept(this, null), sub);
+    }
+    // Multi-value IN: (a, b) IN (subquery) → ROW(a, b) IN (subquery)
+    SqlNode[] fields = values.stream().map(v -> v.accept(this, null)).toArray(SqlNode[]::new);
+    SqlNode row = new SqlBasicCall(SqlStdOperatorTable.ROW, fields, POS);
+    return inSub(row, sub);
   }
 
   @Override

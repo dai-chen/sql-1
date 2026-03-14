@@ -26,6 +26,7 @@ import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlJoin;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
@@ -766,23 +767,110 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   @Override
+  public SqlNode visitJoin(org.opensearch.sql.ast.tree.Join node, Void ctx) {
+    // Delegate to base for the join construction
+    super.visitJoin(node, ctx);
+
+    // If this is a field-list join or self-join, handle column deduplication
+    boolean hasFieldList = node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty();
+    boolean isSelfJoin = isSelfJoinDetected(node);
+
+    if (hasFieldList || isSelfJoin) {
+      // Wrap the raw SqlJoin in a SELECT with column deduplication
+      // For field-list joins: SELECT l.* REPLACE(r.field AS field), r.* EXCEPT(field1, field2, ...)
+      // For self-joins: SELECT r.* (or l.* depending on overwrite)
+      String leftAlias = node.getLeftAlias().orElse(null);
+      String rightAlias = node.getRightAlias().orElse(null);
+      // Resolve effective aliases from the SqlJoin node
+      if (pipe instanceof SqlJoin) {
+        SqlJoin sqlJoin = (SqlJoin) pipe;
+        if (leftAlias == null) leftAlias = extractAlias(sqlJoin.getLeft());
+        if (rightAlias == null) rightAlias = extractAlias(sqlJoin.getRight());
+      }
+
+      if (isSelfJoin && leftAlias != null && rightAlias != null) {
+        // Self-join: select from one side to avoid duplicates
+        org.opensearch.sql.ast.expression.Literal overwriteLit = node.getArgumentMap().get("overwrite");
+        boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
+        String ref = overwrite ? rightAlias : leftAlias;
+        SqlNode starRef = new SqlIdentifier(java.util.Arrays.asList(ref, ""), SqlParserPos.ZERO);
+        pipe = select(starRef).from(pipe).build();
+        skipNextWrap = true;
+      } else if (hasFieldList && leftAlias != null && rightAlias != null) {
+        List<String> sharedFields = node.getJoinFields().get().stream()
+            .map(f -> f.getField().toString()).collect(Collectors.toList());
+        org.opensearch.sql.ast.expression.Literal overwriteLit = node.getArgumentMap().get("overwrite");
+        boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
+
+        // Build: SELECT l.* REPLACE(r.field AS field), r.* EXCEPT(field1, field2, ...)
+        List<SqlNode> replaceClauses = new ArrayList<>();
+        if (overwrite) {
+          for (String f : sharedFields) {
+            replaceClauses.add(as(identifier(rightAlias, f), f));
+          }
+        }
+        SqlNode leftStar;
+        if (!replaceClauses.isEmpty()) {
+          leftStar = new org.opensearch.sql.calcite.parser.SqlStarExceptReplace(
+              SqlParserPos.ZERO,
+              new SqlIdentifier(java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO),
+              null,
+              new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+        } else {
+          leftStar = new SqlIdentifier(java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO);
+        }
+
+        // Build EXCEPT list for right side
+        SqlNodeList exceptList = new SqlNodeList(
+            sharedFields.stream().map(f -> (SqlNode) identifier(f)).collect(Collectors.toList()),
+            SqlParserPos.ZERO);
+        SqlNode rightStar = new org.opensearch.sql.calcite.parser.SqlStarExceptReplace(
+            SqlParserPos.ZERO,
+            new SqlIdentifier(java.util.Arrays.asList(rightAlias, ""), SqlParserPos.ZERO),
+            exceptList,
+            null);
+
+        pipe = select(leftStar, rightStar).from(pipe).build();
+        skipNextWrap = true;
+      }
+    }
+    return pipe;
+  }
+
+  /** Detect self-join: left and right reference the same table without explicit aliases. */
+  private boolean isSelfJoinDetected(org.opensearch.sql.ast.tree.Join node) {
+    String leftTable = extractTableNameFromPlan(node.getLeft());
+    String rightTable = extractTableNameFromPlan(node.getRight());
+    return leftTable != null && leftTable.equals(rightTable);
+  }
+
+  private static String extractTableNameFromPlan(org.opensearch.sql.ast.tree.UnresolvedPlan plan) {
+    if (plan instanceof org.opensearch.sql.ast.tree.SubqueryAlias) {
+      plan = (org.opensearch.sql.ast.tree.UnresolvedPlan) plan.getChild().get(0);
+    }
+    Relation rel = extractRelation(plan);
+    return rel != null ? rel.getTableQualifiedName().toString() : null;
+  }
+
+  @Override
   public SqlNode visitLookup(Lookup node, Void ctx) {
     Map<String, String> outputMap = node.getOutputAliasMap();
-    if (outputMap.isEmpty() || node.getOutputStrategy() != Lookup.OutputStrategy.APPEND) {
-      return super.visitLookup(node, ctx);
-    }
+    boolean isReplace = node.getOutputStrategy() == Lookup.OutputStrategy.REPLACE;
 
-    // APPEND mode with schema: only COALESCE columns that exist in the source table
-    Set<String> sourceCols = new HashSet<>(resolveColumns(tableName));
-
-    String leftAlias = "_l";
-    String rightAlias = "_r";
-    SqlNode leftSide = subquery(pipe, leftAlias);
-
+    // Resolve lookup table columns
     Relation lookupRel = extractRelation(node.getLookupRelation());
     String lookupTable = lookupRel != null
         ? lookupRel.getTableQualifiedName().toString()
         : node.getLookupRelation().toString();
+    Set<String> sourceCols = new HashSet<>(resolveColumns(tableName));
+    List<String> lookupCols = resolveColumns(lookupTable);
+    Set<String> mappingFields = new HashSet<>(node.getMappingAliasMap().keySet());
+
+    String leftAlias = "_l";
+    String rightAlias = "_r";
+    knownAliases.add(leftAlias);
+    knownAliases.add(rightAlias);
+    SqlNode leftSide = subquery(pipe, leftAlias);
     SqlNode rightSide = subquery(
         select(star()).from(table(lookupTable)).build(), rightAlias);
 
@@ -796,18 +884,120 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
     SqlNode joinNode = join(leftSide, JoinType.LEFT, rightSide, onCondition);
 
-    List<SqlNode> selectItems = new ArrayList<>();
-    selectItems.add(new org.apache.calcite.sql.SqlIdentifier(
-        java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO));
-    for (Map.Entry<String, String> e : outputMap.entrySet()) {
-      SqlNode rRef = identifier(rightAlias, e.getKey());
-      if (sourceCols.contains(e.getValue())) {
-        selectItems.add(as(call("COALESCE", identifier(leftAlias, e.getValue()), rRef), e.getValue()));
+    if (outputMap.isEmpty()) {
+      // No output spec: REPLACE all non-mapping lookup columns into source
+      // Use _l.* REPLACE(_r.col AS col) for shared columns,
+      // plus _r.col AS col for new columns
+      List<SqlNode> replaceClauses = new ArrayList<>();
+      List<SqlNode> newCols = new ArrayList<>();
+      for (String col : lookupCols) {
+        if (mappingFields.contains(col) || col.startsWith("_")) continue;
+        SqlNode rRef = identifier(rightAlias, col);
+        if (sourceCols.contains(col)) {
+          // Shared column: REPLACE with lookup value (null when no match)
+          replaceClauses.add(as(rRef, col));
+        } else {
+          // New column from lookup table
+          newCols.add(as(rRef, col));
+        }
+      }
+      List<SqlNode> selectItems = new ArrayList<>();
+      if (!replaceClauses.isEmpty()) {
+        SqlNode leftStar = new org.opensearch.sql.calcite.parser.SqlStarExceptReplace(
+            SqlParserPos.ZERO,
+            new org.apache.calcite.sql.SqlIdentifier(
+                java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO),
+            null,
+            new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+        selectItems.add(leftStar);
       } else {
-        selectItems.add(as(rRef, e.getValue()));
+        selectItems.add(new org.apache.calcite.sql.SqlIdentifier(
+            java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO));
+      }
+      selectItems.addAll(newCols);
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
+    } else {
+      // Explicit output fields
+      // Check pipe columns too (for eval-created columns like 'major')
+      List<String> pipeCols = extractPipeColumns();
+      Set<String> allKnownCols = new HashSet<>(sourceCols);
+      allKnownCols.addAll(pipeCols);
+
+      // Check if any target column is a pipe-only column (not in schema)
+      // If so, we need explicit column enumeration instead of SqlStarExceptReplace
+      boolean hasPipeOnlyTarget = false;
+      for (Map.Entry<String, String> e : outputMap.entrySet()) {
+        if (!sourceCols.contains(e.getValue()) && pipeCols.contains(e.getValue())) {
+          hasPipeOnlyTarget = true;
+          break;
+        }
+      }
+
+      if (hasPipeOnlyTarget && !pipeCols.isEmpty()) {
+        // Use explicit column enumeration
+        // For REPLACE: skip target columns in source list, add at end
+        Map<String, SqlNode> overrides = new LinkedHashMap<>();
+        for (Map.Entry<String, String> e : outputMap.entrySet()) {
+          SqlNode rRef = identifier(rightAlias, e.getKey());
+          if (isReplace) {
+            overrides.put(e.getValue(), as(rRef, e.getValue()));
+          } else {
+            if (allKnownCols.contains(e.getValue())) {
+              overrides.put(e.getValue(), as(call("COALESCE", identifier(leftAlias, e.getValue()), rRef), e.getValue()));
+            } else {
+              overrides.put(e.getValue(), as(rRef, e.getValue()));
+            }
+          }
+        }
+        List<SqlNode> selectItems = new ArrayList<>();
+        for (String col : pipeCols) {
+          if (overrides.containsKey(col)) {
+            // Skip — will be added at end
+            continue;
+          }
+          selectItems.add(identifier(leftAlias, col));
+        }
+        // Add overridden/new columns at end
+        for (SqlNode item : overrides.values()) {
+          selectItems.add(item);
+        }
+        pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
+      } else {
+        List<SqlNode> replaceClauses = new ArrayList<>();
+        List<SqlNode> newCols = new ArrayList<>();
+        for (Map.Entry<String, String> e : outputMap.entrySet()) {
+          SqlNode rRef = identifier(rightAlias, e.getKey());
+          if (isReplace) {
+            if (allKnownCols.contains(e.getValue())) {
+              replaceClauses.add(as(rRef, e.getValue()));
+            } else {
+              newCols.add(as(rRef, e.getValue()));
+            }
+          } else {
+            if (allKnownCols.contains(e.getValue())) {
+              replaceClauses.add(as(call("COALESCE", identifier(leftAlias, e.getValue()), rRef), e.getValue()));
+            } else {
+              newCols.add(as(rRef, e.getValue()));
+            }
+          }
+        }
+        List<SqlNode> selectItems = new ArrayList<>();
+        if (!replaceClauses.isEmpty()) {
+          SqlNode leftStar = new org.opensearch.sql.calcite.parser.SqlStarExceptReplace(
+              SqlParserPos.ZERO,
+              new org.apache.calcite.sql.SqlIdentifier(
+                  java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO),
+              null,
+              new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+          selectItems.add(leftStar);
+        } else {
+          selectItems.add(new org.apache.calcite.sql.SqlIdentifier(
+              java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO));
+        }
+        selectItems.addAll(newCols);
+        pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
       }
     }
-    pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
     return pipe;
   }
 
