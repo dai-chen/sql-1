@@ -15,6 +15,8 @@
 - PPL uses SimpleJsonResponseFormatter (no alias, no status), SQL uses JdbcResponseFormatter (alias + status=200)
 - sendResponse signatures: PPL handler (channel, status, contentType, content), SQL handler (channel, message, status)
 - JDBC formatter uses legacyTypeName(): STRING→keyword, STRUCT→object, ARRAY→nested. All others use name(). SimpleJson uses typeName() which returns the ExprCoreType name directly (e.g. STRING→string).
+- Absorption rules pattern: BoundaryScan (custom TableScan) + SimpleAbsorptionConfig (RelRule.Config without Immutables) + rules match LogicalXxx → BoundaryScan, check EngineCapabilities, call scan.absorb(). Rules registered via BoundaryScan.register().
+- analytics-engine-stub/ has NO Immutables library — use SimpleAbsorptionConfig for RelRule.Config, not @Value.Immutable
 
 # Iteration Log
 
@@ -171,4 +173,31 @@
   - ParquetEngineCapabilities explicitly blocks full-text search functions via UNSUPPORTED_FUNCTIONS set
   - Function names are stored as uppercase for standard SQL functions, lowercase for OpenSearch-specific functions (match, match_phrase)
   - No changes needed to AnalyticsBackEndPlugin or EngineContext — EngineCapabilities is standalone for now
+---
+
+## 2026-03-14T01:46 - US-010
+- Implemented absorption rules (filter, project, sort, aggregate pushdown) gated by EngineCapabilities in analytics-engine-stub/ module
+- Created BoundaryScan (custom TableScan) that holds EngineCapabilities and tracks absorbed operators as immutable list
+- Created 4 absorption rules: FilterAbsorptionRule, ProjectAbsorptionRule, SortAbsorptionRule, AggregateAbsorptionRule
+- Created SimpleAbsorptionConfig base class implementing RelRule.Config without Immutables library
+- BoundaryScan.register(RelOptPlanner) adds all 4 rules automatically
+- BoundaryScan.deriveRowType() delegates to last absorbed operator's row type (handles schema changes from Project/Aggregate)
+- BoundaryScan.explainTerms() includes absorbed count for proper HepPlanner digest differentiation
+- 5 unit tests using HepPlanner: filter, project, sort, aggregate absorption + unsupported operator (LogicalUnion) stays above boundary
+- Files created:
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/plan/BoundaryScan.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/plan/rules/SimpleAbsorptionConfig.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/plan/rules/FilterAbsorptionRule.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/plan/rules/ProjectAbsorptionRule.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/plan/rules/SortAbsorptionRule.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/plan/rules/AggregateAbsorptionRule.java
+  - analytics-engine-stub/src/test/java/org/opensearch/analytics/plan/rules/AbsorptionRuleTest.java
+- **Learnings for future iterations:**
+  - analytics-engine-stub/ does NOT have Immutables library — use SimpleAbsorptionConfig base class extending RelRule.Config manually
+  - BoundaryScan must override explainTerms() to include absorbed count, otherwise HepPlanner treats pre/post-absorption scans as identical (same digest)
+  - BoundaryScan must override deriveRowType() to return last absorbed operator's row type — Project and Aggregate change the schema
+  - Absorption rules are simple: match LogicalXxx → BoundaryScan, check capabilities, absorb. No DSL translation needed (analytics engine handles execution)
+  - HepPlanner is simpler than VolcanoPlanner for testing absorption rules — no convention/trait concerns
+  - BoundaryScan.absorb() returns NEW instance (immutable pattern required by Calcite optimizer)
+  - Rules registered via BoundaryScan.register(RelOptPlanner) — same pattern as CalciteLogicalIndexScan
 ---

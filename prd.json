@@ -163,8 +163,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 3. In analytics-engine-stub/ module."
+      "passes": true,
+      "notes": "Implemented BoundaryScan (custom TableScan with absorbed operators list), 4 absorption rules (Filter, Project, Sort, Aggregate) gated by EngineCapabilities, SimpleAbsorptionConfig base class (no Immutables dependency). 5 unit tests: each operator type absorbed + unsupported operator (LogicalUnion) stays above boundary. HepPlanner used for testing."
     },
     {
       "id": "US-011",
