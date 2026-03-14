@@ -115,8 +115,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "Phase 2. This scaffold will be extended in later phases. Tests use stub responses for now."
+      "passes": true,
+      "notes": "ParquetQueryIT in integ-test/ with 5 tests: PPL query, SQL query, PPL explain, SQL explain, Lucene regression. JDBC formatter uses legacyTypeName (STRING->keyword). No test data needed — stub routing intercepts by index name."
     },
     {
       "id": "US-008",

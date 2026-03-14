@@ -14,6 +14,7 @@
 - Parquet stub response: ParquetStubResponse in protocol/.../response/ — buildStubQueryResult(), formatAsSimpleJson(), formatAsJdbc(). Used by both PPL and SQL handlers.
 - PPL uses SimpleJsonResponseFormatter (no alias, no status), SQL uses JdbcResponseFormatter (alias + status=200)
 - sendResponse signatures: PPL handler (channel, status, contentType, content), SQL handler (channel, message, status)
+- JDBC formatter uses legacyTypeName(): STRING→keyword, STRUCT→object, ARRAY→nested. All others use name(). SimpleJson uses typeName() which returns the ExprCoreType name directly (e.g. STRING→string).
 
 # Iteration Log
 
@@ -114,4 +115,22 @@
   - SQL handler has existing isExplainRequest(request) private method — reuse it
   - Explain responses for both PPL and SQL use application/json content type
   - Stub explain can be a simple hardcoded JSON string — no need for ExplainResponse/ExplainResponseNode objects at this phase
+---
+
+## 2026-03-14T01:30 - US-007
+- Created ParquetQueryIT integration test class in integ-test/src/test/java/org/opensearch/sql/ppl/
+- 5 test methods covering all acceptance criteria:
+  - testPplQueryOnParquetIndex: PPL query returns stub SimpleJson response with 4-column schema and 2 rows
+  - testSqlQueryOnParquetIndex: SQL query returns stub JDBC response with schema, 2 rows, and status=200
+  - testPplExplainOnParquetIndex: PPL explain returns stub JSON with Parquet description
+  - testSqlExplainOnParquetIndex: SQL explain returns stub JSON with Parquet description
+  - testLuceneQueryStillWorks: BANK index query still works (no regression from Parquet routing)
+- Files created:
+  - integ-test/src/test/java/org/opensearch/sql/ppl/ParquetQueryIT.java
+- **Learnings for future iterations:**
+  - JDBC formatter uses legacyTypeName() for type mapping: STRING→keyword, STRUCT→object, ARRAY→nested. All other types use name() directly.
+  - SimpleJson formatter uses typeName() which returns ExprCoreType name (e.g. STRING→string). So PPL and SQL responses have DIFFERENT type names for the same ExprCoreType.
+  - No test data/index creation needed for Parquet stub tests — routing intercepts by hardcoded index name before any engine processing
+  - IT class extends PPLIntegTestCase. For SQL queries, build manual POST requests to /_plugins/_sql since the inherited executeQuery() is PPL-specific.
+  - Stub schema has null aliases, so JDBC formatter omits the alias field from schema JSON (schema matcher must use null alias)
 ---
