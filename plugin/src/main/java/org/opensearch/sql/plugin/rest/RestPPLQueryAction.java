@@ -88,13 +88,17 @@ public class RestPPLQueryAction extends BaseRestHandler {
     TransportPPLQueryRequest transportPPLQueryRequest =
         new TransportPPLQueryRequest(PPLQueryRequestFactory.getPPLRequest(request));
 
-    // Phase 1: Route Parquet index queries to placeholder error
+    // Phase 1: Route Parquet index queries to stub responses
     String query = transportPPLQueryRequest.getRequest();
     String indexName = ParquetIndexRouting.extractIndexName(query);
     if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
+      boolean isExplain = request.path().endsWith("/_explain");
       return channel -> {
         String formattedResult =
-            ParquetStubResponse.formatAsSimpleJson(ParquetStubResponse.buildStubQueryResult());
+            isExplain
+                ? ParquetStubResponse.formatExplainAsJson()
+                : ParquetStubResponse.formatAsSimpleJson(
+                    ParquetStubResponse.buildStubQueryResult());
         sendResponse(channel, OK, "application/json", formattedResult);
       };
     }

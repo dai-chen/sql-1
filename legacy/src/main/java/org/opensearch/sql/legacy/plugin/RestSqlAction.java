@@ -145,12 +145,14 @@ public class RestSqlAction extends BaseRestHandler {
               request.params(),
               sqlRequest.cursor());
 
-      // Route Parquet index queries to placeholder error
+      // Route Parquet index queries to stub responses
       String indexName = ParquetIndexRouting.extractIndexNameFromSql(sqlRequest.getSql());
       if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
         return channel -> {
           String formattedResult =
-              ParquetStubResponse.formatAsJdbc(ParquetStubResponse.buildStubQueryResult());
+              isExplainRequest(request)
+                  ? ParquetStubResponse.formatExplainAsJson()
+                  : ParquetStubResponse.formatAsJdbc(ParquetStubResponse.buildStubQueryResult());
           sendResponse(channel, formattedResult, OK);
         };
       }

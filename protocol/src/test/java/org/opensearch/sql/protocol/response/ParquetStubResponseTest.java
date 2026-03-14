@@ -97,4 +97,16 @@ class ParquetStubResponseTest {
     assertEquals(2, obj.get("size").getAsInt());
     assertEquals(200, obj.get("status").getAsInt());
   }
+
+  @Test
+  void formatExplainAsJsonProducesValidResponse() {
+    String json = ParquetStubResponse.formatExplainAsJson();
+
+    assertNotNull(json);
+    JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
+    assertTrue(obj.has("Parquet"));
+    JsonObject parquet = obj.getAsJsonObject("Parquet");
+    assertTrue(parquet.has("description"));
+    assertTrue(parquet.get("description").getAsString().contains("Stub explain"));
+  }
 }
