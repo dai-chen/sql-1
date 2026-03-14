@@ -53,6 +53,10 @@ import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Replace;
 import org.opensearch.sql.ast.tree.ReplacePair;
+import org.opensearch.sql.ast.tree.Expand;
+import org.opensearch.sql.ast.tree.Flatten;
+import org.opensearch.sql.ast.tree.Reverse;
+import org.opensearch.sql.ast.tree.Transpose;
 import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.utils.WildcardUtils;
@@ -551,6 +555,108 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   @Override
+  public SqlNode visitReverse(Reverse node, Void ctx) {
+    // Capture column names before adding ROW_NUMBER
+    List<String> cols = extractPipeColumns();
+    if (cols.isEmpty()) {
+      List<String> resolved = resolveColumns(tableName);
+      cols = resolved.stream().filter(n -> !n.startsWith("_")).collect(Collectors.toList());
+    }
+
+    // If pending ORDER BY is from a prior reverse (__reverse_row_num__),
+    // flip it to ASC (canceling the reverse) instead of adding another ROW_NUMBER
+    if (pendingOrderBy != null && pendingOrderBy.size() == 1) {
+      String pendingStr = pendingOrderBy.get(0).toString();
+      if (pendingStr.contains("__reverse_row_num__")) {
+        // Double reverse = cancel. Just flip DESC to ASC.
+        pendingOrderBy = List.of(identifier("__reverse_row_num__"));
+        return pipe;
+      }
+    }
+
+    // Build ROW_NUMBER window ORDER BY from pending sort order (if any)
+    SqlNodeList winOrderBy = SqlNodeList.EMPTY;
+    if (pendingOrderBy != null) {
+      winOrderBy = new SqlNodeList(pendingOrderBy, SqlParserPos.ZERO);
+      pendingOrderBy = null;
+    }
+    // Apply any pending FETCH before ROW_NUMBER
+    if (pendingFetch != null) {
+      pipe = applyPendingOrderBy(pipe);
+    }
+
+    // Step 1: add ROW_NUMBER() OVER(ORDER BY ...) as __reverse_row_num__
+    String rnCol = "__reverse_row_num__";
+    SqlNode rowNum = as(
+        window(new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], SqlParserPos.ZERO),
+            SqlNodeList.EMPTY, winOrderBy), rnCol);
+    pipe = select(star(), rowNum).from(wrapAsSubquery()).build();
+
+    // Step 2: project only original columns, defer ORDER BY __reverse_row_num__ DESC
+    pipe = wrapAsSubquery();
+    List<SqlNode> items = cols.stream()
+        .map(c -> (SqlNode) identifier(c))
+        .collect(Collectors.toList());
+    if (items.isEmpty()) {
+      items = List.of(star());
+    }
+    pipe = select(items.toArray(new SqlNode[0])).from(pipe).build();
+    pendingOrderBy = List.of(desc(identifier(rnCol)));
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitFlatten(Flatten node, Void ctx) {
+    String fieldName = node.getField().getField().toString();
+    List<String> allCols = resolveColumns(tableName);
+    // Filter out metadata fields
+    allCols = allCols.stream().filter(n -> !n.startsWith("_")).collect(Collectors.toList());
+
+    // Sub-fields of the flattened field, sorted alphabetically
+    List<String> subFields = allCols.stream()
+        .filter(c -> c.startsWith(fieldName + "."))
+        .sorted()
+        .collect(Collectors.toList());
+
+    // Top-level columns: those without dots (exclude ALL nested sub-fields)
+    List<String> topLevelCols = allCols.stream()
+        .filter(c -> !c.contains("."))
+        .collect(Collectors.toList());
+
+    List<String> aliases = node.getAliases();
+    List<String> outputNames;
+    if (aliases != null && !aliases.isEmpty()) {
+      if (aliases.size() != subFields.size()) {
+        throw new IllegalArgumentException(
+            String.format(
+                "The number of aliases has to match the number of flattened fields."
+                    + " Expected %d (%s), got %d (%s)",
+                subFields.size(), String.join(", ", subFields),
+                aliases.size(), String.join(", ", aliases)));
+      }
+      outputNames = aliases;
+    } else {
+      outputNames = subFields.stream()
+          .map(f -> f.substring(fieldName.length() + 1))
+          .collect(Collectors.toList());
+    }
+
+    SqlNode sub = wrapAsSubquery();
+    List<SqlNode> selectItems = new ArrayList<>();
+    // Iterate through top-level columns; insert sub-fields right after the flattened field
+    for (String col : topLevelCols) {
+      selectItems.add(identifier(col));
+      if (col.equals(fieldName)) {
+        for (int i = 0; i < subFields.size(); i++) {
+          selectItems.add(as(identifier(subFields.get(i)), outputNames.get(i)));
+        }
+      }
+    }
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(sub).build();
+    return pipe;
+  }
+
+  @Override
   public SqlNode visitMvCombine(MvCombine node, Void ctx) {
     String fieldName = node.getField().getField().toString();
 
@@ -725,6 +831,41 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     if (node.getLimit() != null) {
       pipe = select(star()).from(wrapAsSubquery()).limit(intLiteral(node.getLimit())).build();
     }
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitExpand(Expand node, Void ctx) {
+    String fieldName = node.getField().getField().toString();
+    List<String> allCols = resolveColumns(tableName);
+    allCols = allCols.stream().filter(n -> !n.startsWith("_") && !n.contains(".")).collect(Collectors.toList());
+    if (allCols.isEmpty()) return pipe;
+
+    if (!isArrayField(fieldName)) return pipe;
+
+    String alias = node.getAlias() != null ? node.getAlias() : fieldName;
+    String subqueryAlias = "_t" + (aliasCounter.get() + 1);
+    String unnestAlias = "_u";
+    SqlNode unnest = new SqlBasicCall(
+        SqlStdOperatorTable.UNNEST,
+        new SqlNode[]{identifier(subqueryAlias, fieldName)},
+        SqlParserPos.ZERO);
+    SqlNode aliasedUnnest = new SqlBasicCall(
+        SqlStdOperatorTable.AS,
+        new SqlNode[]{unnest, identifier(unnestAlias), identifier(fieldName)},
+        SqlParserPos.ZERO);
+
+    List<SqlNode> selectItems = new ArrayList<>();
+    for (String col : allCols) {
+      if (col.equals(fieldName)) {
+        selectItems.add(as(identifier(unnestAlias, fieldName), alias));
+      } else {
+        selectItems.add(identifier(subqueryAlias, col));
+      }
+    }
+
+    SqlNode joinNode = join(wrapAsSubquery(), JoinType.CROSS, aliasedUnnest, null);
+    pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
     return pipe;
   }
 
@@ -1125,5 +1266,65 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     }
 
     pipe = unionAll(originalData, totalsRow);
+  }
+
+  @Override
+  public SqlNode visitTranspose(Transpose node, Void ctx) {
+    int maxRows = node.getMaxRows();
+    String columnName = node.getColumnName();
+
+    pipe = applyPendingOrderBy(pipe);
+
+    List<String> cols = extractPipeColumns();
+    if (cols.isEmpty()) {
+      cols = resolveColumns(tableName).stream()
+          .filter(n -> !n.startsWith("_") && !n.contains("."))
+          .collect(Collectors.toList());
+    }
+    if (cols.isEmpty()) return pipe;
+
+    // Add ROW_NUMBER() OVER() to the pipe
+    String rnCol = "_rn";
+    SqlNode rowNum = as(
+        window(new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], SqlParserPos.ZERO),
+            SqlNodeList.EMPTY, SqlNodeList.EMPTY), rnCol);
+    pipe = select(star(), rowNum).from(wrapAsSubquery()).build();
+    SqlNode numberedSubquery = wrapAsSubquery();
+
+    // For each column, build a SELECT that transposes it
+    List<SqlNode> unionParts = new ArrayList<>();
+    for (String col : cols) {
+      List<SqlNode> items = new ArrayList<>();
+      items.add(as(new SqlBasicCall(SqlStdOperatorTable.CAST,
+          new SqlNode[]{SqlLiteral.createCharString(col, SqlParserPos.ZERO),
+              new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, SqlParserPos.ZERO), SqlParserPos.ZERO)},
+          SqlParserPos.ZERO), columnName));
+      for (int i = 1; i <= maxRows; i++) {
+        SqlNode caseExpr = caseWhen(
+            List.of(new SqlBasicCall(SqlStdOperatorTable.EQUALS,
+                new SqlNode[]{identifier(rnCol), intLiteral(i)}, SqlParserPos.ZERO)),
+            List.of(new SqlBasicCall(SqlStdOperatorTable.CAST,
+                new SqlNode[]{identifier(col),
+                    new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, SqlParserPos.ZERO), SqlParserPos.ZERO)},
+                SqlParserPos.ZERO)),
+            SqlLiteral.createNull(SqlParserPos.ZERO));
+        SqlNode maxAgg = new SqlBasicCall(
+            SqlStdOperatorTable.MAX,
+            new SqlNode[]{caseExpr},
+            SqlParserPos.ZERO);
+        items.add(as(maxAgg, "row " + i));
+      }
+      SqlNode colSelect = select(items.toArray(new SqlNode[0]))
+          .from(numberedSubquery)
+          .build();
+      unionParts.add(colSelect);
+    }
+
+    SqlNode result = unionParts.get(0);
+    for (int i = 1; i < unionParts.size(); i++) {
+      result = unionAll(result, unionParts.get(i));
+    }
+    pipe = result;
+    return pipe;
   }
 }

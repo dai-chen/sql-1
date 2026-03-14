@@ -103,6 +103,7 @@ import org.opensearch.sql.ast.tree.RangeBin;
 import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
+import org.opensearch.sql.ast.tree.Reverse;
 import org.opensearch.sql.ast.tree.Replace;
 import org.opensearch.sql.ast.tree.Rex;
 import org.opensearch.sql.ast.tree.Search;
@@ -634,6 +635,30 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (node.getCount() != null && node.getCount() > 0) {
       pendingFetch = intLiteral(node.getCount());
     }
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitReverse(Reverse node, Void ctx) {
+    // Build ROW_NUMBER window ORDER BY from pending sort order (if any)
+    SqlNodeList winOrderBy = SqlNodeList.EMPTY;
+    if (pendingOrderBy != null) {
+      winOrderBy = new SqlNodeList(pendingOrderBy, POS);
+      pendingOrderBy = null;
+    }
+    if (pendingFetch != null) {
+      pipe = applyPendingOrderBy(pipe);
+    }
+    // Step 1: Wrap current pipe as subquery, add ROW_NUMBER() OVER(ORDER BY ...) as __reverse_row_num__
+    String rnCol = "__reverse_row_num__";
+    SqlNode rowNum = as(
+        window(new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], POS),
+            SqlNodeList.EMPTY, winOrderBy), rnCol);
+    pipe = select(star(), rowNum).from(wrapAsSubquery()).build();
+
+    // Step 2: Wrap again, defer ORDER BY __reverse_row_num__ DESC
+    pipe = select(star()).from(wrapAsSubquery()).build();
+    pendingOrderBy = List.of(desc(identifier(rnCol)));
     return pipe;
   }
 
@@ -3196,7 +3221,18 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitMvExpand(MvExpand node, Void ctx) {
     // MvExpand needs schema to enumerate columns — delegate to DynamicPPLToSqlNodeConverter
-    // Base converter: just pass through (no-op for non-array fields)
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitExpand(org.opensearch.sql.ast.tree.Expand node, Void ctx) {
+    // Expand needs schema to enumerate columns — delegate to DynamicPPLToSqlNodeConverter
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitTranspose(org.opensearch.sql.ast.tree.Transpose node, Void ctx) {
+    // Transpose needs schema to enumerate columns — delegate to DynamicPPLToSqlNodeConverter
     return pipe;
   }
 

@@ -498,5 +498,15 @@ public class PPLToSqlNodeConverterTest {
         FROM "t") AS "_t1\"""");
   }
 
+  @Test
+  public void testReverse() {
+    ppl("source=t | fields a | reverse").shouldTranslateTo("""
+        SELECT *
+        FROM (SELECT *, ROW_NUMBER() OVER () AS "__reverse_row_num__"
+        FROM (SELECT "a"
+        FROM (SELECT *
+        FROM "t") AS "_t1") AS "_t2") AS "_t3"
+        ORDER BY "__reverse_row_num__" DESC""");
+  }
 
 }
