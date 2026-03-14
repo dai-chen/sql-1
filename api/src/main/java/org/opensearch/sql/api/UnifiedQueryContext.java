@@ -305,6 +305,7 @@ public class UnifiedQueryContext implements AutoCloseable {
                       wrapJsonUdf(PPLBuiltinOperators.JSON),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_ARRAY_LENGTH),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_EXTRACT),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_EXTRACT_ALL),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_KEYS),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_SET),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_DELETE),

@@ -17,6 +17,7 @@ import java.util.List;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -150,6 +151,8 @@ public class RestUnifiedSQLQueryAction {
       String typeName = t.toString();
       if (typeName.contains("EXPR_IP")) {
         types.add("ip");
+      } else if (t.getSqlTypeName() == SqlTypeName.MAP) {
+        types.add("struct");
       } else {
         types.add(null);
       }
@@ -196,6 +199,8 @@ public class RestUnifiedSQLQueryAction {
           } else {
             row.append(new org.json.JSONArray(val.toString()));
           }
+        } else if (val instanceof java.util.Map) {
+          row.append(new org.json.JSONObject((java.util.Map<?, ?>) val));
         } else {
           row.append("\"").append(escape(val.toString())).append("\"");
         }

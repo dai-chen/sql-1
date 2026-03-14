@@ -107,6 +107,7 @@ import org.opensearch.sql.ast.tree.Replace;
 import org.opensearch.sql.ast.tree.Rex;
 import org.opensearch.sql.ast.tree.Search;
 import org.opensearch.sql.ast.tree.ReplacePair;
+import org.opensearch.sql.ast.tree.SPath;
 import org.opensearch.sql.ast.tree.Sort;
 import org.opensearch.sql.ast.tree.SpanBin;
 import org.opensearch.sql.ast.tree.StreamWindow;
@@ -328,6 +329,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   // -- Bin alias tracking: maps original field name to bin expression alias --
   protected final Map<String, SqlNode> binReplacements = new HashMap<>();
+
+  // -- MAP field tracking: field names produced by spath auto-extract (json_extract_all) --
+  protected final Set<String> mapFields = new java.util.HashSet<>();
 
   private String nextAlias() {
     return "_t" + aliasCounter.incrementAndGet();
@@ -572,6 +576,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (expr instanceof Field) {
         String name = ((Field) expr).getField().toString();
         if (binReplacements.containsKey(name)) {
+          colList.add(as(col, name));
+          continue;
+        }
+        if (col instanceof SqlBasicCall
+            && ((SqlBasicCall) col).getOperator() == SqlStdOperatorTable.ITEM) {
           colList.add(as(col, name));
           continue;
         }
@@ -1838,6 +1847,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitQualifiedName(QualifiedName node, Void ctx) {
     List<String> parts = node.getParts();
+    if (parts.size() > 1 && mapFields.contains(parts.get(0))) {
+      String key = String.join(".", parts.subList(1, parts.size()));
+      return new SqlBasicCall(SqlStdOperatorTable.ITEM,
+          new SqlNode[]{identifier(parts.get(0)), SqlLiteral.createCharString(key, POS)}, POS);
+    }
     if (parts.size() == 1 && binReplacements.containsKey(parts.get(0))) {
       return binReplacements.get(parts.get(0));
     }
@@ -3165,6 +3179,18 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   public SqlNode visitNoMv(NoMv node, Void ctx) {
     // NoMv always overrides an existing field — delegate to visitEval which handles overrides
     return visitEval((Eval) node.rewriteAsEval(), ctx);
+  }
+
+  @Override
+  public SqlNode visitSpath(SPath node, Void ctx) {
+    node.getChild().get(0).accept(this, ctx);
+    // Track fields produced by spath auto-extract (json_extract_all returns MAP)
+    if (node.getPath() == null) {
+      String output = (node.getOutField() != null) ? node.getOutField() : node.getInField();
+      mapFields.add(output);
+    }
+    Eval evalNode = node.rewriteAsEval();
+    return visitEval(evalNode, ctx);
   }
 
   @Override
