@@ -8,6 +8,9 @@
 - SPI interfaces use Object params to avoid server dependency — keep this pattern for stub code
 - Parquet routing utility: ParquetIndexRouting in common/.../routing/ — extractIndexName(query) for PPL, extractIndexNameFromSql(query) for SQL, isParquetIndex(name). Shared across legacy/ and plugin/ modules.
 - Cross-module sharing: put shared utilities in common/ module (both legacy/ and plugin/ depend on it)
+- Cross-module function injection: legacy/ cannot depend on plugin/ — use Function<String,String> injected from SQLPlugin.java to bridge the gap
+- Calcite SQL Planner API: Frameworks.getPlanner(config) → parse(sql) → validate(sqlNode) → rel(validatedNode) → RelRoot.rel
+- SQL parser config: Use Lex.MYSQL for case-insensitive identifiers and backtick quoting (timestamp is a reserved keyword)
 - Build exclusions for local dev: `-x integTest -x :integ-test:yamlRestTest -x :doctest:bootstrap -x :doctest:build`
 - Function validation pattern: UnsupportedFunctionValidator (RelVisitor + RexShuttle) checks SqlKind.OTHER_FUNCTION calls against EngineCapabilities. Validate BEFORE BoundaryScan replacement.
 - PPL V3 datetime UDTs (EXPR_TIMESTAMP) are VARCHAR-backed. Standard Calcite TIMESTAMP is DATETIME family. PPLTypeChecker bridges via convertRelDataTypeToSqlTypeName(). DatePartFunction works with both at planning level. SpanFunction has runtime-only issue (instanceof ExprSqlType check).
@@ -269,4 +272,25 @@
   - SpanFunction has a known runtime issue: `fieldType instanceof ExprSqlType` check fails for standard Calcite TIMESTAMP. At planning level it works fine — the mismatch only surfaces during execution.
   - RelOptUtil.toString() only shows top-level plan tree, not internals of absorbed operators. HOUR gets absorbed into BoundaryScan (as part of LogicalProject), so it doesn't appear in plan string. Validate via row type and absorbed operator inspection instead.
   - Combined datetime queries (filter + span + aggregate) work correctly at planning level — all operators absorbed into BoundaryScan
+---
+
+## 2026-03-14T02:56 - US-014
+- Wired ANSI SQL RelNode generation with mock Parquet Schema using Calcite's native Planner API
+- Added planSql() to ParquetQueryPlanner: Frameworks.getPlanner(config) → parse → validate → rel → RelRoot.rel, then UnsupportedFunctionValidator + BoundaryScan replacement + HepPlanner optimization (same pipeline as PPL)
+- Uses Lex.MYSQL parser config for case-insensitive identifiers and backtick quoting
+- RestSqlAction updated: constructor accepts Function<String,String> parquetSqlPlanner injected from SQLPlugin.java (bridges legacy→plugin module dependency)
+- SQL queries on Parquet now return real plan JSON instead of stub JDBC response
+- Files modified:
+  - plugin/src/main/java/org/opensearch/sql/plugin/routing/ParquetQueryPlanner.java (added planSql(), createParquetSchema() helper)
+  - legacy/src/main/java/org/opensearch/sql/legacy/plugin/RestSqlAction.java (Function<String,String> injection, real planner call)
+  - plugin/src/main/java/org/opensearch/sql/plugin/SQLPlugin.java (wired ParquetQueryPlanner.planSql into RestSqlAction via lambda)
+  - plugin/src/test/java/org/opensearch/sql/plugin/routing/ParquetQueryPlannerTest.java (4 new SQL tests: filterProject, aggregate, datetime, formatExplain)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/ParquetQueryIT.java (updated SQL tests to verify plan JSON, added filterProject + aggregate ITs)
+- **Learnings for future iterations:**
+  - legacy/ module cannot depend on plugin/ — use Function injection from SQLPlugin.java to bridge the gap
+  - Calcite's Planner API (Frameworks.getPlanner) is the standard way to do SQL → RelNode without going through ANTLR/AST
+  - Lex.MYSQL enables case-insensitive identifiers and backtick quoting — needed because `timestamp` is a reserved SQL keyword
+  - CalciteSchema.createRootSchema(false).plus() for root schema, then rootSchema.add("name", schema) for catalog registration
+  - SQL path produces different RelNode structure than PPL (e.g., LogicalProject field names differ), but BoundaryScan absorption works identically
+  - No changes needed to UnifiedQueryPlanner — Calcite's Planner API is used directly in ParquetQueryPlanner
 ---
