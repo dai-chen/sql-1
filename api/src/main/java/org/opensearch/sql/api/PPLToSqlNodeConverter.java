@@ -218,6 +218,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     FUNC_MAP.put("mvsort", "SORT_ARRAY");
     FUNC_MAP.put("array_slice", "ARRAY_SLICE");
     FUNC_MAP.put("array", "ARRAY");
+    // Crypto - SHA2 handled separately via PPLBuiltinOperators.SHA2 UDF
   }
 
   private static final Set<String> SQL_DATETIME_KEYWORDS =
@@ -2310,6 +2311,52 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if ("mvzip".equals(name)) {
       return call("ARRAYS_ZIP", args.get(0), args.get(1));
     }
+    // Arithmetic function aliases
+    if ("add".equals(name) && args.size() == 2) return plus(args.get(0), args.get(1));
+    if ("subtract".equals(name) && args.size() == 2) return minus(args.get(0), args.get(1));
+    if ("multiply".equals(name) && args.size() == 2) return times(args.get(0), args.get(1));
+    if ("divide".equals(name) && args.size() == 2) {
+      return caseWhen(
+          List.of(eq(args.get(1), literal(0))),
+          List.of(literal(null)),
+          divide(args.get(0), args.get(1)));
+    }
+    if ("modulus".equals(name) && args.size() == 2) {
+      return caseWhen(
+          List.of(eq(args.get(1), literal(0))),
+          List.of(literal(null)),
+          mod(args.get(0), args.get(1)));
+    }
+    // Math: expm1(x) → EXP(x) - 1
+    if ("expm1".equals(name) && args.size() == 1)
+      return minus(call("EXP", args.get(0)), SqlLiteral.createExactNumeric("1", POS));
+    // Math: rint(x) → ROUND(x)
+    if ("rint".equals(name) && args.size() == 1) return call("ROUND", args.get(0));
+    // Math: atan(y,x) 2-arg → ATAN2(y,x)
+    if ("atan".equals(name) && args.size() == 2) return call("ATAN2", args.get(0), args.get(1));
+    // String: position(substr, str) → POSITION(substr IN str)
+    if ("position".equals(name) && args.size() == 2)
+      return new SqlBasicCall(SqlStdOperatorTable.POSITION, new SqlNode[]{args.get(0), args.get(1)}, POS);
+    // String: locate(substr, str[, pos])
+    if ("locate".equals(name)) {
+      if (args.size() == 3)
+        return new SqlBasicCall(SqlStdOperatorTable.POSITION, new SqlNode[]{args.get(0), args.get(1), args.get(2)}, POS);
+      if (args.size() == 2)
+        return new SqlBasicCall(SqlStdOperatorTable.POSITION, new SqlNode[]{args.get(0), args.get(1)}, POS);
+    }
+    // String: strcmp(a,b) → CASE WHEN a < b THEN -1 WHEN a > b THEN 1 ELSE 0 END
+    if ("strcmp".equals(name) && args.size() == 2)
+      return caseWhen(
+          List.of(lt(args.get(0), args.get(1)), gt(args.get(0), args.get(1))),
+          List.of(intLiteral(-1), intLiteral(1)),
+          intLiteral(0));
+    // Eval: scalar_max / scalar_min with null-ignoring semantics
+    if ("scalar_max".equals(name)) return buildGreatest(args);
+    if ("scalar_min".equals(name)) return buildLeast(args);
+    // SHA2: use registered UDF operator directly (generic call() won't resolve the UDF)
+    if ("sha2".equals(name) && args.size() == 2)
+      return new SqlBasicCall(PPLBuiltinOperators.SHA2,
+          new SqlNode[]{args.get(0), cast(args.get(1), typeSpec(SqlTypeName.INTEGER))}, POS);
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     return call(sqlName, args.toArray(new SqlNode[0]));
@@ -2933,6 +2980,34 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     pipe = select(star()).from(subquery(result, nextAlias())).build();
     return pipe;
+  }
+
+  /** Build null-ignoring GREATEST: CASE WHEN a IS NULL THEN b WHEN b IS NULL THEN a WHEN a >= b THEN a ELSE b END */
+  private SqlNode buildGreatest(List<SqlNode> args) {
+    if (args.size() == 1) return args.get(0);
+    if (args.size() == 2) {
+      SqlNode a = args.get(0), b = args.get(1);
+      return caseWhen(
+          List.of(isNull(a), isNull(b), gte(a, b)),
+          List.of(b, a, a),
+          b);
+    }
+    SqlNode rest = buildGreatest(args.subList(1, args.size()));
+    return buildGreatest(List.of(args.get(0), rest));
+  }
+
+  /** Build null-ignoring LEAST: CASE WHEN a IS NULL THEN b WHEN b IS NULL THEN a WHEN a <= b THEN a ELSE b END */
+  private SqlNode buildLeast(List<SqlNode> args) {
+    if (args.size() == 1) return args.get(0);
+    if (args.size() == 2) {
+      SqlNode a = args.get(0), b = args.get(1);
+      return caseWhen(
+          List.of(isNull(a), isNull(b), lte(a, b)),
+          List.of(b, a, a),
+          b);
+    }
+    SqlNode rest = buildLeast(args.subList(1, args.size()));
+    return buildLeast(List.of(args.get(0), rest));
   }
 
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {

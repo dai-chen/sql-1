@@ -48,6 +48,7 @@ import org.opensearch.sql.calcite.udf.udaf.TakeAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.ListAggFunction;
 import org.opensearch.sql.calcite.udf.udaf.ValuesAggFunction;
 import static org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils.createUserDefinedAggFunction;
+import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.opensearch.sql.calcite.utils.PPLOperandTypes;
 import org.opensearch.sql.calcite.utils.PPLReturnTypes;
 import org.opensearch.sql.calcite.SysLimit;
@@ -287,7 +288,7 @@ public class UnifiedQueryContext implements AutoCloseable {
                       SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
                       pplFirst, pplLast, percentileApprox, percentileApproxUpper, take,
-                      list, values)))
+                      list, values, PPLBuiltinOperators.SHA2)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .sqlValidatorConfig(SqlValidator.Config.DEFAULT
