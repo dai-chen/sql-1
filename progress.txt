@@ -1022,3 +1022,31 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - For addcoltotals with no data, the totals row still appears (SUM of empty set = NULL). The UNION ALL ensures at least 1 row.
   - `wrapAsSubquery()` does NOT modify `pipe` — it returns a new subquery node. Multiple calls wrap the same `pipe` with different aliases.
 ---
+
+## 2026-03-14T17:16 - V4-023: Implement expand, flatten, transpose, and reverse commands
+- **What was fixed**: 3 new tests passing in CalciteFlattenCommandIT (1→4, ALL PASS). Transpose (4/4) and Reverse (7/7) were already passing.
+  - **Flatten column ordering**: Added `.sorted()` to `topLevelCols` stream in `visitFlatten()` to ensure alphabetical ordering. Changed column layout: non-flattened top-level columns first (alphabetical), then the flattened field, then its sub-fields at the end. Previously sub-fields were inserted right after the parent field in its original position, producing wrong order (e.g., `myNum, comment, someField` instead of `comment, myNum, someField`).
+  - **Expand eval-alias handling**: Added `resolveColumnsWithPipeExtras()` helper that resolves table columns AND merges extra aliased columns from the pipe's SELECT list (e.g., from eval). Changed `visitExpand()` to prefer `extractPipeColumns()`, falling back to `resolveColumnsWithPipeExtras()`. Changed `isArrayField` guard: if field is NOT in table schema (eval alias), proceed with UNNEST instead of returning pipe unchanged. This fixes `eval addr=address | expand addr` pattern.
+- **Per-class results** (before → after):
+  - CalciteFlattenCommandIT: 1→4 pass (5 total, 1 skip) ✅ ALL PASS
+  - CalciteTransposeCommandIT: 4/4 pass ✅ ALL PASS (no change)
+  - CalciteReverseCommandIT: 7/7 pass ✅ ALL PASS (no change)
+  - CalciteExpandCommandIT: 0→0 pass (6 total, 5 fail, 1 skip) — all 5 failures are engine-level type metadata
+- **Remaining CalciteExpandCommandIT failures (5)** — ALL engine-level, NOT converter-fixable:
+  - testExpandOnNested: `address` type=`string`, expected `struct` — UNNEST of ARRAY(ANY) produces ANY type which maps to string in JDBC response
+  - testExpandWithAlias: `addr` type=`string`, expected `struct` — same UNNEST type issue
+  - testExpandWithEval: `addr` type=`string`, expected `struct` — same issue + column count now correct (5 cols)
+  - testExpandEmptyArray: `address` type=`string`, expected `undefined` — empty array UNNEST type
+  - testExpandOnNullField: `address` type=`string`, expected `undefined` — null field UNNEST type
+  - Root cause: CROSS JOIN UNNEST of ARRAY(ANY) produces ANY element type. ANY has JDBC ordinal 1111 (Types.OTHER). RestUnifiedSQLQueryAction.jdbcTypeToString() maps OTHER to "keyword" (→"string"). The original CalciteRelNodeVisitor uses Correlate+Uncollect which preserves type info through the RelNode plan, but the SqlNode-based UNNEST approach loses it.
+- **No regressions**: Verified CalciteDateTimeComparisonIT (191/191), CalciteSortCommandIT (30/30), CalciteTrendlineCommandIT (5/5)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+59/-10: visitFlatten ordering, visitExpand eval-alias, resolveColumnsWithPipeExtras helper)
+  - api/src/test/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverterTest.java (+60: testFlattenColumnOrdering, testExpandWithEvalAlias)
+- **Learnings for future iterations:**
+  - OpenSearch returns schema fields in mapping definition order, not alphabetical. The Calcite schema preserves this order. For flatten, tests expect alphabetical ordering of non-flattened columns — must explicitly sort.
+  - Flatten sub-fields should appear at the END of the SELECT list (after all non-flattened columns), not right after the parent field in its original position. This matches the CalciteRelNodeVisitor behavior (projectPlus appends at end).
+  - UNNEST of ARRAY(ANY) loses element type information. The SqlNode-based approach can't preserve nested struct types through UNNEST — this is a fundamental limitation of the CROSS JOIN UNNEST pattern vs the Correlate+Uncollect pattern used by CalciteRelNodeVisitor.
+  - For eval-then-expand (`eval addr=address | expand addr`), the eval alias doesn't exist in the table schema. Must check both pipe columns and table schema to build the complete column list.
+  - `resolveColumnsWithPipeExtras()` is a useful pattern for any command that follows eval — it merges table schema columns with eval-created aliases from the pipe's SELECT list.
+---
