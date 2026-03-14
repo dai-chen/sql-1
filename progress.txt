@@ -8,7 +8,8 @@
 - SPI interfaces use Object params to avoid server dependency — keep this pattern for stub code
 - Parquet routing utility: ParquetIndexRouting in common/.../routing/ — extractIndexName(query) for PPL, extractIndexNameFromSql(query) for SQL, isParquetIndex(name). Shared across legacy/ and plugin/ modules.
 - Cross-module sharing: put shared utilities in common/ module (both legacy/ and plugin/ depend on it)
-- Cross-module function injection: legacy/ cannot depend on plugin/ — use Function<String,String> injected from SQLPlugin.java to bridge the gap
+- Cross-module function injection: legacy/ cannot depend on plugin/ — use Function<String,String> (sync) or BiConsumer<String,ActionListener<String>> (async) injected from SQLPlugin.java to bridge the gap
+- Transport action registration: ActionType(NAME, Response::new) + HandledTransportAction with @Inject constructor, registered in SQLPlugin.getActions() as ActionHandler pair
 - Calcite SQL Planner API: Frameworks.getPlanner(config) → parse(sql) → validate(sqlNode) → rel(validatedNode) → RelRoot.rel
 - SQL parser config: Use Lex.MYSQL for case-insensitive identifiers and backtick quoting (timestamp is a reserved keyword)
 - `match` is a reserved keyword in Calcite MySQL lex mode — cannot be registered as a parseable SQL function. Handle via SqlParseException catch with clear error message. Other search functions (match_phrase, etc.) are NOT reserved and parse fine through operator table registration.
@@ -310,4 +311,28 @@
   - SqlFunction with null operandTypeChecker accepts any number of arguments — useful for registering functions that just need to parse
   - ReturnTypes.BOOLEAN_NULLABLE is cleaner than a lambda for boolean return type inference
   - Two-tier error handling: parse-time catch for reserved keywords, UnsupportedFunctionValidator for parseable-but-unsupported functions
+---
+
+## 2026-03-14T03:29 - US-016
+- Implemented stub transport action for RelNode handoff — full round-trip: REST → routing → RelNode → transport action → stub execution → response
+- Created AnalyticsActionRequest (ActionRequest with plan string + queryType), AnalyticsActionResponse (ActionResponse with result string), TransportAnalyticsAction (HandledTransportAction stub returning mock data from ParquetStubResponse)
+- RestPPLQueryAction: non-explain Parquet path now plans query, creates AnalyticsActionRequest("PPL"), executes via nodeClient.execute(TransportAnalyticsAction.ACTION_TYPE, ...) with async ActionListener
+- RestSqlAction: changed from synchronous Function<String, String> to async BiConsumer<String, ActionListener<String>> for Parquet SQL execution
+- SQLPlugin: registered TransportAnalyticsAction in getActions(), updated getRestHandlers() to inject BiConsumer lambda capturing this.client (NodeClient) for async plan+execute flow
+- ParquetQueryIT: updated PPL/SQL query tests to assert stub response data (schema, datarows, total, size, status) instead of plan JSON
+- Files created:
+  - plugin/src/main/java/org/opensearch/sql/plugin/transport/AnalyticsActionRequest.java
+  - plugin/src/main/java/org/opensearch/sql/plugin/transport/AnalyticsActionResponse.java
+  - plugin/src/main/java/org/opensearch/sql/plugin/transport/TransportAnalyticsAction.java
+- Files modified:
+  - plugin/src/main/java/org/opensearch/sql/plugin/rest/RestPPLQueryAction.java (async transport action call)
+  - legacy/src/main/java/org/opensearch/sql/legacy/plugin/RestSqlAction.java (Function→BiConsumer, async pattern)
+  - plugin/src/main/java/org/opensearch/sql/plugin/SQLPlugin.java (registered action, wired BiConsumer)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/ParquetQueryIT.java (updated assertions for stub data)
+- **Learnings for future iterations:**
+  - Transport action pattern: ActionType with NAME + response reader, HandledTransportAction with @Inject constructor, ActionRequest/ActionResponse with StreamInput/StreamOutput serialization
+  - Cross-module async bridging: legacy/ can't import plugin/ classes — use BiConsumer<String, ActionListener<String>> injected from SQLPlugin to encapsulate plan+transport flow
+  - SQLPlugin.client (set in createComponents) is available in getRestHandlers() lambdas for transport action execution
+  - Transport action NAME convention: "cluster:admin/opensearch/analytics/execute" following existing "cluster:admin/opensearch/ql/..." pattern
+  - ParquetStubResponse.formatAsSimpleJson(QueryResult) and formatAsJdbc(QueryResult) require buildStubQueryResult() first
 ---
