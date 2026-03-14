@@ -168,13 +168,17 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   public SqlNode visitProject(Project node, Void ctx) {
     if (node.isExcluded()) {
-      Set<String> excluded = node.getProjectList().stream()
+      List<String> excludePatterns = node.getProjectList().stream()
           .map(e -> ((Field) e).getField().toString())
-          .collect(Collectors.toSet());
+          .collect(Collectors.toList());
       List<String> pipeCols = extractPipeColumns();
       List<String> allCols = pipeCols.isEmpty() ? resolveColumns(tableName) : pipeCols;
+      // Build compiled regex patterns for wildcard exclusions
+      List<java.util.regex.Pattern> regexPatterns = excludePatterns.stream()
+          .map(p -> java.util.regex.Pattern.compile("^" + p.replace("*", ".*") + "$"))
+          .collect(Collectors.toList());
       SqlNode[] cols = allCols.stream()
-          .filter(c -> !excluded.contains(c))
+          .filter(c -> regexPatterns.stream().noneMatch(p -> p.matcher(c).matches()))
           .map(c -> identifier(c))
           .toArray(SqlNode[]::new);
       pipe = select(cols).from(wrapAsSubquery()).build();
@@ -193,6 +197,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     }
     if (hasWildcard) {
       List<String> allCols = resolveColumns(tableName);
+      LinkedHashSet<String> seen = new LinkedHashSet<>();
       List<SqlNode> expanded = new ArrayList<>();
       for (UnresolvedExpression expr : node.getProjectList()) {
         if (expr instanceof Field) {
@@ -200,13 +205,22 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
           if (name.contains("*")) {
             String regex = "^" + name.replace("*", ".*") + "$";
             java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(regex);
+            boolean anyMatch = allCols.stream().anyMatch(c -> pattern.matcher(c).matches());
+            if (!anyMatch) {
+              throw new IllegalArgumentException(
+                  "wildcard pattern [" + name + "] matches no fields");
+            }
             for (String col : allCols) {
-              if (pattern.matcher(col).matches()) {
+              if (pattern.matcher(col).matches() && seen.add(col)) {
                 expanded.add(identifier(col));
               }
             }
             continue;
           }
+          if (seen.add(name)) {
+            expanded.add(expr.accept(this, null));
+          }
+          continue;
         }
         expanded.add(expr.accept(this, null));
       }

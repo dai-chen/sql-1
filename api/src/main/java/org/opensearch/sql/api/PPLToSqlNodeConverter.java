@@ -334,8 +334,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   // -- MAP field tracking: field names produced by spath auto-extract (json_extract_all) --
   protected final Set<String> mapFields = new java.util.HashSet<>();
 
+  // -- Known alias tracking: aliases from joins, subqueries, lookups --
+  protected final Set<String> knownAliases = new java.util.HashSet<>();
+
   private String nextAlias() {
-    return "_t" + aliasCounter.incrementAndGet();
+    String alias = "_t" + aliasCounter.incrementAndGet();
+    knownAliases.add(alias);
+    return alias;
   }
 
   /** Flatten AST linked list from outermost to leaf, then reverse so leaf (Relation) is first. */
@@ -1010,6 +1015,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     SqlNode rightSide = resolveJoinRight(node.getRight(), rightAlias);
     String effectiveRightAlias = rightAlias != null ? rightAlias : extractAlias(rightSide);
 
+    knownAliases.add(effectiveLeftAlias);
+    if (effectiveRightAlias != null) knownAliases.add(effectiveRightAlias);
+
     SqlNode condition = null;
     if (node.getJoinCondition().isPresent()) {
       condition = node.getJoinCondition().get().accept(this, null);
@@ -1070,6 +1078,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   public SqlNode visitLookup(Lookup node, Void ctx) {
     String leftAlias = "_l";
     String rightAlias = "_r";
+    knownAliases.add(leftAlias);
+    knownAliases.add(rightAlias);
     SqlNode leftSide = subquery(pipe, leftAlias);
 
     Relation lookupRel = extractRelation(node.getLookupRelation());
@@ -1879,6 +1889,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     if (parts.size() == 1 && binReplacements.containsKey(parts.get(0))) {
       return binReplacements.get(parts.get(0));
+    }
+    // For multi-part names, check if the first part is a known alias (join, subquery, lookup).
+    // If not, treat as a single dotted column name (OpenSearch object field).
+    if (parts.size() > 1 && !knownAliases.contains(parts.get(0))) {
+      return identifier(String.join(".", parts));
     }
     return identifier(parts.toArray(new String[0]));
   }
