@@ -97,6 +97,7 @@ import org.opensearch.sql.plugin.config.OpenSearchPluginModule;
 import org.opensearch.sql.plugin.rest.RestPPLQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLStatsAction;
 import org.opensearch.sql.plugin.rest.RestQuerySettingsAction;
+import org.opensearch.sql.plugin.routing.ParquetQueryPlanner;
 import org.opensearch.sql.plugin.transport.PPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
@@ -163,7 +164,16 @@ public class SQLPlugin extends Plugin
 
     return Arrays.asList(
         new RestPPLQueryAction(),
-        new RestSqlAction(settings, injector),
+        new RestSqlAction(
+            settings,
+            injector,
+            sql -> {
+              try {
+                return ParquetQueryPlanner.formatExplain(ParquetQueryPlanner.planSql(sql));
+              } catch (Exception e) {
+                throw new RuntimeException(e);
+              }
+            }),
         new RestSqlStatsAction(settings, restController),
         new RestPPLStatsAction(settings, restController),
         new RestQuerySettingsAction(settings, restController),

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
@@ -85,10 +86,15 @@ public class RestSqlAction extends BaseRestHandler {
   /** New SQL query request handler. */
   private final RestSQLQueryAction newSqlQueryHandler;
 
-  public RestSqlAction(Settings settings, Injector injector) {
+  /** Optional planner function for Parquet SQL queries: SQL string → plan JSON. */
+  private final Function<String, String> parquetSqlPlanner;
+
+  public RestSqlAction(
+      Settings settings, Injector injector, Function<String, String> parquetSqlPlanner) {
     super();
     this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     this.newSqlQueryHandler = new RestSQLQueryAction(injector);
+    this.parquetSqlPlanner = parquetSqlPlanner;
   }
 
   @Override
@@ -145,15 +151,25 @@ public class RestSqlAction extends BaseRestHandler {
               request.params(),
               sqlRequest.cursor());
 
-      // Route Parquet index queries to stub responses
+      // Route Parquet index queries to analytics engine
       String indexName = ParquetIndexRouting.extractIndexNameFromSql(sqlRequest.getSql());
       if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
         return channel -> {
-          String formattedResult =
-              isExplainRequest(request)
-                  ? ParquetStubResponse.formatExplainAsJson()
-                  : ParquetStubResponse.formatAsJdbc(ParquetStubResponse.buildStubQueryResult());
-          sendResponse(channel, formattedResult, OK);
+          try {
+            if (isExplainRequest(request)) {
+              sendResponse(channel, ParquetStubResponse.formatExplainAsJson(), OK);
+            } else {
+              sendResponse(channel, parquetSqlPlanner.apply(sqlRequest.getSql()), OK);
+            }
+          } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            sendResponse(
+                channel,
+                "{\"error\":{\"type\":\"UnsupportedOperationException\",\"reason\":\""
+                    + cause.getMessage().replace("\"", "\\\"")
+                    + "\"}}",
+                BAD_REQUEST);
+          }
         };
       }
 

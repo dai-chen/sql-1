@@ -145,4 +145,58 @@ public class ParquetQueryPlannerTest {
     }
     return null;
   }
+
+  @Test
+  public void testSqlFilterProject() throws Exception {
+    RelNode result =
+        ParquetQueryPlanner.planSql(
+            "SELECT `timestamp`, status, message FROM parquet_index WHERE status = 200");
+
+    String plan = RelOptUtil.toString(result);
+    assertTrue("Plan should contain BoundaryScan: " + plan, plan.contains("BoundaryScan"));
+    BoundaryScan scan = findBoundaryScan(result);
+    assertNotNull("BoundaryScan should exist in plan", scan);
+    assertEquals("Filter + Project should be absorbed", 2, scan.getAbsorbedOperators().size());
+  }
+
+  @Test
+  public void testSqlAggregate() throws Exception {
+    RelNode result =
+        ParquetQueryPlanner.planSql("SELECT count(*) FROM parquet_index GROUP BY status");
+
+    String plan = RelOptUtil.toString(result);
+    assertTrue("Plan should contain BoundaryScan: " + plan, plan.contains("BoundaryScan"));
+    BoundaryScan scan = findBoundaryScan(result);
+    assertNotNull("BoundaryScan should exist in plan", scan);
+    assertTrue("At least aggregate should be absorbed", scan.getAbsorbedOperators().size() >= 1);
+  }
+
+  @Test
+  public void testSqlDatetime() throws Exception {
+    RelNode result =
+        ParquetQueryPlanner.planSql(
+            "SELECT * FROM parquet_index WHERE `timestamp` > TIMESTAMP '2024-01-01 00:00:00'");
+
+    String plan = RelOptUtil.toString(result);
+    assertTrue("Plan should contain BoundaryScan: " + plan, plan.contains("BoundaryScan"));
+    BoundaryScan scan = findBoundaryScan(result);
+    assertNotNull("BoundaryScan should exist in plan", scan);
+    assertTrue("At least filter should be absorbed", scan.getAbsorbedOperators().size() >= 1);
+    boolean hasFilter =
+        scan.getAbsorbedOperators().stream().anyMatch(op -> op instanceof LogicalFilter);
+    assertTrue("Absorbed operators should include filter", hasFilter);
+  }
+
+  @Test
+  public void testSqlFormatExplain() throws Exception {
+    RelNode result =
+        ParquetQueryPlanner.planSql(
+            "SELECT `timestamp`, status FROM parquet_index WHERE status = 200");
+    String explain = ParquetQueryPlanner.formatExplain(result);
+
+    assertNotNull(explain);
+    assertTrue(explain.contains("Parquet"));
+    assertTrue(explain.contains("plan"));
+    assertTrue(explain.contains("BoundaryScan"));
+  }
 }

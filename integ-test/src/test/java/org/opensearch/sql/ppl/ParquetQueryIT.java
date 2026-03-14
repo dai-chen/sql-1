@@ -6,9 +6,7 @@
 package org.opensearch.sql.ppl;
 
 import static org.opensearch.sql.legacy.TestUtils.getResponseBody;
-import static org.opensearch.sql.util.MatcherUtils.rows;
 import static org.opensearch.sql.util.MatcherUtils.schema;
-import static org.opensearch.sql.util.MatcherUtils.verifyDataRows;
 import static org.opensearch.sql.util.MatcherUtils.verifySchema;
 
 import java.io.IOException;
@@ -64,18 +62,10 @@ public class ParquetQueryIT extends PPLIntegTestCase {
   @Test
   public void testSqlQueryOnParquetIndex() throws IOException {
     JSONObject response = executeSqlQuery("SELECT * FROM parquet_index");
-    // JDBC formatter uses legacyTypeName: STRING -> keyword
-    verifySchema(
-        response,
-        schema("timestamp", null, "timestamp"),
-        schema("status", null, "long"),
-        schema("message", null, "keyword"),
-        schema("active", null, "boolean"));
-    verifyDataRows(
-        response,
-        rows("2024-01-15 10:30:00", 200, "Success", true),
-        rows("2024-01-15 11:45:00", 404, "Not Found", false));
-    assertEquals(200, response.getInt("status"));
+    assertTrue(response.has("Parquet"));
+    assertTrue(response.getJSONObject("Parquet").has("plan"));
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
   }
 
   @Test
@@ -92,6 +82,24 @@ public class ParquetQueryIT extends PPLIntegTestCase {
         executeExplainRequest("SELECT * FROM parquet_index", "/_plugins/_sql/_explain");
     assertTrue(response.has("Parquet"));
     assertTrue(response.getJSONObject("Parquet").has("description"));
+  }
+
+  @Test
+  public void testSqlFilterProjectOnParquetIndex() throws IOException {
+    JSONObject response =
+        executeSqlQuery("SELECT `timestamp`, status FROM parquet_index WHERE status = 200");
+    assertTrue(response.has("Parquet"));
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+  }
+
+  @Test
+  public void testSqlAggregateOnParquetIndex() throws IOException {
+    JSONObject response = executeSqlQuery("SELECT count(*) FROM parquet_index GROUP BY status");
+    assertTrue(response.has("Parquet"));
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+    assertTrue(plan.contains("absorbed"));
   }
 
   @Test
