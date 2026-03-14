@@ -9,6 +9,8 @@ import static org.junit.Assert.*;
 
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.logical.LogicalAggregate;
+import org.apache.calcite.rel.logical.LogicalFilter;
 import org.junit.Test;
 import org.opensearch.analytics.plan.BoundaryScan;
 
@@ -71,6 +73,64 @@ public class ParquetQueryPlannerTest {
     assertTrue(explain.contains("Parquet"));
     assertTrue(explain.contains("plan"));
     assertTrue(explain.contains("BoundaryScan"));
+  }
+
+  @Test
+  public void testHourFunctionOnTimestamp() throws Exception {
+    RelNode result =
+        ParquetQueryPlanner.plan(
+            "source = parquet_index | eval hour = hour(timestamp) | where timestamp >"
+                + " '2024-01-01'");
+    String plan = RelOptUtil.toString(result);
+    assertTrue("Plan should contain BoundaryScan: " + plan, plan.contains("BoundaryScan"));
+    // Validate timestamp filter is present in the top-level plan (no UDT type mismatch)
+    assertTrue("Plan should contain timestamp filter: " + plan, plan.contains("2024"));
+    // Validate BoundaryScan absorbed the project with HOUR
+    BoundaryScan scan = findBoundaryScan(result);
+    assertNotNull("BoundaryScan should exist in plan", scan);
+    assertTrue("Operators should be absorbed", scan.getAbsorbedOperators().size() >= 1);
+    // Validate row type includes the 'hour' field from eval (proves HOUR function worked)
+    String rowType = scan.getRowType().toString();
+    assertTrue("Row type should contain hour field: " + rowType, rowType.contains("hour"));
+  }
+
+  @Test
+  public void testSpanOnTimestamp() throws Exception {
+    RelNode result =
+        ParquetQueryPlanner.plan("source = parquet_index | stats count() by span(timestamp, 1h)");
+    String plan = RelOptUtil.toString(result);
+    assertTrue("Plan should contain BoundaryScan: " + plan, plan.contains("BoundaryScan"));
+    // Validate SPAN function is present in the plan (no UDT type mismatch)
+    assertTrue("Plan should contain span: " + plan, plan.contains("span"));
+    // Validate aggregate structure is absorbed
+    BoundaryScan scan = findBoundaryScan(result);
+    assertNotNull("BoundaryScan should exist in plan", scan);
+    boolean hasAggregate =
+        scan.getAbsorbedOperators().stream().anyMatch(op -> op instanceof LogicalAggregate);
+    assertTrue("Absorbed operators should include aggregate", hasAggregate);
+  }
+
+  @Test
+  public void testDatetimeComparisonWithSpan() throws Exception {
+    RelNode result =
+        ParquetQueryPlanner.plan(
+            "source = parquet_index | where timestamp > '2024-01-01' | stats count() by"
+                + " span(timestamp, 1h)");
+    String plan = RelOptUtil.toString(result);
+    assertTrue("Plan should contain BoundaryScan: " + plan, plan.contains("BoundaryScan"));
+    // Validate span function appears in the plan output
+    assertTrue("Plan should contain span: " + plan, plan.contains("span"));
+    // Validate both filter and aggregate are absorbed
+    BoundaryScan scan = findBoundaryScan(result);
+    assertNotNull("BoundaryScan should exist in plan", scan);
+    assertTrue(
+        "At least filter + aggregate should be absorbed", scan.getAbsorbedOperators().size() >= 2);
+    boolean hasFilter =
+        scan.getAbsorbedOperators().stream().anyMatch(op -> op instanceof LogicalFilter);
+    boolean hasAggregate =
+        scan.getAbsorbedOperators().stream().anyMatch(op -> op instanceof LogicalAggregate);
+    assertTrue("Absorbed operators should include filter", hasFilter);
+    assertTrue("Absorbed operators should include aggregate", hasAggregate);
   }
 
   private BoundaryScan findBoundaryScan(RelNode node) {

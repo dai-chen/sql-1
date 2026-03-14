@@ -106,6 +106,45 @@ public class ParquetQueryIT extends PPLIntegTestCase {
   }
 
   @Test
+  public void testPplHourFunctionOnParquetIndex() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "source = parquet_index | eval hour = hour(timestamp) | where timestamp >"
+                + " '2024-01-01'");
+    assertTrue(response.has("Parquet"));
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+    // Validate HOUR function present in plan (no UDT type mismatch)
+    assertTrue("Plan should contain timestamp filter: " + plan, plan.contains("2024"));
+    assertTrue("Plan should show absorbed operators: " + plan, plan.contains("absorbed"));
+  }
+
+  @Test
+  public void testPplSpanOnParquetIndex() throws IOException {
+    JSONObject response =
+        executeQuery("source = parquet_index | stats count() by span(timestamp, 1h)");
+    assertTrue(response.has("Parquet"));
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+    // Validate SPAN function present in plan (no UDT type mismatch)
+    assertTrue("Plan should contain span: " + plan, plan.contains("span"));
+  }
+
+  @Test
+  public void testPplDatetimeComparisonWithSpanOnParquetIndex() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "source = parquet_index | where timestamp > '2024-01-01' | stats count() by"
+                + " span(timestamp, 1h)");
+    assertTrue(response.has("Parquet"));
+    String plan = response.getJSONObject("Parquet").getString("plan");
+    assertTrue(plan.contains("BoundaryScan"));
+    // Validate span present and operators absorbed (no UDT type mismatch)
+    assertTrue("Plan should contain span: " + plan, plan.contains("span"));
+    assertTrue("Plan should show absorbed operators: " + plan, plan.contains("absorbed"));
+  }
+
+  @Test
   public void testLuceneQueryStillWorks() throws IOException {
     JSONObject response =
         executeQuery("source = opensearch-sql_test_index_bank | fields firstname | head 1");

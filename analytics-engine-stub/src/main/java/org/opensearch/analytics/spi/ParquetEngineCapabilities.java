@@ -41,7 +41,38 @@ public class ParquetEngineCapabilities implements EngineCapabilities {
           "SUM",
           "AVG",
           "MIN",
-          "MAX");
+          "MAX",
+          // Datetime functions (PPL UDFs registered as OTHER_FUNCTION)
+          "YEAR",
+          "QUARTER",
+          "MONTH",
+          "WEEK",
+          "DAY",
+          "DAYOFYEAR",
+          "DAYOFMONTH",
+          "DAYOFWEEK",
+          "HOUR",
+          "HOUROFDAY",
+          "MINUTE",
+          "MINUTEOFDAY",
+          "SECOND",
+          "MICROSECOND",
+          "TIMESTAMP",
+          "DATE",
+          "YEARWEEK",
+          "WEEKDAY",
+          "UNIX_TIMESTAMP",
+          "STRFTIME",
+          "TO_SECONDS",
+          "ADDTIME",
+          "SUBTIME",
+          "ADDDATE",
+          "SUBDATE",
+          "DATE_ADD",
+          "DATE_SUB",
+          "EXTRACT",
+          // Span function
+          "SPAN");
 
   private static final Set<String> UNSUPPORTED_FUNCTIONS =
       Set.of(
