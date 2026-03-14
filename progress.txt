@@ -9,6 +9,7 @@
 - Parquet routing utility: ParquetIndexRouting in common/.../routing/ — extractIndexName(query) for PPL, extractIndexNameFromSql(query) for SQL, isParquetIndex(name). Shared across legacy/ and plugin/ modules.
 - Cross-module sharing: put shared utilities in common/ module (both legacy/ and plugin/ depend on it)
 - Build exclusions for local dev: `-x integTest -x :integ-test:yamlRestTest -x :doctest:bootstrap -x :doctest:build`
+- Function validation pattern: UnsupportedFunctionValidator (RelVisitor + RexShuttle) checks SqlKind.OTHER_FUNCTION calls against EngineCapabilities. Validate BEFORE BoundaryScan replacement.
 - REST handler routing pattern: insert check in prepareRequest() BEFORE the existing `return channel ->` lambda. Return a different RestChannelConsumer for the new code path.
 - Formatter-dependent code goes in protocol/ module (NOT common/) — common/ cannot depend on core/ or protocol/ without circular deps
 - Parquet stub response: ParquetStubResponse in protocol/.../response/ — buildStubQueryResult(), formatAsSimpleJson(), formatAsJdbc(). Used by both PPL and SQL handlers.
@@ -228,4 +229,25 @@
   - RelShuttleImpl.visit(TableScan) is the clean way to replace scans in an existing RelNode tree
   - ParquetQueryPlanner is in plugin/ module (not common/) because it depends on api/ and analytics-engine-stub/
   - UnifiedQueryContext implements AutoCloseable — use try/finally to close it
+---
+
+## 2026-03-14T02:16 - US-012
+- Created UnsupportedFunctionValidator in analytics-engine-stub/ that walks RelNode tree and validates function calls against EngineCapabilities
+- Wired validator into ParquetQueryPlanner.plan() after PPL parse but before BoundaryScan replacement
+- Added unit tests for validator (unsupported function throws, supported operations pass)
+- Added ParquetQueryPlannerTest for match() fail-fast
+- Added IT test for PPL match() on Parquet returning 400 error
+- Files created:
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/plan/UnsupportedFunctionValidator.java
+  - analytics-engine-stub/src/test/java/org/opensearch/analytics/plan/UnsupportedFunctionValidatorTest.java
+- Files modified:
+  - plugin/src/main/java/org/opensearch/sql/plugin/routing/ParquetQueryPlanner.java (added validate() call)
+  - plugin/src/test/java/org/opensearch/sql/plugin/routing/ParquetQueryPlannerTest.java (added match() test)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/ParquetQueryIT.java (added fail-fast IT)
+- **Learnings for future iterations:**
+  - UnsupportedFunctionValidator uses RelVisitor + RexShuttle pattern: RelVisitor walks RelNode tree, RexShuttle inspects RexCall nodes within LogicalFilter conditions and LogicalProject expressions
+  - Only SqlKind.OTHER_FUNCTION needs validation — standard SQL operators (AND, OR, =, <, CAST, etc.) have their own SqlKind values and are always safe
+  - PPL match() function appears as SqlKind.OTHER_FUNCTION in the Calcite RelNode tree — this is how custom/named functions are represented
+  - Validation must happen BEFORE BoundaryScan replacement — the validator checks LogicalFilter/LogicalProject which exist in the raw plan, not after absorption
+  - RestPPLQueryAction already catches exceptions from ParquetQueryPlanner.plan() and returns 400 — no handler changes needed
 ---

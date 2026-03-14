@@ -195,8 +195,8 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": "Phase 4. Test queries: 'source = parquet_index | where match(message, \"error\")' and 'source = parquet_index | eval new_field = upper(message)' (if upper not in EngineCapabilities)."
+      "passes": true,
+      "notes": "UnsupportedFunctionValidator walks RelNode tree with RelVisitor+RexShuttle, checks SqlKind.OTHER_FUNCTION calls against EngineCapabilities.supportsFunction(), throws UnsupportedOperationException. Wired into ParquetQueryPlanner.plan() after parse but before BoundaryScan replacement. IT verifies match() on Parquet returns 400 with clear error."
     },
     {
       "id": "US-013",
