@@ -33,6 +33,7 @@ import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelectKeyword;
 import org.apache.calcite.sql.SqlWindow;
+import org.apache.calcite.sql.fun.SqlLibraryOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -204,20 +205,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     FUNC_MAP.put("avg", "AVG");
     FUNC_MAP.put("min", "MIN");
     FUNC_MAP.put("max", "MAX");
-    // Array/MV functions
+    // Array/MV functions (most handled via SqlLibraryOperators in visitFunction)
     FUNC_MAP.put("mvjoin", "ARRAY_JOIN");
-    FUNC_MAP.put("mvdedup", "ARRAY_DISTINCT");
-    FUNC_MAP.put("array_compact", "ARRAY_COMPACT");
     FUNC_MAP.put("array_length", "ARRAY_LENGTH");
-    FUNC_MAP.put("split", "SPLIT");
-    FUNC_MAP.put("mvappend", "MVAPPEND");
-    FUNC_MAP.put("mvfind", "MVFIND");
-    FUNC_MAP.put("mvindex", "MVINDEX");
-    FUNC_MAP.put("mvzip", "MVZIP");
-    FUNC_MAP.put("mvmap", "MVMAP");
-    FUNC_MAP.put("mvsort", "SORT_ARRAY");
-    FUNC_MAP.put("array_slice", "ARRAY_SLICE");
-    FUNC_MAP.put("array", "ARRAY");
     // Crypto - SHA2 handled separately via PPLBuiltinOperators.SHA2 UDF
   }
 
@@ -2346,7 +2336,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (args.size() == 2) {
         // Single element: arr[idx+1] for positive, arr[ARRAY_LENGTH(arr)+idx+1] for negative
         SqlNode posIdx = plus(idx, intLiteral(1));
-        SqlNode negIdx = plus(call("ARRAY_LENGTH", arr), plus(idx, intLiteral(1)));
+        SqlNode negIdx = plus(new SqlBasicCall(SqlLibraryOperators.ARRAY_LENGTH, new SqlNode[]{arr}, POS), plus(idx, intLiteral(1)));
         SqlNode adjustedIdx = caseWhen(
             List.of(lt(idx, intLiteral(0))),
             List.of(negIdx),
@@ -2354,17 +2344,45 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         return new SqlBasicCall(SqlStdOperatorTable.ITEM, new SqlNode[]{arr, adjustedIdx}, POS);
       }
       // Range: mvindex(arr, start, end) → ARRAY_SLICE(arr, start+1, end-start+1)
+      // Note: ARRAY_SLICE requires INTEGER args but arithmetic produces NUMERIC — engine-level type checker limitation
       SqlNode end = args.get(2);
-      return call("ARRAY_SLICE", arr, plus(idx, intLiteral(1)), plus(minus(end, idx), intLiteral(1)));
+      return new SqlBasicCall(SqlLibraryOperators.ARRAY_SLICE, new SqlNode[]{arr, cast(plus(idx, intLiteral(1)), typeSpec(SqlTypeName.INTEGER)), cast(plus(minus(end, idx), intLiteral(1)), typeSpec(SqlTypeName.INTEGER))}, POS);
     }
     // mvappend: single arg → ARRAY(arg), multiple → ARRAY_CONCAT(args...)
     if ("mvappend".equals(name)) {
-      if (args.size() == 1) return call("ARRAY", args.get(0));
-      return call("ARRAY_CONCAT", args.toArray(new SqlNode[0]));
+      if (args.size() == 1) return new SqlBasicCall(SqlLibraryOperators.ARRAY, new SqlNode[]{args.get(0)}, POS);
+      return new SqlBasicCall(SqlLibraryOperators.ARRAY_CONCAT, args.toArray(new SqlNode[0]), POS);
     }
     // mvzip: map to ARRAYS_ZIP
     if ("mvzip".equals(name)) {
-      return call("ARRAYS_ZIP", args.get(0), args.get(1));
+      if (args.size() >= 3) {
+        return new SqlBasicCall(SqlLibraryOperators.ARRAYS_ZIP, new SqlNode[]{args.get(0), args.get(1), args.get(2)}, POS);
+      }
+      return new SqlBasicCall(SqlLibraryOperators.ARRAYS_ZIP, new SqlNode[]{args.get(0), args.get(1)}, POS);
+    }
+    // mvfind: use registered UDF operator
+    if ("mvfind".equals(name)) {
+      return new SqlBasicCall(PPLBuiltinOperators.MVFIND, args.toArray(new SqlNode[0]), POS);
+    }
+    // Array functions using SqlLibraryOperators for correct return types
+    if ("mvdedup".equals(name)) {
+      return new SqlBasicCall(SqlLibraryOperators.ARRAY_DISTINCT, new SqlNode[]{args.get(0)}, POS);
+    }
+    if ("array_compact".equals(name)) {
+      return new SqlBasicCall(SqlLibraryOperators.ARRAY_COMPACT, new SqlNode[]{args.get(0)}, POS);
+    }
+    if ("split".equals(name)) {
+      return new SqlBasicCall(SqlLibraryOperators.SPLIT, args.toArray(new SqlNode[0]), POS);
+    }
+    if ("mvsort".equals(name)) {
+      return new SqlBasicCall(SqlLibraryOperators.SORT_ARRAY, new SqlNode[]{args.get(0)}, POS);
+    }
+    if ("array".equals(name)) {
+      // Cast string literal args to VARCHAR to avoid CHAR padding
+      SqlNode[] castArgs = args.stream()
+          .map(a -> isStringLiteral(a) ? cast(a, typeSpec(SqlTypeName.VARCHAR)) : a)
+          .toArray(SqlNode[]::new);
+      return new SqlBasicCall(SqlLibraryOperators.ARRAY, castArgs, POS);
     }
     // Arithmetic function aliases
     if ("add".equals(name) && args.size() == 2) return plus(args.get(0), args.get(1));

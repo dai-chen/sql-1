@@ -12,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
@@ -186,6 +187,15 @@ public class RestUnifiedSQLQueryAction {
           row.append(val);
         } else if (val instanceof Boolean) {
           row.append(val);
+        } else if (val instanceof java.util.List) {
+          row.append(new org.json.JSONArray((java.util.List<?>) val));
+        } else if (val instanceof java.sql.Array) {
+          Object arr = ((java.sql.Array) val).getArray();
+          if (arr instanceof Object[]) {
+            row.append(new org.json.JSONArray(java.util.Arrays.asList((Object[]) arr)));
+          } else {
+            row.append(new org.json.JSONArray(val.toString()));
+          }
         } else {
           row.append("\"").append(escape(val.toString())).append("\"");
         }
@@ -232,6 +242,7 @@ public class RestUnifiedSQLQueryAction {
       case java.sql.Types.DATE -> "date";
       case java.sql.Types.TIME -> "time";
       case java.sql.Types.TIMESTAMP -> "timestamp";
+      case java.sql.Types.ARRAY -> "array";
       default -> "keyword";
     };
   }

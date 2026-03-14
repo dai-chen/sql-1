@@ -396,6 +396,7 @@ public class PPLBuiltinOperators extends ReflectiveSqlOperatorTable {
   public static final SqlOperator MVAPPEND = new MVAppendFunctionImpl().toUDF("mvappend");
   public static final SqlOperator MVZIP = new MVZipFunctionImpl().toUDF("mvzip");
   public static final SqlOperator MVFIND = new MVFindFunctionImpl().toUDF("mvfind");
+  public static final SqlOperator MVFIND_UPPER = new MVFindFunctionImpl().toUDF("MVFIND");
   public static final SqlOperator FILTER = new FilterFunctionImpl().toUDF("filter");
   public static final SqlOperator TRANSFORM = new TransformFunctionImpl().toUDF("transform");
   public static final SqlOperator REDUCE = new ReduceFunctionImpl().toUDF("reduce");

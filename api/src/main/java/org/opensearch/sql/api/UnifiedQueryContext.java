@@ -288,7 +288,7 @@ public class UnifiedQueryContext implements AutoCloseable {
                       SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
                       pplFirst, pplLast, percentileApprox, percentileApproxUpper, take,
-                      list, values, PPLBuiltinOperators.SHA2)))
+                      list, values, PPLBuiltinOperators.SHA2, PPLBuiltinOperators.MVFIND, PPLBuiltinOperators.MVFIND_UPPER)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .sqlValidatorConfig(SqlValidator.Config.DEFAULT
