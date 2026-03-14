@@ -11,6 +11,7 @@
 - Cross-module function injection: legacy/ cannot depend on plugin/ — use Function<String,String> injected from SQLPlugin.java to bridge the gap
 - Calcite SQL Planner API: Frameworks.getPlanner(config) → parse(sql) → validate(sqlNode) → rel(validatedNode) → RelRoot.rel
 - SQL parser config: Use Lex.MYSQL for case-insensitive identifiers and backtick quoting (timestamp is a reserved keyword)
+- `match` is a reserved keyword in Calcite MySQL lex mode — cannot be registered as a parseable SQL function. Handle via SqlParseException catch with clear error message. Other search functions (match_phrase, etc.) are NOT reserved and parse fine through operator table registration.
 - Build exclusions for local dev: `-x integTest -x :integ-test:yamlRestTest -x :doctest:bootstrap -x :doctest:build`
 - Function validation pattern: UnsupportedFunctionValidator (RelVisitor + RexShuttle) checks SqlKind.OTHER_FUNCTION calls against EngineCapabilities. Validate BEFORE BoundaryScan replacement.
 - PPL V3 datetime UDTs (EXPR_TIMESTAMP) are VARCHAR-backed. Standard Calcite TIMESTAMP is DATETIME family. PPLTypeChecker bridges via convertRelDataTypeToSqlTypeName(). DatePartFunction works with both at planning level. SpanFunction has runtime-only issue (instanceof ExprSqlType check).
@@ -293,4 +294,20 @@
   - CalciteSchema.createRootSchema(false).plus() for root schema, then rootSchema.add("name", schema) for catalog registration
   - SQL path produces different RelNode structure than PPL (e.g., LogicalProject field names differ), but BoundaryScan absorption works identically
   - No changes needed to UnifiedQueryPlanner — Calcite's Planner API is used directly in ParquetQueryPlanner
+---
+
+## 2026-03-14T03:15 - US-015
+- Registered 7 search functions as SqlFunction(SqlKind.OTHER_FUNCTION, ReturnTypes.BOOLEAN_NULLABLE) in planSql() via ListSqlOperatorTable + SqlOperatorTables.chain()
+- Added SqlParseException catch in planSql() for reserved keyword functions (match) — converts to clear UnsupportedOperationException
+- Non-reserved search functions (match_phrase, etc.) parse successfully through operator table, then UnsupportedFunctionValidator catches them
+- Files modified:
+  - plugin/src/main/java/org/opensearch/sql/plugin/routing/ParquetQueryPlanner.java (SEARCH_FUNCTIONS set, createSearchFunctionTable(), operatorTable in config, SqlParseException handler)
+  - plugin/src/test/java/org/opensearch/sql/plugin/routing/ParquetQueryPlannerTest.java (added testSqlMatchOnParquetIndexThrows)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/ParquetQueryIT.java (added testSqlMatchOnParquetIndexFailsFast)
+- **Learnings for future iterations:**
+  - `match` is a reserved keyword in Calcite's MySQL lex mode — it cannot be registered as a function that the SQL parser will recognize. Must handle via SqlParseException catch.
+  - Other search functions (match_phrase, match_bool_prefix, etc.) are NOT reserved keywords and parse fine through operator table registration
+  - SqlFunction with null operandTypeChecker accepts any number of arguments — useful for registering functions that just need to parse
+  - ReturnTypes.BOOLEAN_NULLABLE is cleaner than a lambda for boolean return type inference
+  - Two-tier error handling: parse-time catch for reserved keywords, UnsupportedFunctionValidator for parseable-but-unsupported functions
 ---

@@ -242,8 +242,8 @@
         "Tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": "Phase 5. Reference ANSI SQL PoC for match_phrase registration pattern."
+      "passes": true,
+      "notes": "Registered 7 search functions (match, match_phrase, match_bool_prefix, match_phrase_prefix, multi_match, simple_query_string, query_string) as SqlFunction with SqlKind.OTHER_FUNCTION in planSql() operator table. match is a reserved keyword in MySQL lex mode so it fails at parse time — handled via SqlParseException catch that produces clear UnsupportedOperationException. Other functions parse successfully and are caught by UnsupportedFunctionValidator."
     },
     {
       "id": "US-016",
