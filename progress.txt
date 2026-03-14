@@ -201,3 +201,31 @@
   - BoundaryScan.absorb() returns NEW instance (immutable pattern required by Calcite optimizer)
   - Rules registered via BoundaryScan.register(RelOptPlanner) — same pattern as CalciteLogicalIndexScan
 ---
+
+## 2026-03-14T02:05 - US-011
+- Wired PPL V3 RelNode generation with mock Parquet Schema, replacing stub response in RestPPLQueryAction
+- Created ParquetQueryPlanner utility in plugin/ module:
+  - Creates AbstractSchema with ParquetTable (avoids nested root schema issue from MockParquetSchemaProvider)
+  - Builds UnifiedQueryContext with QueryType.PPL, catalog "parquet", defaultNamespace "parquet"
+  - Uses UnifiedQueryPlanner.plan() to parse PPL → AST → RelNode
+  - Replaces LogicalTableScan with BoundaryScan via RelShuttleImpl visitor
+  - Runs HepPlanner with all 4 absorption rules (Filter, Project, Sort, Aggregate)
+  - formatExplain() serializes plan as JSON with escaped plan string
+- RestPPLQueryAction: query requests now use ParquetQueryPlanner.plan() + formatExplain(); explain requests still use ParquetStubResponse
+- Added api and analytics-engine-stub dependencies to plugin/build.gradle
+- Files created:
+  - plugin/src/main/java/org/opensearch/sql/plugin/routing/ParquetQueryPlanner.java
+  - plugin/src/test/java/org/opensearch/sql/plugin/routing/ParquetQueryPlannerTest.java
+- Files modified:
+  - plugin/build.gradle (added api + analytics-engine-stub deps)
+  - plugin/src/main/java/org/opensearch/sql/plugin/rest/RestPPLQueryAction.java (replaced stub with real planner)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/ParquetQueryIT.java (updated PPL tests to check plan, added 3 absorption tests)
+- **Learnings for future iterations:**
+  - Don't pass MockParquetSchemaProvider.buildSchema() directly to UnifiedQueryContext.catalog() — it creates a nested root schema. Instead, create a simple AbstractSchema with getTableMap() returning the ParquetTable.
+  - UnifiedQueryContext.builder().catalog(name, schema).defaultNamespace(name) makes unqualified table names resolve under that catalog — `source = parquet_index` works with defaultNamespace("parquet")
+  - `stats count() by status` produces LogicalProject on top of LogicalAggregate (Calcite reorders columns) — the top-level node isn't always BoundaryScan after absorption
+  - `sort timestamp | head 100` produces LogicalSort with fetch — sort absorption handles this
+  - RelShuttleImpl.visit(TableScan) is the clean way to replace scans in an existing RelNode tree
+  - ParquetQueryPlanner is in plugin/ module (not common/) because it depends on api/ and analytics-engine-stub/
+  - UnifiedQueryContext implements AutoCloseable — use try/finally to close it
+---

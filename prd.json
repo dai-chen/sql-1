@@ -179,8 +179,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": "Phase 4. Wire UnifiedQueryPlanner with mock Schema from analytics-engine-stub/."
+      "passes": true,
+      "notes": "ParquetQueryPlanner in plugin/ module: creates AbstractSchema with ParquetTable, builds UnifiedQueryContext with PPL + defaultNamespace, uses UnifiedQueryPlanner.plan() for PPL→RelNode, replaces TableScan with BoundaryScan via RelShuttleImpl, runs HepPlanner with 4 absorption rules. RestPPLQueryAction returns explain JSON with plan string. 4 unit tests + 4 ITs (filter+project, aggregate, sort+limit, explain format)."
     },
     {
       "id": "US-012",
