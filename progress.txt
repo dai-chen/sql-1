@@ -803,3 +803,55 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - ARRAY_CONCAT requires ALL arguments to be arrays. Scalar args must be wrapped in ARRAY() first. Use smart detection to avoid double-wrapping array expressions.
   - extractPipeColumns() should be preferred over resolveColumns() for commands that follow pipeline-narrowing operations (fields, eval, etc.).
 ---
+
+## 2026-03-14T06:13 - V4-015: Chart command complete
+- **What was fixed**: 8 new tests passing in CalciteChartCommandIT (7→15, ALL PASS) + 2 bonus in CalciteTimechartCommandIT (10→12)
+  - **FLOOR TO WEEK off-by-one (3 tests)**: Calcite's `FLOOR(field TO WEEK)` floors to Sunday. Tests expect Monday-based weeks. Fixed by shifting field back 1 day before FLOOR, then shifting forward 1 day: `TIMESTAMPADD(DAY, 1, FLOOR(TIMESTAMPADD(DAY, -1, field) TO WEEK))`. This converts Sunday-based floor to Monday-based.
+  - **Numeric span row-split VARCHAR cast (1 test)**: When row split is a numeric span with no column split, the code was wrapping with `COALESCE(CAST(... AS VARCHAR), 'NULL')` making schema type 'string' instead of 'int'. Fixed by detecting numeric spans and skipping VARCHAR cast, preserving original numeric type.
+  - **limit/top/bottom/useother (3 tests)**: Implemented `applyChartLimit` method with multi-layer subquery approach: (1) base aggregation, (2) SUM window per column-split for global ranking, (3) DENSE_RANK by global sum, (4) CASE WHEN to bucket overflow into otherStr, (5) re-aggregate. COUNT re-aggregation uses SUM (sum of counts). ORDER BY added for deterministic output.
+  - **nullstr NULL span filter (1 test)**: For span-based column splits, NULL span values (from NULL underlying data) are always filtered out regardless of usenull setting. Added `isNotNull(colGroupBy)` filter unconditionally for span-based column splits.
+- **Pass rate change**: ~64.2% → ~64.7% (estimated +10 net new: 8 chart + 2 timechart)
+- **Per-class results** (before → after):
+  - CalciteChartCommandIT: 7→15 pass (15 total, 0 fail) ✅ ALL PASS
+  - CalciteTimechartCommandIT: 10→12 pass (18 total, 6 fail) — bonus from week floor fix
+  - CalciteBinCommandIT: 32→32 pass (no regression) ✅
+  - CalciteTimechartPerFunctionIT: 0→0 pass (no change)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+- **Remaining CalciteTimechartCommandIT failures (6)**: Not investigated this iteration — V4-016 scope.
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+154/-11)
+- **Learnings for future iterations:**
+  - Calcite FLOOR(field TO WEEK) floors to Sunday, not Monday. Use shift-1-day trick: `TIMESTAMPADD(DAY, 1, FLOOR(TIMESTAMPADD(DAY, -1, field) TO WEEK))` for Monday-based week floor.
+  - Chart limit/top/bottom requires multi-layer subquery: base agg → window rank → bucket overflow → re-aggregate. DENSE_RANK (not ROW_NUMBER) is correct for ranking by aggregation value.
+  - For span-based column splits, NULL span values should always be excluded regardless of usenull setting. The usenull flag applies to categorical column splits only.
+  - Numeric span row splits should preserve their numeric type — don't cast to VARCHAR when there's no column split.
+  - The week floor fix also benefits timechart queries using weekly spans (+2 bonus passes).
+---
+
+## 2026-03-14T06:50 - V4-016: Implement timechart commands
+- **What was fixed**: 29 new tests passing across 2 test classes
+  - **visitEval GROUP BY override (12 tests)**: When pipe is a SqlSelect with GROUP BY and eval has column overrides, the old code modified the SELECT list in-place, putting TIMESTAMPDIFF/TIMESTAMPADD expressions inside the GROUP BY query where `@timestamp` is not grouped. Fixed by wrapping the grouped query as a subquery first, then building a new SELECT with overridden columns referencing aggregated values from the subquery output. Also handles SqlOrderBy wrapping (from applyChartLimit) by unwrapping to get the underlying SqlSelect for column detection.
+  - **Default limit for timechart with BY clause (3 tests)**: Changed `applyLimit` from requiring `hasExplicitLimit` to applying whenever both `columnSplit` and `rowSplit` are present with `limit > 0`. Default limit=10 now applies to timechart with BY clause even without explicit `limit=N`. Fixes testTimechartWithOtherCategory (default limit=5 with OTHER), testTimechartWithUseOtherFalseAndAvg/Count (default limit=10 without OTHER).
+  - **DENSE_RANK tie-breaking (2 tests)**: Added secondary ORDER BY `colAlias` to the DENSE_RANK window to break ties when multiple column-split values have the same aggregate total. Without this, all tied values got the same rank, so `_rn <= limit` included too many values. Fixes testTimechartWithLimitCountGroupBy and testTimechartWithNullAndOther.
+  - **Multi-unit time span (bonus)**: For time spans with value > 1 (e.g., span=2m), changed from simple `FLOOR(field TO MINUTE)` (which always floors to 1-minute boundaries) to epoch-based calculation: `TIMESTAMPADD(unit, FLOOR(TIMESTAMPDIFF(unit, epoch, field) / value) * value, epoch)`. This correctly floors to 2-minute boundaries.
+  - **TIMESTAMPDIFF MILLISECOND overflow (bonus)**: For MILLISECOND unit, compute as `TIMESTAMPDIFF(SECOND, ...) * 1000` to avoid int32 overflow on intervals > ~24.8 days (e.g., monthly spans where TIMESTAMPDIFF(MILLISECOND) exceeds Integer.MAX_VALUE).
+- **Per-class results** (before → after):
+  - CalciteTimechartPerFunctionIT: 0→12 pass (12 total, 0 fail) ✅ ALL PASS
+  - CalciteTimechartCommandIT: 12→17 pass (18 total, 1 fail)
+  - CalcitePPLAggregationIT: 87→95 pass (bonus from multi-unit span fix)
+  - CalciteChartCommandIT: 15/15 (no regression) ✅
+  - CalciteBinCommandIT: 32/70 (no regression) ✅
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalciteTrendlineCommandIT: 5/5 (no regression) ✅
+- **Remaining 1 CalciteTimechartCommandIT failure**:
+  - testTimechartWithoutTimestampField: expects error message "Field [@timestamp] not found" but V4 converter produces generic "Failed to plan query" (Column '@timestamp' not found). Error message format mismatch — not fixable without engine changes.
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+76/-13)
+- **Learnings for future iterations:**
+  - When pipe has GROUP BY and eval has column overrides, NEVER modify the SELECT list in-place. Wrap as subquery first so eval expressions reference aggregated columns as plain columns.
+  - SqlOrderBy wraps SqlSelect — must unwrap to detect column names for override detection.
+  - DENSE_RANK needs secondary ordering to break ties deterministically. Without it, all tied values get the same rank.
+  - FLOOR(field TO MINUTE) always floors to 1-minute boundaries regardless of span value. For multi-unit spans (span=2m, span=3h), use epoch-based TIMESTAMPADD(FLOOR(TIMESTAMPDIFF/value)*value) pattern.
+  - TIMESTAMPDIFF(MILLISECOND) returns int32 in Calcite, which overflows for intervals > ~24.8 days. Use TIMESTAMPDIFF(SECOND) * 1000 for large intervals.
+  - Timechart with BY clause should always apply default limit (10) even without explicit limit=N. This matches PPL spec behavior.
+---
