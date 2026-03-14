@@ -33,6 +33,7 @@ import org.opensearch.sql.legacy.metrics.MetricName;
 import org.opensearch.sql.legacy.metrics.Metrics;
 import org.opensearch.sql.opensearch.response.error.ErrorMessageFactory;
 import org.opensearch.sql.plugin.request.PPLQueryRequestFactory;
+import org.opensearch.sql.plugin.routing.ParquetIndexRouting;
 import org.opensearch.sql.plugin.transport.PPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryRequest;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
@@ -85,6 +86,20 @@ public class RestPPLQueryAction extends BaseRestHandler {
   protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient nodeClient) {
     TransportPPLQueryRequest transportPPLQueryRequest =
         new TransportPPLQueryRequest(PPLQueryRequestFactory.getPPLRequest(request));
+
+    // Phase 1: Route Parquet index queries to placeholder error
+    String query = transportPPLQueryRequest.getRequest();
+    String indexName = ParquetIndexRouting.extractIndexName(query);
+    if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
+      return channel ->
+          sendResponse(
+              channel,
+              BAD_REQUEST,
+              "application/json",
+              "{\"error\":\"Parquet index queries are not yet supported. Index: "
+                  + indexName
+                  + "\"}");
+    }
 
     return channel ->
         nodeClient.execute(
