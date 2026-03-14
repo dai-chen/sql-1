@@ -15,6 +15,16 @@ import org.opensearch.analytics.plan.BoundaryScan;
 public class ParquetQueryPlannerTest {
 
   @Test
+  public void testMatchOnParquetIndexThrows() {
+    UnsupportedOperationException ex =
+        assertThrows(
+            UnsupportedOperationException.class,
+            () ->
+                ParquetQueryPlanner.plan("source = parquet_index | where match(message, 'error')"));
+    assertTrue(ex.getMessage().contains("not supported for Parquet"));
+  }
+
+  @Test
   public void testFilterAndProjectAbsorbed() throws Exception {
     RelNode result =
         ParquetQueryPlanner.plan(

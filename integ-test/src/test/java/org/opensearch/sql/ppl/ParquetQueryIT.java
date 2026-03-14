@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.ppl;
 
+import static org.opensearch.sql.legacy.TestUtils.getResponseBody;
 import static org.opensearch.sql.util.MatcherUtils.rows;
 import static org.opensearch.sql.util.MatcherUtils.schema;
 import static org.opensearch.sql.util.MatcherUtils.verifyDataRows;
@@ -16,6 +17,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 import org.opensearch.client.Request;
 import org.opensearch.client.RequestOptions;
+import org.opensearch.client.ResponseException;
 
 public class ParquetQueryIT extends PPLIntegTestCase {
 
@@ -90,6 +92,17 @@ public class ParquetQueryIT extends PPLIntegTestCase {
         executeExplainRequest("SELECT * FROM parquet_index", "/_plugins/_sql/_explain");
     assertTrue(response.has("Parquet"));
     assertTrue(response.getJSONObject("Parquet").has("description"));
+  }
+
+  @Test
+  public void testPplMatchOnParquetIndexFailsFast() throws IOException {
+    ResponseException ex =
+        assertThrows(
+            ResponseException.class,
+            () -> executeQuery("source = parquet_index | where match(message, 'error')"));
+    assertEquals(400, ex.getResponse().getStatusLine().getStatusCode());
+    String body = getResponseBody(ex.getResponse(), true);
+    assertTrue(body.contains("not supported"));
   }
 
   @Test

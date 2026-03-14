@@ -15,6 +15,7 @@ import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
 import org.opensearch.analytics.plan.BoundaryScan;
+import org.opensearch.analytics.plan.UnsupportedFunctionValidator;
 import org.opensearch.analytics.schema.ParquetTable;
 import org.opensearch.analytics.spi.ParquetEngineCapabilities;
 import org.opensearch.sql.api.UnifiedQueryContext;
@@ -44,6 +45,7 @@ public class ParquetQueryPlanner {
             .build();
     try {
       RelNode relNode = new UnifiedQueryPlanner(context).plan(pplQuery);
+      UnsupportedFunctionValidator.validate(relNode, new ParquetEngineCapabilities());
       return optimize(replaceScanWithBoundary(relNode));
     } finally {
       context.close();
