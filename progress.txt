@@ -10,6 +10,10 @@
 - Cross-module sharing: put shared utilities in common/ module (both legacy/ and plugin/ depend on it)
 - Build exclusions for local dev: `-x integTest -x :integ-test:yamlRestTest -x :doctest:bootstrap -x :doctest:build`
 - REST handler routing pattern: insert check in prepareRequest() BEFORE the existing `return channel ->` lambda. Return a different RestChannelConsumer for the new code path.
+- Formatter-dependent code goes in protocol/ module (NOT common/) — common/ cannot depend on core/ or protocol/ without circular deps
+- Parquet stub response: ParquetStubResponse in protocol/.../response/ — buildStubQueryResult(), formatAsSimpleJson(), formatAsJdbc(). Used by both PPL and SQL handlers.
+- PPL uses SimpleJsonResponseFormatter (no alias, no status), SQL uses JdbcResponseFormatter (alias + status=200)
+- sendResponse signatures: PPL handler (channel, status, contentType, content), SQL handler (channel, message, status)
 
 # Iteration Log
 
@@ -73,4 +77,24 @@
   - RestSqlAction routing goes AFTER SqlRequest parsing but BEFORE newSqlQueryHandler.prepareRequest() call
   - Cross-module sharing: move shared utilities to common/ module since both legacy/ and plugin/ depend on it
   - yamlRestTest in integ-test module must be excluded alongside integTest for local builds: `-x :integ-test:yamlRestTest`
+---
+
+## 2026-03-14T00:39 - US-005
+- Wired Parquet path with stub JDBC/SimpleJson formatted responses using existing formatter infrastructure
+- Created ParquetStubResponse utility class in protocol/ module with buildStubQueryResult(), formatAsSimpleJson(), formatAsJdbc()
+- PPL handler returns SimpleJson format (schema + datarows + total + size), SQL handler returns JDBC format (+ status=200)
+- Stub schema: 4 columns (timestamp/TIMESTAMP, status/LONG, message/STRING, active/BOOLEAN) with 2 sample rows
+- Files created:
+  - protocol/src/main/java/org/opensearch/sql/protocol/response/ParquetStubResponse.java
+  - protocol/src/test/java/org/opensearch/sql/protocol/response/ParquetStubResponseTest.java (5 tests)
+- Files modified:
+  - plugin/src/main/java/org/opensearch/sql/plugin/rest/RestPPLQueryAction.java (replaced BAD_REQUEST with SimpleJson stub)
+  - legacy/src/main/java/org/opensearch/sql/legacy/plugin/RestSqlAction.java (replaced BAD_REQUEST with JDBC stub)
+- **Learnings for future iterations:**
+  - Cannot put formatter-dependent code in common/ module — circular dependency (common ← core ← common, common ← protocol ← core). Use protocol/ module instead.
+  - PPL default format: SimpleJsonResponseFormatter (schema with name/type, no alias, no status field)
+  - SQL default format: JdbcResponseFormatter (schema with name/alias/type, includes status=200)
+  - sendResponse signatures differ: PPL handler takes (channel, status, contentType, content), SQL handler takes (channel, message, status)
+  - ExprTupleValue.fromExprValueMap(LinkedHashMap) for constructing row tuples
+  - QueryResult(schema, exprValues, Cursor.None) for non-paginated results
 ---

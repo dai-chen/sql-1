@@ -83,8 +83,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "Phase 2. Stub returns hardcoded schema + rows. This establishes the response formatting path."
+      "passes": true,
+      "notes": "ParquetStubResponse utility in protocol/ module (not common/ due to circular dependency). PPL uses SimpleJsonResponseFormatter, SQL uses JdbcResponseFormatter. 4-column schema (timestamp/status/message/active) with 2 sample rows."
     },
     {
       "id": "US-006",
