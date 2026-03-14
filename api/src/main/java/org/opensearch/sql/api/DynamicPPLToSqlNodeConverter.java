@@ -97,7 +97,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   private boolean isArrayField(String fieldName) {
-    if (tableName == null) return true;
+    if (tableName == null) return false;
     Table table = defaultSchema.getTable(tableName);
     if (table == null) {
       for (String name : defaultSchema.getTableNames()) {
@@ -112,10 +112,10 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         if (underlying != null) table = underlying.getTable(tableName);
       } catch (Exception ignored) {}
     }
-    if (table == null) return true;
+    if (table == null) return false;
     org.apache.calcite.rel.type.RelDataTypeField f =
         table.getRowType(typeFactory).getField(fieldName, true, false);
-    if (f == null) return true;
+    if (f == null) return false;
     org.apache.calcite.rel.type.RelDataType t = f.getType();
     return org.apache.calcite.sql.type.SqlTypeUtil.isArray(t)
         || org.apache.calcite.sql.type.SqlTypeUtil.isMultiset(t);

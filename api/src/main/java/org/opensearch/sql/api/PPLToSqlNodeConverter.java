@@ -344,7 +344,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   /** Wrap current pipe as a subquery with a generated alias. */
   protected SqlNode wrapAsSubquery() {
-    skipNextWrap = false;
+    // If skipNextWrap is set (after JOIN), return the raw join directly
+    // so that join aliases (a, b) remain visible to downstream pipes.
+    if (skipNextWrap) {
+      skipNextWrap = false;
+      return pipe;
+    }
+    // If pipe is a raw SqlJoin, wrap in SELECT * first so the subquery
+    // doesn't produce a bare join inside parentheses (which the parser rejects).
+    if (pipe instanceof SqlJoin) {
+      pipe = select(star()).from(pipe).build();
+    }
     return subquery(pipe, nextAlias());
   }
 
@@ -576,7 +586,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
       colList.add(col);
     }
-    pipe = select(colList.toArray(new SqlNode[0])).from(skipNextWrap ? consumeSkipWrap() : wrapAsSubquery()).build();
+    pipe = select(colList.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
     return pipe;
   }
 
