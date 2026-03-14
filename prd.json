@@ -18,7 +18,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -34,8 +34,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Source: https://github.com/mch2/OpenSearch/tree/planning-poc/sandbox/libs/analytics-framework/src/main/java/org/opensearch/analytics"
+      "passes": true,
+      "notes": "Copied 5 SPI interfaces from PoC: EngineContext, SchemaProvider, QueryPlanExecutor, AnalyticsBackEndPlugin, EngineBridge. Original repo had no EngineCapabilities.java — EngineContext and AnalyticsBackEndPlugin serve that role. Also fixed spotless licenseHeader escape bug in build.gradle."
     },
     {
       "id": "US-003",
@@ -50,8 +50,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Phase 1. Use hardcoded flag if no real Parquet index setting available. Reference RestUnifiedSQLQueryAction from ANSI SQL PoC for wiring pattern."
+      "passes": true,
+      "notes": "Implemented ParquetIndexRouting utility class with extractIndexName() (regex-based) and isParquetIndex() (hardcoded set). RestPPLQueryAction routes Parquet queries to placeholder BAD_REQUEST error. Reusable by US-004."
     },
     {
       "id": "US-004",
@@ -66,8 +66,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Phase 1. Same routing logic as US-003 but for SQL endpoint."
+      "passes": true,
+      "notes": "Moved ParquetIndexRouting from plugin/ to common/ module for cross-module sharing. Added extractIndexNameFromSql() for SQL FROM clause parsing. RestSqlAction routes Parquet queries to placeholder BAD_REQUEST error."
     },
     {
       "id": "US-005",

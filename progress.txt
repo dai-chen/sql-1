@@ -1,6 +1,76 @@
 # Codebase Patterns
-(Patterns discovered during implementation will be consolidated here)
+- Submodule build.gradle pattern: plugins (java-library, io.freefair.lombok, jacoco, com.diffplug.spotless), spotless with googleJavaFormat 1.32.0 and OpenSearch license header
+- Calcite version: 1.41.0, always exclude json-smart from calcite-core
+- doctest:bootstrap fails in this env — use `-x :doctest:bootstrap -x :doctest:build` for full builds
+- Do NOT add stub/test modules to publishedModules in root build.gradle
+- Java 21 source/target set globally in allprojects — no need to redeclare in submodules
+- Analytics SPI package structure: org.opensearch.analytics (EngineContext), .backend (EngineBridge), .exec (QueryPlanExecutor), .schema (SchemaProvider), .spi (AnalyticsBackEndPlugin)
+- SPI interfaces use Object params to avoid server dependency — keep this pattern for stub code
+- Parquet routing utility: ParquetIndexRouting in common/.../routing/ — extractIndexName(query) for PPL, extractIndexNameFromSql(query) for SQL, isParquetIndex(name). Shared across legacy/ and plugin/ modules.
+- Cross-module sharing: put shared utilities in common/ module (both legacy/ and plugin/ depend on it)
+- Build exclusions for local dev: `-x integTest -x :integ-test:yamlRestTest -x :doctest:bootstrap -x :doctest:build`
+- REST handler routing pattern: insert check in prepareRequest() BEFORE the existing `return channel ->` lambda. Return a different RestChannelConsumer for the new code path.
 
 # Iteration Log
 
 <!-- Round summaries and human intervention notes will be appended here automatically -->
+
+## 2026-03-13T23:36 - US-001
+- Created analytics-engine-stub/ Gradle submodule
+- Files changed: settings.gradle, analytics-engine-stub/build.gradle, analytics-engine-stub/src/main/java/org/opensearch/analytics/package-info.java
+- **Learnings for future iterations:**
+  - Submodule pattern: plugins (java-library, lombok, jacoco, spotless), spotless with googleJavaFormat 1.32.0, OpenSearch license header
+  - Calcite 1.41.0 with json-smart exclusion on calcite-core
+  - doctest:bootstrap fails in this environment — exclude with `-x :doctest:bootstrap -x :doctest:build` when running full build
+  - Do NOT add stub modules to publishedModules list in root build.gradle
+---
+
+## 2026-03-13T23:49 - US-002
+- Copied 5 SPI interfaces from analytics engine PoC into analytics-engine-stub/
+- Files created:
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/EngineContext.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/schema/SchemaProvider.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/exec/QueryPlanExecutor.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/spi/AnalyticsBackEndPlugin.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/backend/EngineBridge.java
+- Files modified:
+  - analytics-engine-stub/build.gradle (fixed spotless licenseHeader escape sequences)
+- **Learnings for future iterations:**
+  - The PRD referenced EngineCapabilities.java but it doesn't exist in the PoC — the actual interfaces are EngineContext (top-level) and AnalyticsBackEndPlugin (spi/)
+  - The PoC uses subpackages: backend/, exec/, schema/, spi/ under org.opensearch.analytics
+  - QueryPlanExecutor uses Object params (not typed LogicalPlan) to avoid server dependency in the library
+  - The original build.gradle had a spotless licenseHeader bug: `\\n` (literal backslash-n) instead of `\n` (newline) — fixed
+  - All interfaces use standard Calcite types (SchemaPlus, SqlOperatorTable) — no OpenSearch-specific types
+---
+
+## 2026-03-13T23:59 - US-003
+- Added Parquet index query routing in PPL REST handler (Phase 1)
+- Files created:
+  - plugin/src/main/java/org/opensearch/sql/plugin/routing/ParquetIndexRouting.java (utility class with extractIndexName + isParquetIndex)
+  - plugin/src/test/java/org/opensearch/sql/plugin/routing/ParquetIndexRoutingTest.java (9 unit tests)
+- Files modified:
+  - plugin/src/main/java/org/opensearch/sql/plugin/rest/RestPPLQueryAction.java (routing check in prepareRequest before existing pipeline)
+- **Learnings for future iterations:**
+  - PPL query index extraction: regex `source\s*=\s*(\w+)` works for simple cases, case-insensitive
+  - TransportPPLQueryRequest.getRequest() returns the raw PPL query string
+  - Routing check goes in RestPPLQueryAction.prepareRequest() BEFORE the `return channel ->` lambda
+  - ParquetIndexRouting utility is in plugin/src/main/java/org/opensearch/sql/plugin/routing/ — reuse for US-004 SQL handler
+  - Placeholder response pattern: return a different RestChannelConsumer that sends BAD_REQUEST with JSON error body
+---
+
+## 2026-03-14T00:31 - US-004
+- Added Parquet index query routing in SQL REST handler (Phase 1)
+- Moved ParquetIndexRouting from plugin/.../routing/ to common/.../routing/ for cross-module sharing (legacy/ and plugin/ both depend on common/)
+- Added extractIndexNameFromSql() method using FROM clause regex pattern
+- Files moved:
+  - plugin/.../routing/ParquetIndexRouting.java → common/.../routing/ParquetIndexRouting.java
+  - plugin/.../routing/ParquetIndexRoutingTest.java → common/.../routing/ParquetIndexRoutingTest.java
+- Files modified:
+  - legacy/src/main/java/org/opensearch/sql/legacy/plugin/RestSqlAction.java (added Parquet routing check before new engine handoff)
+  - plugin/src/main/java/org/opensearch/sql/plugin/rest/RestPPLQueryAction.java (updated import to common package)
+- **Learnings for future iterations:**
+  - SQL query index extraction: regex `FROM\s+(\w+)` (case-insensitive) works for simple SELECT queries
+  - RestSqlAction routing goes AFTER SqlRequest parsing but BEFORE newSqlQueryHandler.prepareRequest() call
+  - Cross-module sharing: move shared utilities to common/ module since both legacy/ and plugin/ depend on it
+  - yamlRestTest in integ-test module must be excluded alongside integTest for local builds: `-x :integ-test:yamlRestTest`
+---
