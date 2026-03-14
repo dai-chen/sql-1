@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,10 +23,17 @@ import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.JoinType;
 import org.apache.calcite.sql.SqlBasicCall;
+import org.apache.calcite.sql.SqlBasicTypeNameSpec;
+import org.apache.calcite.sql.SqlDataTypeSpec;
+import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
+import org.apache.calcite.sql.SqlOrderBy;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.QualifiedName;
@@ -34,6 +42,7 @@ import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
 import org.opensearch.sql.ast.tree.Lookup;
+import org.opensearch.sql.ast.tree.Multisearch;
 import org.opensearch.sql.ast.tree.MvCombine;
 import org.opensearch.sql.ast.tree.MvExpand;
 import org.opensearch.sql.ast.tree.Project;
@@ -755,5 +764,156 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     newSelectItems.addAll(newColExprs);
     sel.setSelectList(new SqlNodeList(newSelectItems, SqlParserPos.ZERO));
     return pipe;
+  }
+
+  @Override
+  public SqlNode visitMultisearch(Multisearch node, Void ctx) {
+    List<UnresolvedPlan> subsearches = node.getSubsearches();
+    if (subsearches.isEmpty()) return pipe;
+
+    // Convert each subsearch and extract column names
+    List<SqlNode> converted = new ArrayList<>();
+    List<List<String>> allColLists = new ArrayList<>();
+    for (UnresolvedPlan sub : subsearches) {
+      SqlNode result = convertSubPlan(sub);
+      converted.add(result);
+      List<String> cols = extractSelectColumnNames(result);
+      allColLists.add(cols);
+    }
+
+    // If any subsearch has unresolvable columns (e.g. SELECT *), fall back to parent
+    for (List<String> cols : allColLists) {
+      if (cols.isEmpty()) {
+        return super.visitMultisearch(node, ctx);
+      }
+    }
+
+    // Compute unified column set preserving order: first subsearch columns first
+    LinkedHashSet<String> unifiedCols = new LinkedHashSet<>();
+    for (List<String> cols : allColLists) {
+      unifiedCols.addAll(cols);
+    }
+
+    SqlDataTypeSpec varcharType =
+        new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, SqlParserPos.ZERO), SqlParserPos.ZERO);
+
+    // Identify columns shared across multiple subsearches (candidates for CHAR padding)
+    Map<String, Integer> colCount = new LinkedHashMap<>();
+    for (String col : unifiedCols) colCount.put(col, 0);
+    for (List<String> cols : allColLists) {
+      for (String col : cols) colCount.merge(col, 1, Integer::sum);
+    }
+
+    // Collect all known table columns from subsearch source tables
+    Set<String> allTableCols = new HashSet<>();
+    for (UnresolvedPlan sub : subsearches) {
+      String tbl = extractTableName(sub);
+      if (tbl != null) allTableCols.addAll(resolveColumns(tbl));
+    }
+
+    // Shared computed columns (not in any table schema) need VARCHAR cast to prevent CHAR padding
+    Set<String> castToVarchar = new HashSet<>();
+    for (Map.Entry<String, Integer> e : colCount.entrySet()) {
+      if (e.getValue() > 1 && !allTableCols.contains(e.getKey())) {
+        castToVarchar.add(e.getKey());
+      }
+    }
+
+    // Re-project each subsearch to the unified schema
+    List<SqlNode> aligned = new ArrayList<>();
+    for (int i = 0; i < converted.size(); i++) {
+      Set<String> subCols = new LinkedHashSet<>(allColLists.get(i));
+      String subAlias = "_t" + aliasCounter.incrementAndGet();
+      SqlNode subquery = subquery(converted.get(i), subAlias);
+      List<SqlNode> selectItems = new ArrayList<>();
+      for (String col : unifiedCols) {
+        if (subCols.contains(col)) {
+          if (castToVarchar.contains(col)) {
+            // Cast computed string columns to VARCHAR to prevent CHAR padding
+            selectItems.add(as(
+                SqlStdOperatorTable.CAST.createCall(SqlParserPos.ZERO, identifier(col), varcharType),
+                col));
+          } else {
+            selectItems.add(as(identifier(col), col));
+          }
+        } else {
+          // Null-fill missing columns with untyped NULL
+          selectItems.add(as(SqlLiteral.createNull(SqlParserPos.ZERO), col));
+        }
+      }
+      aligned.add(select(selectItems.toArray(new SqlNode[0])).from(subquery).build());
+    }
+
+    // UNION ALL the aligned projections
+    SqlNode result = aligned.get(0);
+    for (int i = 1; i < aligned.size(); i++) {
+      result = unionAll(result, aligned.get(i));
+    }
+    pipe = select(star()).from(subquery(result, "_t" + aliasCounter.incrementAndGet())).build();
+    return pipe;
+  }
+
+  /** Extract column names from a SqlSelect or SqlOrderBy result. */
+  private List<String> extractSelectColumnNames(SqlNode node) {
+    if (node instanceof SqlSelect) {
+      SqlSelect sel = (SqlSelect) node;
+      List<String> cols = new ArrayList<>();
+      boolean hasStar = false;
+      for (SqlNode item : sel.getSelectList()) {
+        if (item instanceof SqlIdentifier && ((SqlIdentifier) item).isStar()) {
+          hasStar = true;
+          continue;
+        }
+        String name = extractColumnName(item);
+        if (name == null) return Collections.emptyList();
+        cols.add(name);
+      }
+      if (hasStar) {
+        // Try to resolve * from the FROM clause's source table
+        List<String> starCols = resolveStarColumns(sel);
+        if (starCols.isEmpty()) return Collections.emptyList();
+        // Merge: star columns first, then explicit non-star columns (excluding duplicates)
+        LinkedHashSet<String> merged = new LinkedHashSet<>(starCols);
+        merged.addAll(cols);
+        return new ArrayList<>(merged);
+      }
+      return cols;
+    }
+    if (node instanceof SqlOrderBy) {
+      return extractSelectColumnNames(((SqlOrderBy) node).query);
+    }
+    return Collections.emptyList();
+  }
+
+  /** Resolve columns for a SELECT * by tracing the FROM clause to find the source table. */
+  private List<String> resolveStarColumns(SqlSelect sel) {
+    SqlNode from = sel.getFrom();
+    if (from == null) return Collections.emptyList();
+    // Unwrap AS alias: (subquery) AS alias
+    if (from instanceof SqlBasicCall
+        && "AS".equals(((SqlBasicCall) from).getOperator().getName())) {
+      from = ((SqlBasicCall) from).operand(0);
+    }
+    // If FROM is a subquery (SqlSelect), recurse
+    if (from instanceof SqlSelect) {
+      return extractSelectColumnNames(from);
+    }
+    // If FROM is a table identifier
+    if (from instanceof SqlIdentifier) {
+      return resolveColumns(((SqlIdentifier) from).getSimple());
+    }
+    return Collections.emptyList();
+  }
+
+  /** Extract the source table name from a subsearch plan by finding the Relation node. */
+  private static String extractTableName(UnresolvedPlan plan) {
+    if (plan instanceof Relation) return ((Relation) plan).getTableQualifiedName().toString();
+    for (Object child : plan.getChild()) {
+      if (child instanceof UnresolvedPlan) {
+        String name = extractTableName((UnresolvedPlan) child);
+        if (name != null) return name;
+      }
+    }
+    return null;
   }
 }
