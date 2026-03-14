@@ -302,7 +302,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   }
 
   /** Apply deferred ORDER BY and LIMIT to the given SqlNode. */
-  private SqlNode applyPendingOrderBy(SqlNode node) {
+  protected SqlNode applyPendingOrderBy(SqlNode node) {
     SqlNodeList orderList = pendingOrderBy != null
         ? new SqlNodeList(pendingOrderBy, SqlParserPos.ZERO) : null;
     SqlNode result;

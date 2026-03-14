@@ -36,9 +36,12 @@ import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Let;
+import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
+import org.opensearch.sql.ast.tree.AddColTotals;
+import org.opensearch.sql.ast.tree.AddTotals;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
 import org.opensearch.sql.ast.tree.Lookup;
@@ -309,8 +312,13 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
   /** Extract column names from the current pipe's SELECT list. Returns empty if pipe is not a SELECT or uses *. */
   private List<String> extractPipeColumns() {
-    if (!(pipe instanceof org.apache.calcite.sql.SqlSelect)) return Collections.emptyList();
-    org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+    SqlNode target = pipe;
+    // Unwrap SqlOrderBy to get underlying SqlSelect
+    if (target instanceof org.apache.calcite.sql.SqlOrderBy) {
+      target = ((org.apache.calcite.sql.SqlOrderBy) target).query;
+    }
+    if (!(target instanceof org.apache.calcite.sql.SqlSelect)) return Collections.emptyList();
+    org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) target;
     SqlNodeList selectList = sel.getSelectList();
     if (selectList == null) return Collections.emptyList();
     List<String> cols = new ArrayList<>();
@@ -915,5 +923,207 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       }
     }
     return null;
+  }
+
+  private Table resolveTable(String tableName) {
+    if (tableName == null) return null;
+    Table table = defaultSchema.getTable(tableName);
+    if (table == null) {
+      for (String name : defaultSchema.getTableNames()) {
+        if (name.equalsIgnoreCase(tableName)) { table = defaultSchema.getTable(name); break; }
+      }
+    }
+    if (table == null) {
+      try {
+        org.apache.calcite.jdbc.CalciteSchema cs =
+            org.apache.calcite.jdbc.CalciteSchema.from(defaultSchema);
+        Schema underlying = cs.schema;
+        if (underlying != null) table = underlying.getTable(tableName);
+      } catch (Exception ignored) {}
+    }
+    return table;
+  }
+
+  private List<String> resolveNumericColumns(String tableName) {
+    Table table = resolveTable(tableName);
+    if (table == null) return Collections.emptyList();
+    return table.getRowType(typeFactory).getFieldList().stream()
+        .filter(f -> org.apache.calcite.sql.type.SqlTypeUtil.isNumeric(f.getType()))
+        .map(f -> f.getName())
+        .filter(n -> !n.startsWith("_"))
+        .collect(Collectors.toList());
+  }
+
+  private static String getOptionValue(Map<String, Literal> options, String key, String defaultValue) {
+    Literal literal = options.get(key);
+    if (literal == null) return defaultValue;
+    Object value = literal.getValue();
+    if (value == null) return defaultValue;
+    String s = value.toString();
+    if (s.length() >= 2 && s.startsWith("'") && s.endsWith("'")) s = s.substring(1, s.length() - 1);
+    return s;
+  }
+
+  private static boolean getBooleanOptionValue(Map<String, Literal> options, String key, boolean defaultValue) {
+    if (!options.containsKey(key)) return defaultValue;
+    Object value = options.get(key).getValue();
+    if (value instanceof Boolean) return (Boolean) value;
+    return Boolean.parseBoolean(value.toString());
+  }
+
+  @Override
+  public SqlNode visitAddTotals(AddTotals node, Void ctx) {
+    // Children already visited by convert()'s flatten loop — no need to re-visit
+
+    // Apply pending FETCH/ORDER BY before building UNION ALL
+    if (pendingFetch != null || pendingOrderBy != null) {
+      pipe = applyPendingOrderBy(pipe);
+    }
+
+    Map<String, Literal> options = node.getOptions();
+    String label = getOptionValue(options, "label", "Total");
+    String labelField = getOptionValue(options, "labelfield", null);
+    String fieldname = getOptionValue(options, "fieldname", "Total");
+    boolean row = getBooleanOptionValue(options, "row", true);
+    boolean col = getBooleanOptionValue(options, "col", false);
+
+    List<Field> fieldsToAggregate = node.getFieldList();
+    List<String> allCols = extractPipeColumns();
+    if (allCols.isEmpty()) allCols = resolveColumns(tableName);
+    Set<String> numericCols = resolveEffectiveNumericCols(allCols);
+
+    // Determine which fields to sum
+    List<String> fieldNames;
+    if (fieldsToAggregate.isEmpty()) {
+      fieldNames = allCols.stream().filter(numericCols::contains).collect(Collectors.toList());
+    } else {
+      fieldNames = fieldsToAggregate.stream()
+          .map(f -> f.getField().toString())
+          .filter(numericCols::contains)
+          .collect(Collectors.toList());
+    }
+
+    if (row && !fieldNames.isEmpty()) {
+      // Build row totals: SELECT *, (COALESCE(f1,0) + COALESCE(f2,0) + ...) AS fieldname
+      SqlNode sumExpr = buildCoalescedSum(fieldNames);
+      pipe = select(SqlIdentifier.star(SqlParserPos.ZERO), as(sumExpr, fieldname))
+          .from(wrapAsSubquery()).build();
+    }
+
+    if (col) {
+      buildColTotals(allCols, fieldNames, numericCols, labelField, label, row ? fieldname : null);
+    }
+
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitAddColTotals(AddColTotals node, Void ctx) {
+    // Children already visited by convert()'s flatten loop — no need to re-visit
+
+    // Apply pending FETCH/ORDER BY before building UNION ALL
+    if (pendingFetch != null || pendingOrderBy != null) {
+      pipe = applyPendingOrderBy(pipe);
+    }
+
+    Map<String, Literal> options = node.getOptions();
+    String label = getOptionValue(options, "label", "Total");
+    String labelField = getOptionValue(options, "labelfield", null);
+
+    List<Field> fieldsToAggregate = node.getFieldList();
+    List<String> allCols = extractPipeColumns();
+    if (allCols.isEmpty()) allCols = resolveColumns(tableName);
+    Set<String> numericCols = resolveEffectiveNumericCols(allCols);
+
+    List<String> fieldNames;
+    if (fieldsToAggregate.isEmpty()) {
+      fieldNames = allCols.stream().filter(numericCols::contains).collect(Collectors.toList());
+    } else {
+      fieldNames = fieldsToAggregate.stream()
+          .map(f -> f.getField().toString())
+          .filter(numericCols::contains)
+          .collect(Collectors.toList());
+    }
+
+    buildColTotals(allCols, fieldNames, numericCols, labelField, label, null);
+    return pipe;
+  }
+
+  private SqlNode buildCoalescedSum(List<String> fieldNames) {
+    SqlNode result = null;
+    for (String f : fieldNames) {
+      SqlNode coalesced = new SqlBasicCall(SqlStdOperatorTable.COALESCE,
+          new SqlNode[]{identifier(f), intLiteral(0)}, SqlParserPos.ZERO);
+      result = result == null ? coalesced
+          : new SqlBasicCall(SqlStdOperatorTable.PLUS, new SqlNode[]{result, coalesced}, SqlParserPos.ZERO);
+    }
+    return result;
+  }
+
+  /**
+   * Resolve effective numeric columns: uses schema for table columns,
+   * and assumes pipe-only columns (from stats/eval) are numeric if they appear
+   * in the fields-to-aggregate list.
+   */
+  private Set<String> resolveEffectiveNumericCols(List<String> allCols) {
+    Set<String> schemaCols = new LinkedHashSet<>(resolveNumericColumns(tableName));
+    // Columns in the pipe but not in the schema (e.g., from stats/eval) — treat as numeric
+    Set<String> schemaColNames = new HashSet<>(resolveColumns(tableName));
+    for (String col : allCols) {
+      if (!schemaColNames.contains(col)) {
+        schemaCols.add(col);
+      }
+    }
+    return schemaCols;
+  }
+
+  private void buildColTotals(List<String> allCols, List<String> fieldNames,
+      Set<String> numericCols, String labelField, String label, String rowFieldname) {
+    // Determine if labelField exists in current columns
+    boolean labelFieldExists = labelField != null && allCols.contains(labelField);
+    boolean labelFieldIsNew = labelField != null && !labelFieldExists;
+    if (labelField != null && labelField.equals(rowFieldname)) {
+      labelFieldExists = true;
+      labelFieldIsNew = false;
+    }
+
+    // Wrap pipe as subquery once — used for both original data and aggregation
+    SqlNode wrappedPipe = wrapAsSubquery();
+
+    // Build the totals row first (references the wrapped pipe)
+    SqlNode dataForAgg = subquery(pipe, "_t" + aliasCounter.incrementAndGet());
+
+    // Determine the full column list
+    List<String> fullCols = new ArrayList<>(allCols);
+    if (rowFieldname != null && !allCols.contains(rowFieldname)) fullCols.add(rowFieldname);
+    if (labelFieldIsNew) fullCols.add(labelField);
+
+    Set<String> fieldsToSum = new LinkedHashSet<>(fieldNames);
+    List<SqlNode> totalsItems = new ArrayList<>();
+    for (String col : fullCols) {
+      if (fieldsToSum.contains(col)) {
+        totalsItems.add(as(new SqlBasicCall(SqlStdOperatorTable.SUM,
+            new SqlNode[]{identifier(col)}, SqlParserPos.ZERO), col));
+      } else if (col.equals(labelField)) {
+        totalsItems.add(as(SqlLiteral.createCharString(label, SqlParserPos.ZERO), col));
+      } else {
+        totalsItems.add(as(SqlLiteral.createNull(SqlParserPos.ZERO), col));
+      }
+    }
+    SqlNode totalsRow = select(totalsItems.toArray(new SqlNode[0])).from(dataForAgg).build();
+
+    // Build original data side — add NULL labelField column if new
+    SqlNode originalData;
+    if (labelFieldIsNew) {
+      List<SqlNode> origItems = new ArrayList<>();
+      origItems.add(SqlIdentifier.star(SqlParserPos.ZERO));
+      origItems.add(as(SqlLiteral.createNull(SqlParserPos.ZERO), labelField));
+      originalData = select(origItems.toArray(new SqlNode[0]))
+          .from(subquery(pipe, "_t" + aliasCounter.incrementAndGet())).build();
+    } else {
+      originalData = pipe;
+    }
+
+    pipe = unionAll(originalData, totalsRow);
   }
 }
