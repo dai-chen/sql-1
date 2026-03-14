@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 60.1% (1360/2264, 144 skipped)
+- Current rate: 69.3% (1570/2264, 144 skipped)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -126,6 +126,12 @@
 - Metadata fields excluded from schema — SELECT * returns only user data columns
 - SELECT * EXCEPT/REPLACE supported at SqlNode layer
 - Custom PPL UDFs: pplFirst, pplLast, matchPhrase, percentile_approx, take, listAgg, valuesAgg
+
+### toSqlString() Backslash Escaping (CRITICAL)
+- CalciteSqlDialect.DEFAULT.toSqlString() doubles ALL backslashes in string literals
+- The SQL endpoint's parser (SqlParserUtil.parseString) does NOT un-escape doubled backslashes
+- Fix: transpileV4() applies sql.replace("\\\\", "\\") after toSqlString() to un-double
+- This affects ALL string literals: regex patterns, escape sequences, file paths, etc.
 
 ## Iteration Log
 
@@ -854,4 +860,58 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - FLOOR(field TO MINUTE) always floors to 1-minute boundaries regardless of span value. For multi-unit spans (span=2m, span=3h), use epoch-based TIMESTAMPADD(FLOOR(TIMESTAMPDIFF/value)*value) pattern.
   - TIMESTAMPDIFF(MILLISECOND) returns int32 in Calcite, which overflows for intervals > ~24.8 days. Use TIMESTAMPDIFF(SECOND) * 1000 for large intervals.
   - Timechart with BY clause should always apply default limit (10) even without explicit limit=N. This matches PPL spec behavior.
+---
+
+## 2026-03-14T08:28 - V4-018: Fix rex command backslash escaping
+- **What was fixed**: 3 new CalciteRexCommandIT tests + 104 tests globally from backslash fix
+  - **Backslash double-escaping in toSqlString()**: `CalciteSqlDialect.DEFAULT.toSqlString()` doubles all backslashes in string literals (standard SQL escaping). But the SQL endpoint's parser (`SqlParserUtil.parseString`) only handles single-quote escaping (`''` → `'`) — it does NOT un-escape doubled backslashes. This caused regex patterns like `\d` (digit shorthand) to become `\\d` (literal backslash + d) in the SQL sent to the engine, breaking all regex matching with backslash sequences.
+  - **Fix**: Added `sql = sql.replace("\\\\", "\\")` after `toSqlString()` in `PPLIntegTestCase.transpileV4()`. This un-doubles backslashes to match what the string transpiler produces (which embeds patterns directly without Calcite literal serialization).
+  - **Global impact**: The fix affects ALL string literals in ALL SQL queries, not just regex patterns. Any string literal containing backslashes (regex patterns in rex/parse/replace, escape sequences, file paths) was being double-escaped. This explains the +104 test improvement beyond just the 3 rex tests.
+  - **Removed stale debug file**: Deleted untracked `BackslashDebugTest.java` that always called `fail()`.
+- **Pass rate change**: 64.2% (1454/2264) → 68.8% (1558/2264) = +4.6pp, +104 tests
+- **Per-class results** (sampled):
+  - CalciteRexCommandIT: 10→13 pass (18 total, 5 fail) — 3 backslash tests fixed
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteParseCommandIT: 7/7 (no regression) ✅
+  - CalciteReplaceCommandIT: 16/21 (no regression, same 5 pre-existing failures) ✅
+  - +101 tests across other classes from global backslash fix
+- **Remaining 5 CalciteRexCommandIT failures**:
+  - testRexMultipleMatches: max_match=3 not implemented (needs array of all matches)
+  - testRexMaxMatchAtDefaultLimit: max_match=10 array output
+  - testRexMaxMatchZeroLimitedToDefaultTen: max_match=0 (unlimited) array output
+  - testRexMaxMatchWithinDefaultLimit: max_match=5 array output
+  - testRexMaxMatchConfigurableLimit: max_match=0 with custom cluster setting limit=5
+  - All 5 require producing an array of repeated regex matches — no simple SQL equivalent (would need recursive CTE or UDF)
+- **Files changed**:
+  - integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (+6/-1: backslash un-doubling in transpileV4)
+- **Learnings for future iterations:**
+  - Calcite's `toSqlString(CalciteSqlDialect.DEFAULT)` doubles ALL backslashes in string literals. This is standard SQL escaping behavior — in standard SQL, `\\` represents a literal backslash.
+  - However, the SQL endpoint's Calcite parser (`SqlParserUtil.parseString`) only handles single-quote escaping (`''` → `'`). It does NOT un-escape doubled backslashes. So `\\d` in the SQL string literal is passed literally as `\\d` to the regex engine, not as `\d`.
+  - The string transpiler (PPLToSqlTranspiler) works because it embeds patterns directly in SQL strings without going through Calcite's SqlLiteral serialization. It only escapes single quotes.
+  - This asymmetry between serialization (doubles backslashes) and parsing (doesn't un-double) is a Calcite design issue. The fix must be at the serialization consumer (transpileV4) rather than in the converter.
+  - The fix is safe because: (1) the SQL parser doesn't use backslash escaping, so doubled backslashes are always wrong, and (2) any intentional doubled backslashes in the original pattern would have been quadrupled by toSqlString(), so un-doubling restores them correctly.
+---
+
+## 2026-03-14T10:08 - V4-012 (Iteration 19): Fix join alias visibility for downstream pipes
+- **What was fixed**: 12 new tests passing from wrapAsSubquery() skipNextWrap fix
+  - **wrapAsSubquery() respects skipNextWrap**: Previously, only visitProject checked the `skipNextWrap` flag (set by visitJoin). All other visitors (visitAggregation, visitFilter, visitSort, visitEval, visitDedup, etc.) always called `wrapAsSubquery()` which wrapped the raw SqlJoin in a subquery, losing join alias visibility. Now `wrapAsSubquery()` itself checks `skipNextWrap` first — when true, returns the raw join directly so aliases (a, b) remain visible to downstream pipes.
+  - **Simplified visitProject**: Removed the explicit `skipNextWrap ? consumeSkipWrap() : wrapAsSubquery()` check in visitProject since `wrapAsSubquery()` now handles it internally.
+  - **isArrayField default**: Changed `isArrayField()` in DynamicPPLToSqlNodeConverter to return `false` (not `true`) when table/field is not found. This prevents UNNEST on non-array fields when schema lookup fails.
+- **Pass rate change**: 68.8% (1558/2264) → 69.3% (1570/2264) = +0.5pp, +12 tests
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 9→12 pass (39 total, 27 fail) — +3 (testComplexInnerJoin, testJoinThenStatsWithGroupBy, testComplexLeftJoin now pass)
+  - +9 spillover across other classes from join alias visibility fix
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+- **Remaining CalcitePPLJoinIT failures (27)**:
+  - 15 tests: 500 errors — alias override issues (testCheckAccessTheReferenceBy*), multiple joins (testMultipleJoins*), subquery joins (testInnerJoinWithRelationSubquery), cross/non-equi joins, self-join disambiguation
+  - 12 tests: column count mismatches — field-list joins return all columns from both sides instead of pruning (testJoinWithFieldList*, testJoinWithoutFieldList*, testJoinComparing, testJoinSubsearchMaxOut)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+10/-4: wrapAsSubquery skipNextWrap, visitProject simplification)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+3/-3: isArrayField default false)
+- **Learnings for future iterations:**
+  - The `skipNextWrap` flag must be checked by ALL code paths that wrap the pipe, not just visitProject. Moving the check into `wrapAsSubquery()` itself is the correct approach — it ensures all downstream visitors automatically preserve join aliases.
+  - When `skipNextWrap` is true and pipe is a raw SqlJoin, returning it directly from `wrapAsSubquery()` works because SqlJoin is a valid FROM clause item in Calcite's SqlSelect.
+  - The remaining join failures fall into two categories: (1) complex alias resolution (when both `left=t1` and `as tt` are specified, which takes precedence?), and (2) field-list column pruning (SELECT * from a join returns all columns from both sides, but tests expect only the field-list columns).
+  - `isArrayField()` should return `false` when schema lookup fails — assuming a field is an array when we can't verify leads to UNNEST errors on non-array fields.
 ---
