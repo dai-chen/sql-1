@@ -915,3 +915,25 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - The remaining join failures fall into two categories: (1) complex alias resolution (when both `left=t1` and `as tt` are specified, which takes precedence?), and (2) field-list column pruning (SELECT * from a join returns all columns from both sides, but tests expect only the field-list columns).
   - `isArrayField()` should return `false` when schema lookup fails — assuming a field is an array when we can't verify leads to UNNEST errors on non-array fields.
 ---
+
+## 2026-03-14T13:06 - V4-017: Implement JSON functions
+- **What was fixed**: 11 new tests passing in CalcitePPLJsonBuiltinFunctionIT (1→12 of 18)
+  - **JSON UDF registration in UnifiedQueryContext**: Added 8 JSON UDFs from PPLBuiltinOperators to the SQL endpoint's operator table chain: JSON, JSON_ARRAY_LENGTH, JSON_EXTRACT, JSON_KEYS, JSON_SET, JSON_DELETE, JSON_APPEND, JSON_EXTEND. The UDFs had null operand metadata (getOperandMetadata() returns null), causing Calcite's validator to throw UnsupportedOperationException on getOperandCountRange(). Fixed by creating `wrapJsonUdf()` helper that wraps each UDF in a new SqlUserDefinedFunction with VARIADIC_METADATA (accepts any number of args).
+  - **json_valid → IS_JSON_VALUE**: Added special case in visitFunction: `json_valid(expr)` generates `new SqlBasicCall(SqlStdOperatorTable.IS_JSON_VALUE, ...)` which produces `expr IS JSON VALUE` postfix syntax. This is the standard SQL way to validate JSON.
+  - **Generic fallback works for other JSON functions**: The converter's existing generic fallback (`SqlBasicFunction.create(funcName)`) generates uppercase function names via SqlPrettyWriter, which match the registered UDF names. No special handling needed for json, json_extract, json_delete, json_array_length, json_keys, json_append, json_extend.
+- **Pass rate change**: 69.3% (1570/2264) → 69.8% (1581/2264) = +0.5pp, +11 tests
+- **Per-class results**:
+  - CalcitePPLJsonBuiltinFunctionIT: 1→12 pass (18 total, 6 fail) — +11
+  - No spillover to other classes (JSON functions only used in this test class)
+- **Remaining 6 CalcitePPLJsonBuiltinFunctionIT failures**:
+  - 3 JSON_SET with {} wildcard paths: testJsonSet, testJsonSetWithWrongPath, testJsonSetPartialSet — CalciteException "Invalid input for JSON_SET" with `{}` array wildcard path syntax. The UDF implementation (JsonSetFunctionImpl) doesn't support `{}` wildcards. Engine-level UDF bug.
+  - 3 data format issues: testJsonObject (nested json_object returns raw JSON instead of escaped string), testJsonArrayWithDifferentType (mixed-type array returns as escaped string), testJsonKeys (array returned as escaped string). These are engine-level JSON type serialization issues.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (+63: wrapJsonUdf helper, VARIADIC_METADATA, 8 JSON UDF registrations)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+3: json_valid special case)
+- **Learnings for future iterations:**
+  - PPLBuiltinOperators UDFs created via `toUDF()` have null operand metadata. Calcite's validator calls `getOperandCountRange()` during validation, which delegates to operand metadata. Must wrap with custom SqlOperandMetadata that provides a valid count range.
+  - The `wrapJsonUdf()` pattern (creating a new SqlUserDefinedFunction preserving the original's function impl and return type inference but adding VARIADIC_METADATA) can be reused for any future UDF registration.
+  - json_valid is the only JSON function that maps to a non-function SQL construct (IS JSON VALUE postfix operator). All others map directly to function calls.
+  - The generic fallback in visitFunction works for most UDFs once they're registered in the operator table — no special handling needed per function.
+---
