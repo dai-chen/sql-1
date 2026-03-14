@@ -937,3 +937,39 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - json_valid is the only JSON function that maps to a non-function SQL construct (IS JSON VALUE postfix operator). All others map directly to function calls.
   - The generic fallback in visitFunction works for most UDFs once they're registered in the operator table — no special handling needed per function.
 ---
+
+## 2026-03-14T13:29 - V4-019: Patterns command (triage only)
+- **What was fixed**: No code changes needed — all 11 remaining failures are engine-blocked
+  - 7 BRAIN method tests: ML-based pattern extraction algorithm, not SQL-expressible. Throws UnsupportedOperationException.
+  - 4 show_numbered_token tests: Require UDF to build struct mapping `<tokenN>` → matched value arrays. 3 fail with "Failed to plan query" (SQL references non-existent tokens column), 1 fails with column count mismatch (expected 4 got 3).
+- **Test results**: 4/15 pass (was reported as 3/15 in old notes — 4th test testSimplePatternAggregationMode_NotShowNumberedToken was already passing)
+  - PASS: testSimplePatternLabelMode_NotShowNumberedToken, testSimplePatternLabelMode_NullFieldReturnEmpty, testSimplePatternLabelMode_EmptyStringReturnEmpty, testSimplePatternAggregationMode_NotShowNumberedToken
+- **Files changed**: None (prd.json updated only)
+- **Learnings**: BRAIN pattern method and show_numbered_token both require server-side UDFs — not achievable through SQL transpilation alone.
+---
+
+## 2026-03-14T13:45 - V4-020: Multisearch schema-aware UNION ALL
+- **What was fixed**: 9 new tests passing in CalciteMultisearchCommandIT (4→13 of 17)
+  - **Schema-aware visitMultisearch override in DynamicPPLToSqlNodeConverter**: Replaces raw UNION ALL with schema-aligned UNION ALL. For each subsearch: (1) convert via convertSubPlan, (2) extract column names from SqlSelect result, (3) compute unified column set (superset preserving order), (4) project each subsearch to unified schema with NULL fills for missing columns, (5) CAST computed string columns to VARCHAR to prevent CHAR padding.
+  - **extractSelectColumnNames**: Handles SqlSelect, SqlOrderBy, and SELECT * patterns. For SELECT *, resolves columns from FROM clause's source table via resolveStarColumns().
+  - **resolveStarColumns**: Traces FROM clause through AS aliases and subqueries to find source table, then resolves columns via resolveColumns().
+  - **extractTableName**: Walks AST tree to find Relation node for source table name.
+  - **CHAR padding prevention**: Identifies shared computed columns (present in multiple subsearches but NOT in any source table schema) and casts to VARCHAR. This prevents Calcite's UNION ALL from producing CHAR(N) with trailing spaces for eval-created string literals.
+  - **Null-filling**: Missing columns get untyped NULL (SqlLiteral.createNull) so Calcite infers correct type from other UNION ALL branch.
+- **Pass rate change**: 69.8% (estimated) → ~70.2% (estimated +9 net new tests)
+- **Per-class results** (before → after):
+  - CalciteMultisearchCommandIT: 4→13 pass (17 total, 4 fail)
+- **Remaining 4 failures**:
+  - testMultisearchWithDirectTypeConflict: expects ResponseException for incompatible types across subsearches — type conflict detection not implemented
+  - testMultisearchTypeConflictWithStats: same type conflict detection issue
+  - testMultisearchCrossIndexFieldSelection: expected 4 columns but got 2 — locations_type_conflict index column resolution issue
+  - testMultisearchWithTimestampInterleaving: timestamp type shown as "timestamp" instead of "string"
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+160 lines)
+- **No regressions**: Verified CalciteDateTimeComparisonIT (191/191), CalciteSortCommandIT (30/30), CalciteTrendlineCommandIT (5/5)
+- **Learnings for future iterations:**
+  - Schema-aware UNION ALL requires extracting column names from each subsearch's SqlSelect result. For SELECT * patterns, must trace through FROM clause to find source table and resolve columns.
+  - CHAR padding in UNION ALL happens when Calcite infers CHAR(N) type for string literals in eval expressions. Casting to VARCHAR prevents padding. Only cast computed columns (not table columns) to preserve native types.
+  - Untyped NULL (SqlLiteral.createNull) in UNION ALL lets Calcite infer the correct type from the other branch. Typed NULL (CAST(NULL AS VARCHAR)) would force VARCHAR type on the column.
+  - extractTableName walks the AST tree recursively to find the Relation node — handles nested pipe chains.
+  - The fallback to parent's raw UNION ALL when column extraction fails ensures backward compatibility.
+---
