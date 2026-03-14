@@ -641,3 +641,38 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
 - **Root cause**: V4 transpilation errors produce fundamentally different exception messages than the PPL engine. `createSyntheticResponseException()` wraps raw Java exceptions with `reason: "V4 transpilation error"`, but tests expect PPL-domain-specific messages like `"date:09:07:42 in unsupported format"` or `"function expected {[BOOLEAN,BOOLEAN],...}"`. These are PPL engine error handling tests, not transpilation correctness tests.
 - **Recommendation**: Exclude from 85% target or skip when V4 is enabled. Not worth fixing — the errors are architecturally different.
 
+
+## 2026-03-13T23:24 - V4-011: Fix math, string, text, operator, and JSON functions
+- **What was fixed**: 68 new tests passing across 8+ test classes
+  - **Arithmetic function mappings**: add→PLUS, subtract→MINUS, multiply→MULTIPLY, divide→DIVIDE (with zero-guard CASE WHEN), modulus→MOD (with zero-guard). These were falling through to FUNC_MAP and becoming invalid function calls like ADD(), SUBTRACT().
+  - **Math function mappings**: expm1→EXP(x)-1, rint→ROUND(x), atan 2-arg→ATAN2(y,x). The 1-arg atan already worked via FUNC_MAP.
+  - **String function mappings**: position→SqlStdOperatorTable.POSITION (generates POSITION(substr IN str) syntax), locate 2-arg and 3-arg→SqlStdOperatorTable.POSITION, strcmp→CASE WHEN a<b THEN -1 WHEN a>b THEN 1 ELSE 0 END.
+  - **Eval-level scalar_max/scalar_min**: Replaced GREATEST/LEAST (which propagate nulls) with recursive buildGreatest/buildLeast using CASE WHEN with null-ignoring semantics: CASE WHEN a IS NULL THEN b WHEN b IS NULL THEN a WHEN a >= b THEN a ELSE b END.
+  - **SHA2 UDF registration**: SHA2 was registered in PPLBuiltinOperators but not added to the Calcite operator table chain. Added PPLBuiltinOperators.SHA2 to UnifiedQueryContext operator table. Also changed visitFunction to use the registered UDF operator directly instead of generic call().
+- **Pass rate change**: 60.1% (1360/2264) → 63.1% (1428/2264) = +3.0pp, +68 tests
+- **Per-class results** (before → after):
+  - CalciteMathematicalFunctionIT: 53→61 pass (62 total, 1 fail: conv) — +8
+  - CalciteTextFunctionIT: 22→24 pass (24 total, 0 fail) — +2 ✅ ALL PASS
+  - CalcitePPLStringBuiltinFunctionIT: 22→24 pass (27 total, 3 fail) — +2
+  - CalciteOperatorIT: 21→21 pass (21 total, 0 fail) — already passing ✅
+  - CalcitePPLCaseFunctionIT: 8→8 pass (9 total, 0 fail, 1 skip) — already passing ✅
+  - CalcitePPLEvalMaxMinFunctionIT: 0→5 pass (8 total, 3 fail) — +5
+  - CalcitePPLCryptographicFunctionIT: 2→4 pass (4 total, 0 fail) — +2 ✅ ALL PASS
+  - CalcitePPLJsonBuiltinFunctionIT: 1→1 pass (18 total, 17 fail) — 0 (engine-level)
+  - +49 spillover across other classes from arithmetic/string/eval function mappings
+- **Remaining failures (24 in V4-011 scope)**:
+  - CalciteMathematicalFunctionIT (1): testConv — CONV function not registered in engine
+  - CalcitePPLStringBuiltinFunctionIT (3): testReplaceWithCaptureGroups, testReplaceWithEmailDomainReplacement (regex capture group \\N→$N conversion producing wrong results), testReplaceWithInvalidRegexPattern (error type mismatch)
+  - CalcitePPLEvalMaxMinFunctionIT (3): testEvalMaxNumeric (type=bigint vs expected type=int), testEvalMaxNumericAndString, testEvalMinNumericAndString (mixed numeric+string comparison fails in Calcite)
+  - CalcitePPLJsonBuiltinFunctionIT (17): All engine-level — json_delete/extract/extend/append/valid/json/array_length not implemented, json_keys/object/array format mismatch, json_set wildcard path not supported
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+75 lines: 14 function handlers, buildGreatest/buildLeast helpers, SHA2 special handling)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (+2 lines: SHA2 UDF registration in operator table)
+- **Learnings for future iterations:**
+  - PPL arithmetic functions (add, subtract, multiply, divide, modulus) must map to SQL operators (PLUS, MINUS, etc.), NOT function calls. Calcite has no ADD() function.
+  - SqlStdOperatorTable.POSITION generates the correct `POSITION(substr IN str)` syntax. Using call("POSITION", args) generates `POSITION(substr, str)` which is wrong.
+  - GREATEST/LEAST in Calcite propagate nulls (return NULL if any arg is NULL). PPL's eval max/min ignore nulls. Must use CASE WHEN with IS NULL checks.
+  - UDFs registered in PPLBuiltinOperators must ALSO be added to the operator table chain in UnifiedQueryContext for the SQL validator to find them. MD5/SHA1 work because they're in SqlLibrary.MYSQL/SPARK, but SHA2 is a custom UDF.
+  - The PPL parser remaps eval-level max(a,b) to 'scalar_max' and min(a,b) to 'scalar_min'. These arrive as Function nodes (not AggregateFunction), so they're handled in visitFunction.
+  - Mixed numeric+string comparison in CASE WHEN fails in Calcite — can't compare INTEGER and VARCHAR. Would need CAST to VARCHAR for all args, but this changes comparison semantics.
+---
