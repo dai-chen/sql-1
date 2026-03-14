@@ -973,3 +973,52 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - extractTableName walks the AST tree recursively to find the Relation node — handles nested pipe chains.
   - The fallback to parent's raw UNION ALL when column extraction fails ensures backward compatibility.
 ---
+
+## 2026-03-14T14:30 - V4-021: Implement spath command
+- **What was fixed**: 13 new tests passing in CalcitePPLSpathCommandIT (1→14, ALL PASS)
+  - **MAP type in JDBC response** (9 tests): Added SqlTypeName.MAP detection in `extractUdtTypes()` → returns "struct". Added `java.util.Map` serialization in `formatAsJdbc()` → converts to JSONObject. Previously MAP fell through to default "keyword" (string).
+  - **MAP field tracking** (4 tests): Added `mapFields` Set to PPLToSqlNodeConverter that tracks field names produced by spath auto-extract (json_extract_all). In `visitSpath`, when path is null (auto-extract mode), adds the output field name to mapFields.
+  - **ITEM access for MAP fields**: Modified `visitQualifiedName` — when parts.size() > 1 and parts.get(0) is in mapFields, generates `ITEM(identifier(parts[0]), charString('remaining.parts'))` instead of compound SqlIdentifier. json_extract_all flattens nested JSON into dot-separated keys, so 'user.name' is a single MAP key.
+  - **ITEM alias in visitProject**: When a field expression produces a SqlBasicCall with SqlStdOperatorTable.ITEM operator, wraps with `AS "original.dotted.name"` alias. Without this, Calcite names ITEM expressions as EXPR$0.
+- **Per-class results**:
+  - CalcitePPLSpathCommandIT: 1→14 pass (14 total, 0 fail) ✅ ALL PASS
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLBasicIT: 35/42 (no regression) ✅
+  - CalcitePPLJsonBuiltinFunctionIT: 12/18 (no regression) ✅
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+20: mapFields set, visitSpath tracking, visitQualifiedName ITEM access, visitProject ITEM alias)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (no change — JSON UDFs already registered from V4-017)
+  - legacy/src/main/java/org/opensearch/sql/legacy/plugin/RestUnifiedSQLQueryAction.java (+12: MAP type detection, Map serialization)
+- **Learnings for future iterations:**
+  - Calcite's MAP SqlTypeName has jdbcOrdinal=1111 (java.sql.Types.OTHER). The jdbcTypeToString default case returns "keyword". Must use extractUdtTypes() to override with "struct" based on RelDataType inspection.
+  - json_extract_all flattens nested JSON into dot-separated keys: {"user":{"name":"John"}} → MAP{"user.name":"John"}. So ITEM(doc, 'user.name') is correct (single ITEM call), NOT nested ITEM(ITEM(doc, 'user'), 'name').
+  - The SPath AST node rewrites itself to Eval via rewriteAsEval(). The converter's visitSpath just delegates to visitEval. The key insight is tracking which fields become MAP columns so downstream visitQualifiedName can generate ITEM access.
+  - ITEM expressions in SELECT lists need explicit AS aliases — Calcite auto-names them EXPR$N without aliases.
+  - Map values from UDFs need explicit JSONObject serialization in formatAsJdbc() — Java's Map.toString() produces "{key=val}" format, not JSON.
+---
+
+## 2026-03-14T15:11 - V4-022: Implement addtotals and addcoltotals commands
+- **What was fixed**: 14 new tests passing (3→17 of 17, ALL PASS)
+  - **visitAddTotals**: Implemented in DynamicPPLToSqlNodeConverter. Handles row=true (default): adds new column with per-row sum of numeric fields via `SELECT *, COALESCE(f1,0)+COALESCE(f2,0)+... AS fieldname`. Handles col=true: appends summary row via UNION ALL with SUM aggregation. Handles both simultaneously. Options: label, labelfield, fieldname, row, col.
+  - **visitAddColTotals**: Implemented in DynamicPPLToSqlNodeConverter. Always appends column totals row via UNION ALL. Options: label, labelfield.
+  - **Pending FETCH application**: Apply `applyPendingOrderBy()` before building UNION ALL to ensure `head N` limits the data BEFORE totals computation, not after. Changed `applyPendingOrderBy` from private to protected in base converter.
+  - **resolveEffectiveNumericCols**: New helper that combines schema numeric columns with pipe-only columns (from stats/eval). Columns not in the original table schema are assumed numeric (they came from aggregation/computation).
+  - **extractPipeColumns SqlOrderBy unwrapping**: Enhanced `extractPipeColumns()` to unwrap `SqlOrderBy` to get underlying `SqlSelect` for column extraction. Fixes column resolution after `head N` (which produces SqlOrderBy via applyPendingOrderBy).
+  - **buildColTotals**: Shared helper for column totals. Handles labelfield (new column with NULL in data rows + label in totals row, or existing column with label value). Single `wrapAsSubquery()` call for both original data and aggregation branches.
+  - **No child re-visit**: Removed `node.getChild().get(0).accept(this, ctx)` calls — the `convert()` flatten loop already visits all children. Re-visiting caused double GROUP BY when addtotals followed stats.
+- **Per-class results**:
+  - CalciteAddTotalsCommandIT: 3→11 pass (11 total, 0 fail) ✅ ALL PASS
+  - CalciteAddColTotalsCommandIT: 0→6 pass (6 total, 0 fail) ✅ ALL PASS
+- **No regressions**: CalciteDateTimeComparisonIT (191/191), CalciteSortCommandIT (30/30), CalciteTrendlineCommandIT (5/5)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+180 lines: visitAddTotals, visitAddColTotals, buildColTotals, buildCoalescedSum, resolveEffectiveNumericCols, resolveTable, resolveNumericColumns, getOptionValue, getBooleanOptionValue, extractPipeColumns SqlOrderBy unwrapping)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+1/-1: applyPendingOrderBy private→protected)
+- **Learnings for future iterations:**
+  - The `convert()` flatten loop visits ALL AST nodes in order. Visitor methods should NOT re-visit children via `node.getChild().get(0).accept()` — this causes double processing (e.g., double GROUP BY when stats is followed by addtotals).
+  - `applyPendingOrderBy()` produces SqlOrderBy which wraps SqlSelect. `extractPipeColumns()` must unwrap SqlOrderBy to access the underlying SqlSelect's column list.
+  - Columns from stats/eval output are not in the original table schema. `resolveNumericColumns(tableName)` won't find them. Must treat pipe-only columns as numeric when they appear in the fields-to-aggregate list.
+  - UNION ALL for column totals must put original data FIRST, totals row LAST — tests verify the last row is the totals row.
+  - For addcoltotals with no data, the totals row still appears (SUM of empty set = NULL). The UNION ALL ensures at least 1 row.
+  - `wrapAsSubquery()` does NOT modify `pipe` — it returns a new subquery node. Multiple calls wrap the same `pipe` with different aliases.
+---

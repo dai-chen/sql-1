@@ -71,7 +71,7 @@
       ],
       "priority": 5,
       "passes": true,
-      "notes": "33 new tests passing. Rate: 52.4%→53.9%. (1) ResponseException wrapping: wrapped transpileV4() in try-catch in both executeQuery() and executeQueryToString(), converting client-side exceptions to synthetic ResponseException via reflection. (2) visitSearch: added Search AST node handling with convertSearchExpr() that walks SearchComparison/SearchAnd/SearchOr/SearchGroup/SearchNot trees to generate WHERE clauses. (3) resolveDateMathToTimestamp: resolves OS date math expressions (now/h, now-1d/d, unix millis, ISO timestamps) to actual SQL timestamp strings at transpile time. CalciteSearchCommandIT: 3→10 pass (7 new). Remaining 41 failures: 38 engine-level nanosecond timestamp bug, 2 quarter/week snap edge cases, 1 parser error."
+      "notes": "33 new tests passing. Rate: 52.4%\u219253.9%. (1) ResponseException wrapping: wrapped transpileV4() in try-catch in both executeQuery() and executeQueryToString(), converting client-side exceptions to synthetic ResponseException via reflection. (2) visitSearch: added Search AST node handling with convertSearchExpr() that walks SearchComparison/SearchAnd/SearchOr/SearchGroup/SearchNot trees to generate WHERE clauses. (3) resolveDateMathToTimestamp: resolves OS date math expressions (now/h, now-1d/d, unix millis, ISO timestamps) to actual SQL timestamp strings at transpile time. CalciteSearchCommandIT: 3\u219210 pass (7 new). Remaining 41 failures: 38 engine-level nanosecond timestamp bug, 2 quarter/week snap edge cases, 1 parser error."
     },
     {
       "id": "V4-006",
@@ -84,7 +84,7 @@
       ],
       "priority": 6,
       "passes": true,
-      "notes": "46 new tests passing. Rate: 53.9%→55.9%. (1) mvindex single-element: ITEM operator with 0→1-based index conversion and negative index handling. 3 new passes in CalciteArrayFunctionIT. (2) mvappend: single→ARRAY(), multi→ARRAY_CONCAT. (3) mvsort: ARRAY_SORT→SORT_ARRAY. (4) mvzip: ARRAYS_ZIP. (5) MvExpand CROSS JOIN UNNEST stub (falls back when resolveColumns empty). (6) Bonus fixes from subagent: castToBoolean, if/case VARCHAR casting, mod/% null-on-zero, ispresent/isempty/isblank, e() function — these fixed ~28 CalcitePPLBuiltinFunctionsNullIT tests and others. Most array/MV failures remain blocked by engine-level type metadata (type=string vs type=array) and missing lambda functions (forall, exists, filter, transform, reduce, mvmap, mvfind)."
+      "notes": "46 new tests passing. Rate: 53.9%\u219255.9%. (1) mvindex single-element: ITEM operator with 0\u21921-based index conversion and negative index handling. 3 new passes in CalciteArrayFunctionIT. (2) mvappend: single\u2192ARRAY(), multi\u2192ARRAY_CONCAT. (3) mvsort: ARRAY_SORT\u2192SORT_ARRAY. (4) mvzip: ARRAYS_ZIP. (5) MvExpand CROSS JOIN UNNEST stub (falls back when resolveColumns empty). (6) Bonus fixes from subagent: castToBoolean, if/case VARCHAR casting, mod/% null-on-zero, ispresent/isempty/isblank, e() function \u2014 these fixed ~28 CalcitePPLBuiltinFunctionsNullIT tests and others. Most array/MV failures remain blocked by engine-level type metadata (type=string vs type=array) and missing lambda functions (forall, exists, filter, transform, reduce, mvmap, mvfind)."
     },
     {
       "id": "V4-007",
@@ -97,7 +97,7 @@
       ],
       "priority": 7,
       "passes": true,
-      "notes": "7 tests fixed (38→31 failures). (1) resolveColumns fix: CalciteSchema.from(SchemaPlus).schema.getTable() bypasses SchemaPlus caching that prevented lazy table fetch in AbstractSchema.getTableMap(). This unblocks ALL schema-dependent operations (eval override, fields-, rename wildcard, fillnull all-fields). (2) SELECT * REPLACE for eval column overrides: DynamicPPLToSqlNodeConverter.visitEval now uses SqlStarExceptReplace instead of explicit column enumeration, fixing column ambiguity when eval alias matches field name. (3) StarExceptReplaceRewriter enhanced to trace through subquery chains to resolve underlying table names. (4) earliest/latest filter functions: 2-arg form generates field >= / <= resolved timestamp. Remaining 31 failures are engine-level: CONV not registered (3), TYPEOF signature (2), MOD type widening (2), division precision (1), cast formatting (3), invalid date compile errors (5), timestamp precision parsing (4), IP cast (3), expected exceptions not thrown (3), nested array type (2), ADDDATE return type (1), testEarliestWithEval time modifier (1), testDatetimeInvalid invalid seconds (1)."
+      "notes": "7 tests fixed (38\u219231 failures). (1) resolveColumns fix: CalciteSchema.from(SchemaPlus).schema.getTable() bypasses SchemaPlus caching that prevented lazy table fetch in AbstractSchema.getTableMap(). This unblocks ALL schema-dependent operations (eval override, fields-, rename wildcard, fillnull all-fields). (2) SELECT * REPLACE for eval column overrides: DynamicPPLToSqlNodeConverter.visitEval now uses SqlStarExceptReplace instead of explicit column enumeration, fixing column ambiguity when eval alias matches field name. (3) StarExceptReplaceRewriter enhanced to trace through subquery chains to resolve underlying table names. (4) earliest/latest filter functions: 2-arg form generates field >= / <= resolved timestamp. Remaining 31 failures are engine-level: CONV not registered (3), TYPEOF signature (2), MOD type widening (2), division precision (1), cast formatting (3), invalid date compile errors (5), timestamp precision parsing (4), IP cast (3), expected exceptions not thrown (3), nested array type (2), ADDDATE return type (1), testEarliestWithEval time modifier (1), testDatetimeInvalid invalid seconds (1)."
     },
     {
       "id": "V4-008",
@@ -110,7 +110,7 @@
       ],
       "priority": 8,
       "passes": true,
-      "notes": "22 new tests passing (28→50). CalcitePPLJoinIT: 4→8 pass. CalcitePPLLookupIT: 5→7 pass. CalcitePPLExistsSubqueryIT: 5→14 pass. CalcitePPLScalarSubqueryIT: 4→10 pass. CalcitePPLInSubqueryIT: 10→11 pass. Fixes: (1) raw SqlJoin for alias scoping, (2) shared AtomicInteger for alias counter in correlated subqueries, (3) schema-aware visitLookup override for APPEND, (4) effective aliases for field-list join ON conditions, (5) duplicate-detection aliasing for qualified field names, (6) skipNextWrap consumed only by visitProject. Remaining 57 failures: multi-join chains, self-join, max option, nested subqueries, two-expression IN, lookup AS renaming."
+      "notes": "22 new tests passing (28\u219250). CalcitePPLJoinIT: 4\u21928 pass. CalcitePPLLookupIT: 5\u21927 pass. CalcitePPLExistsSubqueryIT: 5\u219214 pass. CalcitePPLScalarSubqueryIT: 4\u219210 pass. CalcitePPLInSubqueryIT: 10\u219211 pass. Fixes: (1) raw SqlJoin for alias scoping, (2) shared AtomicInteger for alias counter in correlated subqueries, (3) schema-aware visitLookup override for APPEND, (4) effective aliases for field-list join ON conditions, (5) duplicate-detection aliasing for qualified field names, (6) skipNextWrap consumed only by visitProject. Remaining 57 failures: multi-join chains, self-join, max option, nested subqueries, two-expression IN, lookup AS renaming."
     },
     {
       "id": "V4-009",
@@ -123,7 +123,7 @@
       ],
       "priority": 9,
       "passes": true,
-      "notes": "94 new tests passing. Rate: 55.9% → 60.1%. CalcitePPLBasicIT: 24→34 pass. CalciteFieldsCommandIT: 14→27 pass. CalcitePPLRenameIT: 4→19 pass. CalciteReplaceCommandIT: 5→16 pass. CalciteEvalCommandIT: 0→2 pass. CalciteFillNullCommandIT: 0→11 pass. Fixes: (1) SqlNodeDSL.between() removed spurious boolean operand, (2) wildcard field expansion in visitProject, (3) SqlStarExceptReplace for rename/replace/fillnull eliminating duplicate columns, (4) string concat + → CONCAT, (5) resolveColumns metadata field filtering, (6) extractPipeColumns helper for narrowed pipes. Remaining 32 failures: escape sequences in replace (3), error message format mismatches (6), wildcard edge cases (12), dotted field names (1), decimal precision (1), string concat edge cases (2), fillnull type validation (2), fields exclude after fields include (3), alias data type (1), renamed field reference (1)."
+      "notes": "94 new tests passing. Rate: 55.9% \u2192 60.1%. CalcitePPLBasicIT: 24\u219234 pass. CalciteFieldsCommandIT: 14\u219227 pass. CalcitePPLRenameIT: 4\u219219 pass. CalciteReplaceCommandIT: 5\u219216 pass. CalciteEvalCommandIT: 0\u21922 pass. CalciteFillNullCommandIT: 0\u219211 pass. Fixes: (1) SqlNodeDSL.between() removed spurious boolean operand, (2) wildcard field expansion in visitProject, (3) SqlStarExceptReplace for rename/replace/fillnull eliminating duplicate columns, (4) string concat + \u2192 CONCAT, (5) resolveColumns metadata field filtering, (6) extractPipeColumns helper for narrowed pipes. Remaining 32 failures: escape sequences in replace (3), error message format mismatches (6), wildcard edge cases (12), dotted field names (1), decimal precision (1), string concat edge cases (2), fillnull type validation (2), fields exclude after fields include (3), alias data type (1), renamed field reference (1)."
     },
     {
       "id": "V4-010",
@@ -136,7 +136,7 @@
       ],
       "priority": 10,
       "passes": true,
-      "notes": "49 new tests passing. Rate: 60.1% → 62.2%. (1) Streamstats PARTITION BY fix: removed `|| node.isGlobal()` check that suppressed PARTITION BY when global=true (default). CalciteStreamstatsCommandIT: 19→33 pass (+14). Remaining 13 failures: global+window+by requires correlate/self-join (not expressible as simple window function), reset_before/reset_after need segment ID computation, 1 unsupported function error message mismatch. (2) visitRex, visitPatterns, visitMultisearch already in working tree from prior uncommitted work — contributed +35 tests across other classes. Rex 10/18 pass (8 fail: 4 max_match, 4 regex backslash escaping). Patterns 3/15 pass (12 fail: 7 brain unsupported, 5 showNumberedToken needs UDF). Multisearch 4/17 pass (13 fail: plan failures, string padding, null filling, type conflicts). NewAdded 14/22 pass (8 fail: mv_expand/appendcol not implemented). GraphLookup DEFERRED (V4-027)."
+      "notes": "49 new tests passing. Rate: 60.1% \u2192 62.2%. (1) Streamstats PARTITION BY fix: removed `|| node.isGlobal()` check that suppressed PARTITION BY when global=true (default). CalciteStreamstatsCommandIT: 19\u219233 pass (+14). Remaining 13 failures: global+window+by requires correlate/self-join (not expressible as simple window function), reset_before/reset_after need segment ID computation, 1 unsupported function error message mismatch. (2) visitRex, visitPatterns, visitMultisearch already in working tree from prior uncommitted work \u2014 contributed +35 tests across other classes. Rex 10/18 pass (8 fail: 4 max_match, 4 regex backslash escaping). Patterns 3/15 pass (12 fail: 7 brain unsupported, 5 showNumberedToken needs UDF). Multisearch 4/17 pass (13 fail: plan failures, string padding, null filling, type conflicts). NewAdded 14/22 pass (8 fail: mv_expand/appendcol not implemented). GraphLookup DEFERRED (V4-027)."
     },
     {
       "id": "V4-011",
@@ -149,7 +149,7 @@
       ],
       "priority": 11,
       "passes": true,
-      "notes": "68 new tests passing. Rate: 60.1% → 63.1%. CalciteMathematicalFunctionIT: 53→61 pass (+8). CalciteTextFunctionIT: 22→24 pass (+2). CalcitePPLStringBuiltinFunctionIT: 22→24 pass (+2). CalcitePPLEvalMaxMinFunctionIT: 0→5 pass (+5). CalcitePPLCryptographicFunctionIT: 2→4 pass (+2). CalcitePPLJsonBuiltinFunctionIT: 1→1 (engine-level). +49 spillover across other classes. Fixes: (1) add/subtract/multiply/divide/modulus→arithmetic operators with zero-guard, (2) expm1→EXP(x)-1, rint→ROUND, (3) atan 2-arg→ATAN2, (4) position/locate→SqlStdOperatorTable.POSITION, (5) strcmp→CASE WHEN, (6) scalar_max/scalar_min→CASE WHEN with null-ignoring semantics, (7) SHA2 UDF registration in operator table. Remaining: conv not registered (1), regex replace capture groups (3), scalar max/min mixed types (2), scalar max type=bigint (1), JSON functions engine-level (17)."
+      "notes": "68 new tests passing. Rate: 60.1% \u2192 63.1%. CalciteMathematicalFunctionIT: 53\u219261 pass (+8). CalciteTextFunctionIT: 22\u219224 pass (+2). CalcitePPLStringBuiltinFunctionIT: 22\u219224 pass (+2). CalcitePPLEvalMaxMinFunctionIT: 0\u21925 pass (+5). CalcitePPLCryptographicFunctionIT: 2\u21924 pass (+2). CalcitePPLJsonBuiltinFunctionIT: 1\u21921 (engine-level). +49 spillover across other classes. Fixes: (1) add/subtract/multiply/divide/modulus\u2192arithmetic operators with zero-guard, (2) expm1\u2192EXP(x)-1, rint\u2192ROUND, (3) atan 2-arg\u2192ATAN2, (4) position/locate\u2192SqlStdOperatorTable.POSITION, (5) strcmp\u2192CASE WHEN, (6) scalar_max/scalar_min\u2192CASE WHEN with null-ignoring semantics, (7) SHA2 UDF registration in operator table. Remaining: conv not registered (1), regex replace capture groups (3), scalar max/min mixed types (2), scalar max type=bigint (1), JSON functions engine-level (17)."
     },
     {
       "id": "V4-012",
@@ -162,7 +162,7 @@
       ],
       "priority": 12,
       "passes": false,
-      "notes": "Iteration 12: +15 tests (1428→1443, 63.1%→63.7%). Fixed: (1) sort count limit missing in visitSort, (2) top/rare double-alias in visitRareTopN, (3) sort null ordering default (NULLS FIRST for ASC, NULLS LAST for DESC), (4) head-then-sort subquery wrap, (5) trendline field overwrite via DynamicPPLToSqlNodeConverter override. CalciteSortCommandIT: 25→30 ALL PASS. CalciteTopCommandIT: 1→5 pass. CalciteRareCommandIT: 1→4 pass. CalciteTrendlineCommandIT: 4→5 ALL PASS. Iteration 13: +11 tests (1443→1454, 63.7%→64.2%). Fixed: (1) parse group name validation via RegexCommonUtils, (2) parse column override via SqlStarExceptReplace, (3) fieldformat prefix/suffix CONCAT, (4) isStringProducing for + operator, (5) fields+ then fields- via extractPipeColumns, (6) replace REGEXP_REPLACE with escapeRegexChars, (7) buildReplacePairExpr helper. CalciteParseCommandIT: 2→7 ALL PASS. CalciteEvalCommandIT: 2→4 ALL PASS. CalciteFieldFormatCommandIT: 1→4 pass. CalcitePPLBasicIT: 34→35 pass. Remaining ~649 failures across 80+ classes — mostly engine-level blockers. Still passes: false — 85% target not yet reached."
+      "notes": "Iteration 12: +15 tests (1428\u21921443, 63.1%\u219263.7%). Fixed: (1) sort count limit missing in visitSort, (2) top/rare double-alias in visitRareTopN, (3) sort null ordering default (NULLS FIRST for ASC, NULLS LAST for DESC), (4) head-then-sort subquery wrap, (5) trendline field overwrite via DynamicPPLToSqlNodeConverter override. CalciteSortCommandIT: 25\u219230 ALL PASS. CalciteTopCommandIT: 1\u21925 pass. CalciteRareCommandIT: 1\u21924 pass. CalciteTrendlineCommandIT: 4\u21925 ALL PASS. Iteration 13: +11 tests (1443\u21921454, 63.7%\u219264.2%). Fixed: (1) parse group name validation via RegexCommonUtils, (2) parse column override via SqlStarExceptReplace, (3) fieldformat prefix/suffix CONCAT, (4) isStringProducing for + operator, (5) fields+ then fields- via extractPipeColumns, (6) replace REGEXP_REPLACE with escapeRegexChars, (7) buildReplacePairExpr helper. CalciteParseCommandIT: 2\u21927 ALL PASS. CalciteEvalCommandIT: 2\u21924 ALL PASS. CalciteFieldFormatCommandIT: 1\u21924 pass. CalcitePPLBasicIT: 34\u219235 pass. Remaining ~649 failures across 80+ classes \u2014 mostly engine-level blockers. Still passes: false \u2014 85% target not yet reached."
     },
     {
       "id": "V4-013",
@@ -188,7 +188,7 @@
       ],
       "priority": 14,
       "passes": true,
-      "notes": "27 new tests passing (23→50 of 58). CalciteMvExpandCommandIT: 0→13 pass (3 fail: 2 per-doc limit, 1 nested object format). CalciteMVAppendFunctionIT: 3→12 pass (3 fail: heterogeneous array type coercion). CalciteMvCombineCommandIT: 2→7 ALL PASS. CalciteNoMvCommandIT: 18→18 (2 fail: error code 500 vs 400). Fixes: (1) MvExpand column qualification with subquery alias to eliminate ambiguity, (2) non-array field detection via isArrayField() schema check, (3) MVAppend ensureArrayArg() wrapping scalars in ARRAY() before ARRAY_CONCAT, (4) MvCombine extractPipeColumns() preference over resolveColumns() + field existence validation."
+      "notes": "27 new tests passing (23\u219250 of 58). CalciteMvExpandCommandIT: 0\u219213 pass (3 fail: 2 per-doc limit, 1 nested object format). CalciteMVAppendFunctionIT: 3\u219212 pass (3 fail: heterogeneous array type coercion). CalciteMvCombineCommandIT: 2\u21927 ALL PASS. CalciteNoMvCommandIT: 18\u219218 (2 fail: error code 500 vs 400). Fixes: (1) MvExpand column qualification with subquery alias to eliminate ambiguity, (2) non-array field detection via isArrayField() schema check, (3) MVAppend ensureArrayArg() wrapping scalars in ARRAY() before ARRAY_CONCAT, (4) MvCombine extractPipeColumns() preference over resolveColumns() + field existence validation."
     },
     {
       "id": "V4-015",
@@ -201,7 +201,7 @@
       ],
       "priority": 15,
       "passes": true,
-      "notes": "All 15/15 CalciteChartCommandIT tests pass. 8 new tests fixed: (1) FLOOR TO WEEK off-by-one: shift-1-day trick for Monday-based week floor, (2) numeric span row-split: skip VARCHAR cast when no column split, (3) limit/top/bottom/useother: DENSE_RANK window + re-aggregation with OTHER bucketing, (4) null span filter: always exclude NULL span values for span-based column splits. Bonus: +2 CalciteTimechartCommandIT from week floor fix (10→12 pass)."
+      "notes": "All 15/15 CalciteChartCommandIT tests pass. 8 new tests fixed: (1) FLOOR TO WEEK off-by-one: shift-1-day trick for Monday-based week floor, (2) numeric span row-split: skip VARCHAR cast when no column split, (3) limit/top/bottom/useother: DENSE_RANK window + re-aggregation with OTHER bucketing, (4) null span filter: always exclude NULL span values for span-based column splits. Bonus: +2 CalciteTimechartCommandIT from week floor fix (10\u219212 pass)."
     },
     {
       "id": "V4-016",
@@ -214,7 +214,7 @@
       ],
       "priority": 16,
       "passes": true,
-      "notes": "29 new tests passing. CalciteTimechartPerFunctionIT: 0→12 ALL PASS. CalciteTimechartCommandIT: 12→17 pass (1 fail: testTimechartWithoutTimestampField error message mismatch). Fixes: (1) visitEval GROUP BY override: wrap grouped query as subquery before applying eval overrides, so TIMESTAMPDIFF/TIMESTAMPADD reference aggregated columns from subquery output instead of raw columns inside GROUP BY. (2) Default limit for timechart with BY clause: apply limit=10 even without explicit limit=N. (3) DENSE_RANK tie-breaking: added secondary ORDER BY colAlias to break ties when multiple column-split values have same aggregate total. (4) Multi-unit time span: span=2m now uses epoch-based TIMESTAMPADD(FLOOR(TIMESTAMPDIFF/value)*value) instead of simple FLOOR(field TO MINUTE). (5) TIMESTAMPDIFF MILLISECOND overflow: compute as TIMESTAMPDIFF(SECOND)*1000 to avoid int32 overflow on intervals >24 days."
+      "notes": "29 new tests passing. CalciteTimechartPerFunctionIT: 0\u219212 ALL PASS. CalciteTimechartCommandIT: 12\u219217 pass (1 fail: testTimechartWithoutTimestampField error message mismatch). Fixes: (1) visitEval GROUP BY override: wrap grouped query as subquery before applying eval overrides, so TIMESTAMPDIFF/TIMESTAMPADD reference aggregated columns from subquery output instead of raw columns inside GROUP BY. (2) Default limit for timechart with BY clause: apply limit=10 even without explicit limit=N. (3) DENSE_RANK tie-breaking: added secondary ORDER BY colAlias to break ties when multiple column-split values have same aggregate total. (4) Multi-unit time span: span=2m now uses epoch-based TIMESTAMPADD(FLOOR(TIMESTAMPDIFF/value)*value) instead of simple FLOOR(field TO MINUTE). (5) TIMESTAMPDIFF MILLISECOND overflow: compute as TIMESTAMPDIFF(SECOND)*1000 to avoid int32 overflow on intervals >24 days."
     },
     {
       "id": "V4-017",
@@ -227,7 +227,7 @@
       ],
       "priority": 17,
       "passes": true,
-      "notes": "11 new tests passing (1→12 of 18). Registered 8 JSON UDFs (JSON, JSON_ARRAY_LENGTH, JSON_EXTRACT, JSON_KEYS, JSON_SET, JSON_DELETE, JSON_APPEND, JSON_EXTEND) in UnifiedQueryContext operator table with wrapJsonUdf() variadic metadata wrapper. Added json_valid→IS_JSON_VALUE postfix operator mapping. Remaining 6 failures: 3 JSON_SET with {} wildcard paths (CalciteException in UDF), 3 data format issues (json_object/json_array_with_different_type/json_keys return string-escaped JSON instead of native JSON)."
+      "notes": "11 new tests passing (1\u219212 of 18). Registered 8 JSON UDFs (JSON, JSON_ARRAY_LENGTH, JSON_EXTRACT, JSON_KEYS, JSON_SET, JSON_DELETE, JSON_APPEND, JSON_EXTEND) in UnifiedQueryContext operator table with wrapJsonUdf() variadic metadata wrapper. Added json_valid\u2192IS_JSON_VALUE postfix operator mapping. Remaining 6 failures: 3 JSON_SET with {} wildcard paths (CalciteException in UDF), 3 data format issues (json_object/json_array_with_different_type/json_keys return string-escaped JSON instead of native JSON)."
     },
     {
       "id": "V4-018",
@@ -240,7 +240,7 @@
       ],
       "priority": 18,
       "passes": true,
-      "notes": "CalciteRexCommandIT: 10→13 pass (18 total, 5 fail). Fixed backslash double-escaping in toSqlString() — CalciteSqlDialect doubles backslashes but SQL parser doesn't un-escape them. Fix: un-double after serialization in transpileV4(). This also fixed +104 tests globally across all classes (rate 64.2%→68.8%). Remaining 5 failures: all max_match>1 (need array output from repeated regex matching, no SQL equivalent)."
+      "notes": "CalciteRexCommandIT: 10\u219213 pass (18 total, 5 fail). Fixed backslash double-escaping in toSqlString() \u2014 CalciteSqlDialect doubles backslashes but SQL parser doesn't un-escape them. Fix: un-double after serialization in transpileV4(). This also fixed +104 tests globally across all classes (rate 64.2%\u219268.8%). Remaining 5 failures: all max_match>1 (need array output from repeated regex matching, no SQL equivalent)."
     },
     {
       "id": "V4-019",
@@ -253,7 +253,7 @@
       ],
       "priority": 19,
       "passes": true,
-      "notes": "4/15 pass (was 3/15 in old notes). All 11 remaining failures are engine-blocked: 7 BRAIN method (ML-based pattern extraction, not SQL-expressible), 4 show_numbered_token (requires UDF to build struct mapping tokenN→matched values). No converter changes needed — simple_pattern LABEL and AGGREGATION modes already work correctly."
+      "notes": "4/15 pass (was 3/15 in old notes). All 11 remaining failures are engine-blocked: 7 BRAIN method (ML-based pattern extraction, not SQL-expressible), 4 show_numbered_token (requires UDF to build struct mapping tokenN\u2192matched values). No converter changes needed \u2014 simple_pattern LABEL and AGGREGATION modes already work correctly."
     },
     {
       "id": "V4-020",
@@ -278,8 +278,8 @@
         "Unit tests pass"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": "14 failures."
+      "passes": true,
+      "notes": "All 14/14 CalcitePPLSpathCommandIT tests pass. Fixes: (1) MAP type in JDBC response: extractUdtTypes() detects SqlTypeName.MAP and returns 'struct'; formatAsJdbc() serializes Map values as JSONObject. (2) MAP field tracking: mapFields set in PPLToSqlNodeConverter tracks fields produced by spath auto-extract (json_extract_all). (3) ITEM access for MAP fields: visitQualifiedName generates ITEM(field, 'dotted.key') instead of compound identifier when first part is a MAP field. (4) ITEM alias in visitProject: wraps ITEM expressions with AS alias using original dotted field name."
     },
     {
       "id": "V4-022",
@@ -291,8 +291,8 @@
         "Unit tests pass"
       ],
       "priority": 22,
-      "passes": false,
-      "notes": "14 failures (8+6). Related commands."
+      "passes": true,
+      "notes": "All 17/17 tests pass (11 AddTotals + 6 AddColTotals). Implemented visitAddTotals and visitAddColTotals in DynamicPPLToSqlNodeConverter with: (1) row totals: SELECT *, COALESCE(f1,0)+COALESCE(f2,0)+... AS fieldname, (2) col totals: UNION ALL with SUM aggregation row, (3) labelfield support (new column or existing), (4) pending FETCH application before UNION ALL, (5) resolveEffectiveNumericCols for stats-output columns, (6) extractPipeColumns SqlOrderBy unwrapping."
     },
     {
       "id": "V4-023",
