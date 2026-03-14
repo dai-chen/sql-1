@@ -162,7 +162,7 @@
       ],
       "priority": 12,
       "passes": false,
-      "notes": "~150+ failures across 40+ classes with 1-10 failures each. This is the long-tail cleanup."
+      "notes": "Iteration 12: +15 tests (1428→1443, 63.1%→63.7%). Fixed: (1) sort count limit missing in visitSort, (2) top/rare double-alias in visitRareTopN, (3) sort null ordering default (NULLS FIRST for ASC, NULLS LAST for DESC), (4) head-then-sort subquery wrap, (5) trendline field overwrite via DynamicPPLToSqlNodeConverter override. CalciteSortCommandIT: 25→30 ALL PASS. CalciteTopCommandIT: 1→5 pass. CalciteRareCommandIT: 1→4 pass. CalciteTrendlineCommandIT: 4→5 ALL PASS. Remaining: ~660 failures across 80+ classes. Still passes: false — 85% target not yet reached."
     },
     {
       "id": "V4-013",

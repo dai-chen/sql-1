@@ -676,3 +676,33 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - The PPL parser remaps eval-level max(a,b) to 'scalar_max' and min(a,b) to 'scalar_min'. These arrive as Function nodes (not AggregateFunction), so they're handled in visitFunction.
   - Mixed numeric+string comparison in CASE WHEN fails in Calcite — can't compare INTEGER and VARCHAR. Would need CAST to VARCHAR for all args, but this changes comparison semantics.
 ---
+
+## 2026-03-14T02:45 - V4-012: Sort/Top/Rare/Trendline long-tail fixes
+- **What was fixed**: 15 new tests passing across 4 test classes
+  - **Sort count limit**: Added `pendingFetch = intLiteral(node.getCount())` in visitSort() when count > 0. PPL `sort 3 - account_number` now generates ORDER BY with FETCH NEXT 3 ROWS ONLY.
+  - **Top/Rare double-alias**: Moved `pipe = wrapAsSubquery()` inside the `if (!useNull)` block in visitRareTopN(). When useNull=true (default), Step 0 no longer wraps, preventing the `AS _t1 AS _t2` double-alias that caused SQL parse errors.
+  - **Sort null ordering**: Changed default from `nullFirst = true` (always NULLS FIRST) to `nullFirst = asc` (NULLS FIRST for ASC, NULLS LAST for DESC). The PPL parser never produces a 'nullFirst' argument, so the default must match PPL semantics.
+  - **Head-then-sort subquery wrap**: Added check at start of visitSort(): if pendingFetch is set from a prior head command, apply it first via `applyPendingOrderBy(pipe)` and wrap as subquery before building new ORDER BY. Prevents `head 2 | sort age` from becoming `ORDER BY age LIMIT 2` (wrong: sort all, take 2) instead of correct `SELECT * FROM (... LIMIT 2) ORDER BY age` (take 2, then sort).
+  - **Trendline field overwrite**: Added visitTrendline override in DynamicPPLToSqlNodeConverter that uses resolveColumns() to detect when a trendline alias matches an existing column, then uses SqlStarExceptReplace with REPLACE for those columns. Base converter keeps simple SELECT *, expr AS alias for new columns.
+- **Pass rate change**: 63.1% (1428/2264) → 63.7% (1443/2264) = +0.6pp, +15 tests
+- **Per-class results** (before → after):
+  - CalciteSortCommandIT: 25→30 pass (30 total, 0 fail) ✅ ALL PASS
+  - CalciteTopCommandIT: 1→5 pass (6 total, 1 fail: testTopCommandLegacyFalse)
+  - CalciteRareCommandIT: 1→4 pass (5 total, 1 fail: testRareCommandLegacyFalse)
+  - CalciteTrendlineCommandIT: 4→5 pass (5 total, 0 fail) ✅ ALL PASS
+  - CalcitePPLEventstatsIT: 25→25 pass (27 total, 2 fail: unchanged)
+- **Remaining failures in targeted classes**:
+  - TopCommandIT (1): testTopCommandLegacyFalse — PPL_SYNTAX_LEGACY_PREFERRED=false not passed through to converter's parse() DEFAULT_SETTINGS
+  - RareCommandIT (1): testRareCommandLegacyFalse — same settings passthrough issue
+  - EventstatsIT (2): testEventstatsDistinctCountFunction (COUNT DISTINCT in window not supported), testUnsupportedWindowFunctions (error message mismatch)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+22/-5: sort count limit, top/rare double-alias, sort null ordering, head-then-sort)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+42: visitTrendline override)
+  - api/src/test/java/org/opensearch/sql/api/PPLToSqlNodeConverterTest.java (+3/-4: updated top/rare expected SQL)
+- **Learnings for future iterations:**
+  - The PPL parser (ArgumentFactory) never produces a 'nullFirst' argument for sort fields — only 'asc' and 'type'. The converter must apply the PPL default: NULLS FIRST for ASC, NULLS LAST for DESC.
+  - wrapAsSubquery() adds an AS alias to the pipe. If pipe is already an AS-aliased node (from a prior wrapAsSubquery), calling it again produces a double-alias. Always ensure pipe is a full SELECT statement before calling wrapAsSubquery().
+  - SqlOrderBy returned by applyPendingOrderBy() is NOT a subquery — it needs to be wrapped in SELECT * FROM (...) AS alias before further processing.
+  - SqlStarExceptReplace REPLACE only works for columns that already exist. For new columns, use regular SELECT *, expr AS alias. The two-tier pattern (base converter for simple case, dynamic converter for schema-aware override) works well here.
+  - PPL_SYNTAX_LEGACY_PREFERRED cluster setting is not passed through to the converter's parse() method. The DEFAULT_SETTINGS in PPLToSqlNodeConverter returns null for this setting, causing legacyPreferred() to always return true. This affects useNull defaults for top/rare commands.
+---
