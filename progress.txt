@@ -775,3 +775,31 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - ARRAY() with string literals creates CHAR(N) values padded to max length. Cast to VARCHAR to prevent padding.
   - RestUnifiedSQLQueryAction.jdbcTypeToString() needs explicit cases for non-standard SQL types (ARRAY, STRUCT, etc.) — they fall through to "keyword" otherwise.
 ---
+
+## 2026-03-14T05:14 - V4-014: Implement MV (multi-value) commands
+- **What was fixed**: 27 new tests passing across 4 test classes (23→50 of 58)
+  - **MvExpand column qualification**: Fixed column ambiguity in CROSS JOIN UNNEST by predicting the subquery alias (`_tN`) before calling `wrapAsSubquery()`, then qualifying ALL non-expanded columns with the subquery alias. Previously, unqualified `identifier(col)` was ambiguous because columns existed in both the subquery and UNNEST output.
+  - **MvExpand non-array field handling**: Added `isArrayField()` helper that checks the table schema to determine if a field is ARRAY/MULTISET type. For non-array fields (VARCHAR, INTEGER), mvexpand is now a no-op instead of failing with "Cannot apply UNNEST to VARCHAR/INTEGER".
+  - **MVAppend scalar wrapping**: Added `ensureArrayArg()` helper that wraps scalar args in `ARRAY()` before passing to `ARRAY_CONCAT`. Smart detection: if arg is already an array-producing expression (ARRAY, ARRAY_CONCAT, SPLIT, etc.), passes through unchanged. For identifiers (which may be array fields), also passes through.
+  - **MvCombine column resolution**: Changed `visitMvCombine` to prefer `extractPipeColumns()` over `resolveColumns(tableName)`, fixing "Column not found" errors when mvcombine follows a pipeline that narrows columns. Added field existence validation that throws IllegalArgumentException for missing fields.
+- **Pass rate change**: ~65.1% → ~66.3% (estimated +27 net new tests)
+- **Per-class results** (before → after):
+  - CalciteMvExpandCommandIT: 0→13 pass (16 total, 3 fail)
+  - CalciteMVAppendFunctionIT: 3→12 pass (15 total, 3 fail)
+  - CalciteMvCombineCommandIT: 2→7 pass (7 total, 0 fail) ✅ ALL PASS
+  - CalciteNoMvCommandIT: 18→18 pass (20 total, 2 fail, unchanged)
+- **Remaining 8 failures**:
+  - MvExpand (3): 2 per-document limit (SqlNode converter applies global LIMIT instead of per-document), 1 nested object format (returned as string instead of JSON)
+  - MVAppend (3): heterogeneous array type coercion — ARRAY(1, 'text', 2.5) forces all elements to CHAR type with padding (Calcite limitation)
+  - NoMv (2): error code 500 vs expected 400 (Column not found returns 500 instead of 400)
+- **No regressions**: Verified DateTimeComparison (191/191), Sort (30/30), Trendline (5/5), Text (24/24), Crypto (4/4), ArrayFunction (30/60), Parse (7/7), Eval (4/4), BuiltinFunctionsNull (63/71)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+98/-6: visitMvExpand rewrite, isArrayField, visitMvCombine extractPipeColumns preference)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+50/-3: ensureArrayArg, mvappend scalar wrapping)
+- **Learnings for future iterations:**
+  - CROSS JOIN UNNEST creates a combined namespace where columns from both sides are visible. ALL column references must be qualified with the source alias to avoid ambiguity.
+  - Predict the subquery alias before calling wrapAsSubquery() by reading aliasCounter.get()+1. The alias is `_t` + counter value.
+  - UNNEST on non-array types (VARCHAR, INTEGER) fails with type error. Check schema for ARRAY/MULTISET type before applying UNNEST. For non-array fields, mvexpand should be a no-op.
+  - ARRAY_CONCAT requires ALL arguments to be arrays. Scalar args must be wrapped in ARRAY() first. Use smart detection to avoid double-wrapping array expressions.
+  - extractPipeColumns() should be preferred over resolveColumns() for commands that follow pipeline-narrowing operations (fields, eval, etc.).
+---

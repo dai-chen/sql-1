@@ -187,8 +187,8 @@
         "Unit tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": "54 failures (14+19+6+15). Needs UNNEST/ARRAY_AGG patterns."
+      "passes": true,
+      "notes": "27 new tests passing (23→50 of 58). CalciteMvExpandCommandIT: 0→13 pass (3 fail: 2 per-doc limit, 1 nested object format). CalciteMVAppendFunctionIT: 3→12 pass (3 fail: heterogeneous array type coercion). CalciteMvCombineCommandIT: 2→7 ALL PASS. CalciteNoMvCommandIT: 18→18 (2 fail: error code 500 vs 400). Fixes: (1) MvExpand column qualification with subquery alias to eliminate ambiguity, (2) non-array field detection via isArrayField() schema check, (3) MVAppend ensureArrayArg() wrapping scalars in ARRAY() before ARRAY_CONCAT, (4) MvCombine extractPipeColumns() preference over resolveColumns() + field existence validation."
     },
     {
       "id": "V4-015",
