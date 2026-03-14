@@ -707,8 +707,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
     // Check if any eval variable overrides an existing column in the pipe's SELECT list
     Set<String> pipeColNames = new java.util.HashSet<>();
-    if (pipe instanceof org.apache.calcite.sql.SqlSelect) {
-      org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+    // Unwrap SqlOrderBy to get the underlying SqlSelect for column detection
+    SqlNode pipeForOverride = pipe;
+    if (pipeForOverride instanceof SqlOrderBy) {
+      pipeForOverride = ((SqlOrderBy) pipeForOverride).query;
+    }
+    if (pipeForOverride instanceof org.apache.calcite.sql.SqlSelect) {
+      org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipeForOverride;
       if (sel.getSelectList() != null) {
         for (SqlNode item : sel.getSelectList()) {
           String name = extractPipeColumnName(item);
@@ -725,11 +730,45 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
     }
 
-    if (hasOverride && pipe instanceof org.apache.calcite.sql.SqlSelect) {
-      // Override case: modify the pipe's SELECT list in-place to replace
-      // overridden columns, then add new columns. This avoids the ambiguity
-      // from SELECT *, expr AS col where col already exists in the subquery.
-      org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+    if (hasOverride && pipeForOverride instanceof org.apache.calcite.sql.SqlSelect) {
+      org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipeForOverride;
+
+      // If the pipe has GROUP BY, wrap as subquery first so eval expressions
+      // can reference aggregated columns without GROUP BY restrictions.
+      if (sel.getGroup() != null && sel.getGroup().size() > 0) {
+        SqlNodeList oldList = sel.getSelectList();
+        // Collect column names from the grouped query's SELECT list
+        List<String> origColNames = new ArrayList<>();
+        for (SqlNode item : oldList) {
+          String name = extractPipeColumnName(item);
+          if (name != null) origColNames.add(name);
+        }
+        // Wrap grouped query as subquery
+        SqlNode sub = wrapAsSubquery();
+        // Build SELECT list: for overridden columns use eval expr, others reference by name
+        Set<String> overrideNames = new java.util.HashSet<>();
+        for (var entry : evalEntries) {
+          if (pipeColNames.contains(entry.getKey())) overrideNames.add(entry.getKey());
+        }
+        List<SqlNode> items = new ArrayList<>();
+        for (String name : origColNames) {
+          if (overrideNames.contains(name)) {
+            items.add(as(evalAliases.get(name), name));
+          } else {
+            items.add(identifier(name));
+          }
+        }
+        // Add new (non-override) eval columns
+        for (var entry : evalEntries) {
+          if (!pipeColNames.contains(entry.getKey())) {
+            items.add(as(entry.getValue(), entry.getKey()));
+          }
+        }
+        pipe = select(items.toArray(new SqlNode[0])).from(sub).build();
+        return pipe;
+      }
+
+      // Non-GROUP BY override: modify the pipe's SELECT list in-place
       SqlNodeList oldList = sel.getSelectList();
 
       // Build a map of existing column name -> expression (for substitution)
@@ -2093,6 +2132,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if ("timestampdiff".equals(name)) {
       SqlNode unit = args.get(0);
       String unitStr = (unit instanceof SqlLiteral) ? ((SqlLiteral) unit).toValue().replace("'", "") : unit.toString().replace("'", "").replace("`", "");
+      // For MILLISECOND, use SECOND * 1000 to avoid int32 overflow on intervals > ~24 days
+      if ("MILLISECOND".equalsIgnoreCase(unitStr)) {
+        return times(cast(call("TIMESTAMPDIFF", identifier("SECOND"),
+            ensureTimestamp(args.get(1)), ensureTimestamp(args.get(2))), typeSpec(SqlTypeName.BIGINT)),
+            intLiteral(1000));
+      }
       return cast(call("TIMESTAMPDIFF", identifier(unitStr), ensureTimestamp(args.get(1)), ensureTimestamp(args.get(2))), typeSpec(SqlTypeName.BIGINT));
     }
     // timestampadd
@@ -2805,8 +2850,26 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           new SqlNode[] {shifted, new SqlIntervalQualifier(TimeUnit.WEEK, null, POS)}, POS);
       return call("TIMESTAMPADD", identifier("DAY"), intLiteral(1), floored);
     }
-    return new SqlBasicCall(SqlStdOperatorTable.FLOOR,
-        new SqlNode[] {field, new SqlIntervalQualifier(spanUnitToTimeUnit(unit), null, POS)}, POS);
+    // Check if span value is 1 — use simple FLOOR(field TO unit)
+    boolean isUnitSpan = false;
+    if (node.getValue() instanceof org.opensearch.sql.ast.expression.Literal) {
+      Object v = ((org.opensearch.sql.ast.expression.Literal) node.getValue()).getValue();
+      if (v instanceof Number && ((Number) v).intValue() == 1) {
+        isUnitSpan = true;
+      }
+    }
+    if (isUnitSpan) {
+      return new SqlBasicCall(SqlStdOperatorTable.FLOOR,
+          new SqlNode[] {field, new SqlIntervalQualifier(spanUnitToTimeUnit(unit), null, POS)}, POS);
+    }
+    // For multi-unit time spans (e.g., span=2m), use:
+    // TIMESTAMPADD(unit, FLOOR(TIMESTAMPDIFF(unit, epoch, field) / value) * value, epoch)
+    String unitName = spanUnitToTimeUnit(unit).toString();
+    SqlNode epoch = cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP));
+    SqlNode diff = call("TIMESTAMPDIFF", identifier(unitName), epoch, field);
+    SqlNode floored = times(call("FLOOR", divide(cast(diff, typeSpec(SqlTypeName.DOUBLE)), value)), value);
+    SqlNode flooredInt = cast(floored, typeSpec(SqlTypeName.INTEGER));
+    return call("TIMESTAMPADD", identifier(unitName), flooredInt, epoch);
   }
 
   private static TimeUnit spanUnitToTimeUnit(SpanUnit u) {
@@ -2909,8 +2972,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
 
     // Determine if limit logic will be applied
-    boolean applyLimit = hasExplicitLimit
-        && node.getColumnSplit() != null && node.getRowSplit() != null;
+    boolean applyLimit = node.getColumnSplit() != null
+        && node.getRowSplit() != null && limit > 0;
 
     // Fix 2: When no rowSplit and columnSplit is a numeric span, don't cast to VARCHAR
     boolean skipVarcharCast = (node.getRowSplit() == null && colSplitIsNumericSpan);
@@ -3025,11 +3088,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     SqlNode withTotal = select(star(), colTotal).from(base).build();
     SqlNode withTotalSub = subquery(withTotal, nextAlias());
 
-    // Step 3: Add DENSE_RANK() OVER (ORDER BY _col_total DESC/ASC NULLS LAST) as _rn
+    // Step 3: Add DENSE_RANK() OVER (ORDER BY _col_total DESC/ASC, colAlias NULLS LAST) as _rn
     SqlNode rankOrder = top ? desc(identifier("_col_total")) : identifier("_col_total");
     SqlNode rn = as(
         window(call("DENSE_RANK"), SqlNodeList.EMPTY,
-            new SqlNodeList(List.of(nullsLast(rankOrder)), POS)), "_rn");
+            new SqlNodeList(List.of(nullsLast(rankOrder), identifier(colAlias)), POS)), "_rn");
     SqlNode ranked = select(identifier(rowAlias), identifier(colAlias),
         identifier(aggAlias), rn).from(withTotalSub).build();
     SqlNode rankedSub = subquery(ranked, nextAlias());
