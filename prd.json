@@ -211,8 +211,8 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": "Phase 4. Critical validation — PPL V3 overwrites all datetime functions with UDT-based implementations. Parquet schema uses native Calcite types."
+      "passes": true,
+      "notes": "Added 30 datetime functions + SPAN to ParquetEngineCapabilities SUPPORTED_FUNCTIONS. Enhanced unit tests with structural assertions (absorbed operator types, row types). Added combined datetime comparison + span + aggregate test. All tests pass — no UDT type mismatch at planning level."
     },
     {
       "id": "US-014",

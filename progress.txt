@@ -10,6 +10,7 @@
 - Cross-module sharing: put shared utilities in common/ module (both legacy/ and plugin/ depend on it)
 - Build exclusions for local dev: `-x integTest -x :integ-test:yamlRestTest -x :doctest:bootstrap -x :doctest:build`
 - Function validation pattern: UnsupportedFunctionValidator (RelVisitor + RexShuttle) checks SqlKind.OTHER_FUNCTION calls against EngineCapabilities. Validate BEFORE BoundaryScan replacement.
+- PPL V3 datetime UDTs (EXPR_TIMESTAMP) are VARCHAR-backed. Standard Calcite TIMESTAMP is DATETIME family. PPLTypeChecker bridges via convertRelDataTypeToSqlTypeName(). DatePartFunction works with both at planning level. SpanFunction has runtime-only issue (instanceof ExprSqlType check).
 - REST handler routing pattern: insert check in prepareRequest() BEFORE the existing `return channel ->` lambda. Return a different RestChannelConsumer for the new code path.
 - Formatter-dependent code goes in protocol/ module (NOT common/) — common/ cannot depend on core/ or protocol/ without circular deps
 - Parquet stub response: ParquetStubResponse in protocol/.../response/ — buildStubQueryResult(), formatAsSimpleJson(), formatAsJdbc(). Used by both PPL and SQL handlers.
@@ -250,4 +251,22 @@
   - PPL match() function appears as SqlKind.OTHER_FUNCTION in the Calcite RelNode tree — this is how custom/named functions are represented
   - Validation must happen BEFORE BoundaryScan replacement — the validator checks LogicalFilter/LogicalProject which exist in the raw plan, not after absorption
   - RestPPLQueryAction already catches exceptions from ParquetQueryPlanner.plan() and returns 400 — no handler changes needed
+---
+
+## 2026-03-14T02:40 - US-013
+- Verified datetime functions work without UDT interference on Parquet schema with standard Calcite TIMESTAMP types
+- Added 30 datetime functions + SPAN to ParquetEngineCapabilities SUPPORTED_FUNCTIONS set
+- Enhanced unit tests with structural assertions: absorbed operator types (LogicalFilter, LogicalAggregate), row type validation (hour field), absorbed operator counts
+- Added combined test: `where timestamp > '2024-01-01' | stats count() by span(timestamp, 1h)` validates filter + aggregate absorption with datetime comparison and span
+- Enhanced IT tests with plan content assertions (span, absorbed, 2024)
+- Files modified:
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/spi/ParquetEngineCapabilities.java (added 31 datetime/span functions to SUPPORTED_FUNCTIONS)
+  - plugin/src/test/java/org/opensearch/sql/plugin/routing/ParquetQueryPlannerTest.java (enhanced 2 tests + added 1 new combined test)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/ParquetQueryIT.java (enhanced 2 tests + added 1 new combined test)
+- **Learnings for future iterations:**
+  - PPL V3 datetime UDTs (EXPR_TIMESTAMP) are VARCHAR-backed, not TIMESTAMP-backed. Standard Calcite TIMESTAMP types belong to DATETIME family. PPLTypeChecker bridges UDT→DATETIME via convertRelDataTypeToSqlTypeName().
+  - DatePartFunction (HOUR, MINUTE, etc.) works with standard Calcite TIMESTAMP at planning level — converts via ExprValueUtils.fromObjectValue()
+  - SpanFunction has a known runtime issue: `fieldType instanceof ExprSqlType` check fails for standard Calcite TIMESTAMP. At planning level it works fine — the mismatch only surfaces during execution.
+  - RelOptUtil.toString() only shows top-level plan tree, not internals of absorbed operators. HOUR gets absorbed into BoundaryScan (as part of LogicalProject), so it doesn't appear in plan string. Validate via row type and absorbed operator inspection instead.
+  - Combined datetime queries (filter + span + aggregate) work correctly at planning level — all operators absorbed into BoundaryScan
 ---
