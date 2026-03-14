@@ -334,6 +334,28 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     return cols;
   }
 
+  /** Resolve table columns plus any extra aliased columns from the pipe's SELECT list (e.g. from eval). */
+  private List<String> resolveColumnsWithPipeExtras() {
+    List<String> cols = new ArrayList<>(resolveColumns(tableName));
+    SqlNode target = pipe;
+    if (target instanceof org.apache.calcite.sql.SqlOrderBy) {
+      target = ((org.apache.calcite.sql.SqlOrderBy) target).query;
+    }
+    if (target instanceof org.apache.calcite.sql.SqlSelect) {
+      SqlNodeList selectList = ((org.apache.calcite.sql.SqlSelect) target).getSelectList();
+      if (selectList != null) {
+        Set<String> existing = new LinkedHashSet<>(cols);
+        for (SqlNode item : selectList) {
+          String name = extractColumnName(item);
+          if (name != null && !existing.contains(name)) {
+            cols.add(name);
+          }
+        }
+      }
+    }
+    return cols;
+  }
+
   @Override
   public SqlNode visitReplace(Replace node, Void ctx) {
     // Check if pipe has been narrowed (e.g. by fields command)
@@ -618,9 +640,10 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         .sorted()
         .collect(Collectors.toList());
 
-    // Top-level columns: those without dots (exclude ALL nested sub-fields)
+    // Top-level columns: those without dots (exclude ALL nested sub-fields), sorted alphabetically
     List<String> topLevelCols = allCols.stream()
         .filter(c -> !c.contains("."))
+        .sorted()
         .collect(Collectors.toList());
 
     List<String> aliases = node.getAliases();
@@ -643,14 +666,16 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
     SqlNode sub = wrapAsSubquery();
     List<SqlNode> selectItems = new ArrayList<>();
-    // Iterate through top-level columns; insert sub-fields right after the flattened field
+    // Add all top-level columns EXCEPT the flattened field first
     for (String col : topLevelCols) {
-      selectItems.add(identifier(col));
-      if (col.equals(fieldName)) {
-        for (int i = 0; i < subFields.size(); i++) {
-          selectItems.add(as(identifier(subFields.get(i)), outputNames.get(i)));
-        }
+      if (!col.equals(fieldName)) {
+        selectItems.add(identifier(col));
       }
+    }
+    // Then add the flattened field and its sub-fields at the end
+    selectItems.add(identifier(fieldName));
+    for (int i = 0; i < subFields.size(); i++) {
+      selectItems.add(as(identifier(subFields.get(i)), outputNames.get(i)));
     }
     pipe = select(selectItems.toArray(new SqlNode[0])).from(sub).build();
     return pipe;
@@ -837,11 +862,25 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   public SqlNode visitExpand(Expand node, Void ctx) {
     String fieldName = node.getField().getField().toString();
-    List<String> allCols = resolveColumns(tableName);
-    allCols = allCols.stream().filter(n -> !n.startsWith("_") && !n.contains(".")).collect(Collectors.toList());
+
+    // Prefer pipe columns (handles eval-then-expand)
+    List<String> allCols = extractPipeColumns();
+    boolean usePipeCols = !allCols.isEmpty();
+    if (!usePipeCols) {
+      // extractPipeColumns returns empty when pipe has * — resolve * plus extra aliases
+      allCols = resolveColumnsWithPipeExtras();
+      allCols = allCols.stream().filter(n -> !n.startsWith("_") && !n.contains(".")).collect(Collectors.toList());
+    }
     if (allCols.isEmpty()) return pipe;
 
-    if (!isArrayField(fieldName)) return pipe;
+    boolean isArray = isArrayField(fieldName);
+    // If field is in table schema but not an array type, skip expand
+    if (!isArray) {
+      List<String> tableCols = resolveColumns(tableName);
+      boolean fieldInTable = tableCols.stream().anyMatch(c -> c.equals(fieldName));
+      if (fieldInTable) return pipe;
+      // Field not in table schema (eval alias) — proceed with UNNEST
+    }
 
     String alias = node.getAlias() != null ? node.getAlias() : fieldName;
     String subqueryAlias = "_t" + (aliasCounter.get() + 1);

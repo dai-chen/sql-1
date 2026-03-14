@@ -43,6 +43,45 @@ public class DynamicPPLToSqlNodeConverterTest {
             .build();
       }
     });
+    // Table with nested struct fields (mapping order: message, comment, myNum, someField)
+    schema.add("nested_tbl", new AbstractTable() {
+      @Override
+      public RelDataType getRowType(RelDataTypeFactory typeFactory) {
+        return typeFactory.builder()
+            .add("message", typeFactory.createArrayType(
+                typeFactory.createStructType(
+                    java.util.List.of(
+                        typeFactory.createSqlType(SqlTypeName.VARCHAR),
+                        typeFactory.createSqlType(SqlTypeName.VARCHAR),
+                        typeFactory.createSqlType(SqlTypeName.BIGINT)),
+                    java.util.List.of("author", "info", "dayOfWeek")), -1))
+            .add("message.author", SqlTypeName.VARCHAR)
+            .add("message.dayOfWeek", SqlTypeName.BIGINT)
+            .add("message.info", SqlTypeName.VARCHAR)
+            .add("myNum", SqlTypeName.BIGINT)
+            .add("comment", typeFactory.createArrayType(
+                typeFactory.createStructType(
+                    java.util.List.of(
+                        typeFactory.createSqlType(SqlTypeName.VARCHAR),
+                        typeFactory.createSqlType(SqlTypeName.BIGINT)),
+                    java.util.List.of("data", "likes")), -1))
+            .add("someField", SqlTypeName.VARCHAR)
+            .build();
+      }
+    });
+    // Table with array field for expand tests
+    schema.add("arr_tbl", new AbstractTable() {
+      @Override
+      public RelDataType getRowType(RelDataTypeFactory typeFactory) {
+        return typeFactory.builder()
+            .add("name", SqlTypeName.VARCHAR)
+            .add("age", SqlTypeName.BIGINT)
+            .add("address", typeFactory.createArrayType(
+                typeFactory.createSqlType(SqlTypeName.VARCHAR), -1))
+            .add("id", SqlTypeName.BIGINT)
+            .build();
+      }
+    });
   }
 
   private static String toSql(SqlNode node) {
@@ -95,5 +134,26 @@ public class DynamicPPLToSqlNodeConverterTest {
         SELECT * REPLACE ("b" AS "a")
         FROM (SELECT *
         FROM "t") AS "_t1\"""");
+  }
+
+  @Test
+  public void testFlattenColumnOrdering() {
+    // Flatten should produce top-level columns in alphabetical order:
+    // comment, myNum, someField (not myNum, comment, someField)
+    ppl("source=nested_tbl | flatten message").shouldTranslateTo("""
+        SELECT "comment", "myNum", "someField", "message", "message.author" AS "author", "message.dayOfWeek" AS "dayOfWeek", "message.info" AS "info"
+        FROM (SELECT *
+        FROM "nested_tbl") AS "_t1\"""");
+  }
+
+  @Test
+  public void testExpandWithEvalAlias() {
+    // eval addr=address creates a new column; expand addr should include all 5 columns
+    ppl("source=arr_tbl | eval addr=address | expand addr").shouldTranslateTo(
+        "SELECT \"_t2\".\"name\", \"_t2\".\"age\", \"_t2\".\"address\", \"_t2\".\"id\", \"_u\".\"addr\" AS \"addr\"\n"
+            + "FROM (SELECT *, \"address\" AS \"addr\"\n"
+            + "FROM (SELECT *\n"
+            + "FROM \"arr_tbl\") AS \"_t1\") AS \"_t2\"\n"
+            + "CROSS JOIN UNNEST(\"_t2\".\"addr\") AS \"_u\" (\"addr\")");
   }
 }
