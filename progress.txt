@@ -154,3 +154,21 @@
   - MockParquetSchemaProvider uses CalciteSchema.createRootSchema(true).plus() — same pattern as UnifiedQueryContext
   - ParquetTable column order: message, status, timestamp, active (matches stub response schema from US-005)
 ---
+
+## 2026-03-14T01:41 - US-009
+- Created EngineCapabilities interface in org.opensearch.analytics.spi package
+- Created ParquetEngineCapabilities mock implementation declaring supported operators and functions
+- Supports operators: LogicalFilter, LogicalProject, LogicalAggregate, LogicalSort
+- Supports functions: math (+,-,*,/), comparison (=,<>,<,>,<=,>=), string (UPPER,LOWER,SUBSTRING,TRIM,CONCAT), aggregates (COUNT,SUM,AVG,MIN,MAX)
+- Does NOT support full-text search: match, match_phrase, match_bool_prefix, match_phrase_prefix, multi_match, simple_query_string, query_string
+- 7 unit tests all passing
+- Files created:
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/spi/EngineCapabilities.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/spi/ParquetEngineCapabilities.java
+  - analytics-engine-stub/src/test/java/org/opensearch/analytics/spi/ParquetEngineCapabilitiesTest.java
+- **Learnings for future iterations:**
+  - EngineCapabilities uses Set-based lookups for both operators (Class<? extends RelNode>) and functions (String name)
+  - ParquetEngineCapabilities explicitly blocks full-text search functions via UNSUPPORTED_FUNCTIONS set
+  - Function names are stored as uppercase for standard SQL functions, lowercase for OpenSearch-specific functions (match, match_phrase)
+  - No changes needed to AnalyticsBackEndPlugin or EngineContext — EngineCapabilities is standalone for now
+---
