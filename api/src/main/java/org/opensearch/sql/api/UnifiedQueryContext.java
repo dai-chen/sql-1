@@ -9,6 +9,7 @@ import static org.opensearch.sql.common.setting.Settings.Key.PPL_JOIN_SUBSEARCH_
 import static org.opensearch.sql.common.setting.Settings.Key.PPL_SUBSEARCH_MAXOUT;
 import static org.opensearch.sql.common.setting.Settings.Key.QUERY_SIZE_LIMIT;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,22 +20,34 @@ import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.RelTraitDef;
 import org.apache.calcite.rel.metadata.DefaultRelMetadataProvider;
 import org.apache.calcite.rel.rules.CoreRules;
+import org.apache.calcite.schema.ImplementableFunction;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.SqlBasicFunction;
 import org.apache.calcite.sql.SqlAggFunction;
+import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlOperandCountRange;
+import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.fun.SqlLibrary;
 import org.apache.calcite.sql.fun.SqlLibraryOperatorTableFactory;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.calcite.sql.type.InferTypes;
 import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.ReturnTypes;
+import org.apache.calcite.sql.type.SqlOperandMetadata;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.util.SqlOperatorTables;
 import org.apache.calcite.sql.validate.SqlConformance;
+import org.apache.calcite.sql.validate.SqlUserDefinedFunction;
 import org.apache.calcite.sql.validate.SqlValidator;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.sql.SqlCallBinding;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Programs;
@@ -288,7 +301,15 @@ public class UnifiedQueryContext implements AutoCloseable {
                       SqlLibrary.POSTGRESQL),
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
                       pplFirst, pplLast, percentileApprox, percentileApproxUpper, take,
-                      list, values, PPLBuiltinOperators.SHA2, PPLBuiltinOperators.MVFIND, PPLBuiltinOperators.MVFIND_UPPER)))
+                      list, values, PPLBuiltinOperators.SHA2, PPLBuiltinOperators.MVFIND, PPLBuiltinOperators.MVFIND_UPPER,
+                      wrapJsonUdf(PPLBuiltinOperators.JSON),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_ARRAY_LENGTH),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_EXTRACT),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_KEYS),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_SET),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_DELETE),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_APPEND),
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_EXTEND))))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .sqlValidatorConfig(SqlValidator.Config.DEFAULT
@@ -309,6 +330,45 @@ public class UnifiedQueryContext implements AutoCloseable {
         }
       }
       return current;
+    }
+
+    /** Variadic operand metadata that accepts any number of arguments. */
+    private static final SqlOperandMetadata VARIADIC_METADATA = new SqlOperandMetadata() {
+      @Override public List<RelDataType> paramTypes(RelDataTypeFactory typeFactory) {
+        return Collections.emptyList();
+      }
+      @Override public List<String> paramNames() {
+        return Collections.emptyList();
+      }
+      @Override public boolean checkOperandTypes(SqlCallBinding callBinding, boolean throwOnFailure) {
+        return true;
+      }
+      @Override public SqlOperandCountRange getOperandCountRange() {
+        return OperandTypes.VARIADIC.getOperandCountRange();
+      }
+      @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+        return opName + "(...)";
+      }
+    };
+
+    /**
+     * Wraps a JSON UDF (which has null operand metadata) into a new SqlUserDefinedFunction
+     * with variadic operand metadata so that Calcite validation can determine operand count.
+     */
+    private static SqlUserDefinedFunction wrapJsonUdf(SqlOperator udf) {
+      SqlUserDefinedFunction original = (SqlUserDefinedFunction) udf;
+      return new SqlUserDefinedFunction(
+          new SqlIdentifier(Collections.singletonList(original.getName()), SqlParserPos.ZERO),
+          SqlKind.OTHER_FUNCTION,
+          original.getReturnTypeInference(),
+          InferTypes.ANY_NULLABLE,
+          VARIADIC_METADATA,
+          original.getFunction()) {
+        @Override
+        public boolean isDeterministic() {
+          return original.isDeterministic();
+        }
+      };
     }
 
   }

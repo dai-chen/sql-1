@@ -2494,6 +2494,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if ("sha2".equals(name) && args.size() == 2)
       return new SqlBasicCall(PPLBuiltinOperators.SHA2,
           new SqlNode[]{args.get(0), cast(args.get(1), typeSpec(SqlTypeName.INTEGER))}, POS);
+    // json_valid → expr IS JSON VALUE (postfix operator)
+    if ("json_valid".equals(name))
+      return new SqlBasicCall(SqlStdOperatorTable.IS_JSON_VALUE, new SqlNode[]{args.get(0)}, POS);
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     return call(sqlName, args.toArray(new SqlNode[0]));
