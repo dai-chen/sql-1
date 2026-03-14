@@ -134,3 +134,23 @@
   - IT class extends PPLIntegTestCase. For SQL queries, build manual POST requests to /_plugins/_sql since the inherited executeQuery() is PPL-specific.
   - Stub schema has null aliases, so JDBC formatter omits the alias field from schema JSON (schema matcher must use null alias)
 ---
+
+## 2026-03-14T01:32 - US-008
+- Created mock Calcite Schema for Parquet index in analytics-engine-stub/ module
+- ParquetTable extends AbstractTable with 4 nullable columns using standard Calcite SqlTypeName:
+  - message → VARCHAR, status → BIGINT, timestamp → TIMESTAMP, active → BOOLEAN
+- MockParquetSchemaProvider implements SchemaProvider, creates root schema and registers ParquetTable as "parquet_index"
+- 3 unit tests: column count/names/types, nullable flags, FrameworkConfig registration
+- Added JUnit 5 test dependencies to analytics-engine-stub/build.gradle
+- Files created:
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/schema/ParquetTable.java
+  - analytics-engine-stub/src/main/java/org/opensearch/analytics/schema/MockParquetSchemaProvider.java
+  - analytics-engine-stub/src/test/java/org/opensearch/analytics/schema/MockParquetSchemaProviderTest.java
+- Files modified:
+  - analytics-engine-stub/build.gradle (added JUnit 5 deps + useJUnitPlatform())
+- **Learnings for future iterations:**
+  - analytics-engine-stub/ now has test infrastructure (JUnit 5) — future stories can add tests directly
+  - Standard Calcite types work fine in test schemas (CalcitePPLTimechartTest etc. already prove this)
+  - MockParquetSchemaProvider uses CalciteSchema.createRootSchema(true).plus() — same pattern as UnifiedQueryContext
+  - ParquetTable column order: message, status, timestamp, active (matches stub response schema from US-005)
+---

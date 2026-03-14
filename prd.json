@@ -131,8 +131,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "Phase 3. In analytics-engine-stub/ module. Use standard Calcite SqlTypeName, not OpenSearch EXPR_TIMESTAMP UDT."
+      "passes": true,
+      "notes": "ParquetTable (AbstractTable) with 4 nullable columns: message/VARCHAR, status/BIGINT, timestamp/TIMESTAMP, active/BOOLEAN. MockParquetSchemaProvider implements SchemaProvider, registers ParquetTable as 'parquet_index'. 3 unit tests validate schema. Standard Calcite SqlTypeName only — no OpenSearch UDTs."
     },
     {
       "id": "US-009",
