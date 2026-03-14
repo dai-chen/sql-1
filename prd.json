@@ -98,8 +98,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "Phase 2."
+      "passes": true,
+      "notes": "Added formatExplainAsJson() to ParquetStubResponse. PPL handler checks request.path().endsWith(\"/_explain\"), SQL handler uses existing isExplainRequest(). Both return stub JSON explain response for Parquet indices."
     },
     {
       "id": "US-007",
