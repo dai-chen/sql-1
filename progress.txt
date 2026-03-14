@@ -12,6 +12,14 @@
 - Type coercion: PPLTypeCoercion (MYSQL_5 conformance + DATE+TIME→TIMESTAMP)
 - Test wiring: PPLIntegTestCase V4 routing via -Dppl.engine.v4=true
 
+### Array/MV Function Patterns
+- Use SqlLibraryOperators.FUNC for array functions (ARRAY_DISTINCT, SPLIT, SORT_ARRAY, ARRAY_COMPACT, ARRAY, ARRAY_CONCAT, ARRAYS_ZIP, ARRAY_SLICE) — NOT call("FUNC") which creates SqlBasicFunction with wrong return type
+- ARRAY() with string literals: cast to VARCHAR to prevent CHAR padding
+- UDFs must be registered in BOTH lowercase and uppercase (SqlPrettyWriter uppercases all function names)
+- RestUnifiedSQLQueryAction needs explicit java.sql.Types.ARRAY handling for JDBC response
+- ARRAY_SLICE requires INTEGER args — arithmetic expressions produce NUMERIC (engine limitation)
+- Lambda functions (forall, exists, filter, transform, reduce, mvmap) have no SQL equivalent — engine-blocked
+
 ### Bin Command Patterns
 - All bin types use subquery approach: SELECT *, binExpr AS _bin_field FROM (subquery)
 - binReplacements map tracks field→expression for downstream pipe resolution
@@ -734,4 +742,36 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - `extractPipeColumns()` should be tried before `resolveColumns()` for field exclusion — enables `fields + a, b | fields - a` pattern where the pipe has already narrowed the column set.
   - Code duplication in replace logic across 3 locations (base visitReplace, dynamic narrowed-pipe visitReplace, dynamic star-replace visitReplace) was a maintenance hazard. Extracted to `buildReplacePairExpr()` helper.
   - Most remaining V4-012 failures are engine-level blockers (spath, flatten, transpose, expand, consecutive dedup, etc.) that cannot be fixed in the converter.
+---
+
+## 2026-03-14T04:26 - V4-013: Implement array functions
+- **What was fixed**: 21 new tests passing in CalciteArrayFunctionIT (9→30)
+  - **SqlLibraryOperators for array functions**: Replaced `call("ARRAY_DISTINCT", ...)` (which creates SqlBasicFunction with ReturnTypes.ARG0_NULLABLE) with `new SqlBasicCall(SqlLibraryOperators.ARRAY_DISTINCT, ...)` which uses the library function's correct return type inference. Applied to: ARRAY_DISTINCT (mvdedup), ARRAY_COMPACT, SPLIT, SORT_ARRAY (mvsort), ARRAY (array), ARRAY_CONCAT (mvappend multi-arg), ARRAYS_ZIP (mvzip), ARRAY_SLICE (mvindex range).
+  - **VARCHAR cast for string literals in ARRAY()**: Added `isStringLiteral()` check in the `array` function handler to cast string literal args to VARCHAR, preventing CHAR padding (e.g., `ARRAY('1', 'text', '2.5')` → `ARRAY(CAST('1' AS VARCHAR), CAST('text' AS VARCHAR), CAST('2.5' AS VARCHAR))`). Fixed 3 ARRAY_JOIN padding tests.
+  - **MVFIND UDF registration**: Added `PPLBuiltinOperators.MVFIND_UPPER` (uppercase "MVFIND") alongside existing lowercase "mvfind" registration. Added both to UnifiedQueryContext operator table. SqlPrettyWriter uppercases function names, so the SQL endpoint needs the uppercase version. Fixed 6 mvfind tests.
+  - **ARRAY type in JDBC response**: Added `java.sql.Types.ARRAY → "array"` case to `RestUnifiedSQLQueryAction.jdbcTypeToString()` and array serialization in `formatAsJdbc()`. Previously ARRAY type fell through to "keyword" → "string". Fixed 14 type=array schema assertion tests.
+- **Pass rate change**: ~64.2% → ~65.1% (estimated +21 net new tests from CalciteArrayFunctionIT + spillover)
+- **Per-class results**:
+  - CalciteArrayFunctionIT: 9→30 pass (60 total, 30 fail) — +21
+  - CalciteNoMvCommandIT: 18/20 pass (was ~1/20 in V4-006 notes) — spillover from array type fix
+  - CalciteMVAppendFunctionIT: 3/15 pass — spillover
+  - No regressions in CalciteDateTimeComparisonIT (191/191), CalciteSortCommandIT (30/30), CalciteTrendlineCommandIT (5/5), CalcitePPLBuiltinFunctionsNullIT (63/71), CalcitePPLCastFunctionIT (11/21)
+- **Remaining 30 CalciteArrayFunctionIT failures**:
+  - 17 lambda functions (engine-blocked): forall, exists, filter, transform(4), reduce(4), mvmap(5) — need V3 UDFs, no SQL equivalent
+  - 7 mvindex range (engine-blocked): ARRAY_SLICE operand type checker requires INTEGER but arithmetic expressions produce NUMERIC — Calcite library function validation issue
+  - 2 MVFIND NPE: testMvfindWithEmptyArray, testMvfindWithNoMatch — UDF returns null on no match, unboxing to int fails
+  - 2 ARRAYS_ZIP ROW type: testMvzipBasic, testMvzipWithEmptyArray — ARRAYS_ZIP returns ROW-typed structs, need custom serialization
+  - 1 SPLIT empty delimiter: testSplitWithEmptyDelimiter — SPLIT('abcd', '') returns single string instead of char array
+  - 1 expected error: testArrayWithMix — error type mismatch
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+34/-18: SqlLibraryOperators for array functions, VARCHAR cast, MVFIND handler)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (+1/-1: MVFIND_UPPER in operator table)
+  - core/src/main/java/org/opensearch/sql/expression/function/PPLBuiltinOperators.java (+1: MVFIND_UPPER)
+  - legacy/src/main/java/org/opensearch/sql/legacy/plugin/RestUnifiedSQLQueryAction.java (+11: ARRAY type handling)
+- **Learnings for future iterations:**
+  - `call("FUNC_NAME", ...)` in SqlNodeDSL creates SqlBasicFunction with ReturnTypes.ARG0_NULLABLE — this overrides the library function's actual return type. For functions that return ARRAY type, MUST use `new SqlBasicCall(SqlLibraryOperators.FUNC, ...)` directly.
+  - SqlPrettyWriter uppercases ALL function names. UDFs registered with lowercase names won't be found when SQL is serialized and re-parsed. Always register both cases (pattern: SHA2, PERCENTILE_APPROX, MVFIND).
+  - Calcite's ARRAY_SLICE operand type checker requires INTEGER family, but arithmetic expressions (e.g., `idx + 1`) produce NUMERIC. Even CAST to INTEGER doesn't help — the validator still sees NUMERIC. This is an engine-level limitation.
+  - ARRAY() with string literals creates CHAR(N) values padded to max length. Cast to VARCHAR to prevent padding.
+  - RestUnifiedSQLQueryAction.jdbcTypeToString() needs explicit cases for non-standard SQL types (ARRAY, STRUCT, etc.) — they fall through to "keyword" otherwise.
 ---
