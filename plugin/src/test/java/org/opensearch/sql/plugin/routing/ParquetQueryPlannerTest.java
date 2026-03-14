@@ -147,6 +147,18 @@ public class ParquetQueryPlannerTest {
   }
 
   @Test
+  public void testSqlMatchOnParquetIndexThrows() {
+    UnsupportedOperationException ex =
+        assertThrows(
+            UnsupportedOperationException.class,
+            () ->
+                ParquetQueryPlanner.planSql(
+                    "SELECT * FROM parquet_index WHERE match(message, 'error')"));
+    assertTrue(ex.getMessage().contains("match"));
+    assertTrue(ex.getMessage().contains("not supported"));
+  }
+
+  @Test
   public void testSqlFilterProject() throws Exception {
     RelNode result =
         ParquetQueryPlanner.planSql(

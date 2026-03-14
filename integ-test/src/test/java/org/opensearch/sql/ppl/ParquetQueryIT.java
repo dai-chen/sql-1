@@ -114,6 +114,17 @@ public class ParquetQueryIT extends PPLIntegTestCase {
   }
 
   @Test
+  public void testSqlMatchOnParquetIndexFailsFast() throws IOException {
+    ResponseException ex =
+        assertThrows(
+            ResponseException.class,
+            () -> executeSqlQuery("SELECT * FROM parquet_index WHERE match(message, 'error')"));
+    assertEquals(400, ex.getResponse().getStatusLine().getStatusCode());
+    String body = getResponseBody(ex.getResponse(), true);
+    assertTrue(body.contains("not supported"));
+  }
+
+  @Test
   public void testPplHourFunctionOnParquetIndex() throws IOException {
     JSONObject response =
         executeQuery(

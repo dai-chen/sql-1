@@ -6,6 +6,7 @@
 package org.opensearch.sql.plugin.routing;
 
 import java.util.Map;
+import java.util.Set;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.RelOptUtil;
@@ -18,8 +19,17 @@ import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
+import org.apache.calcite.sql.SqlFunction;
+import org.apache.calcite.sql.SqlFunctionCategory;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlOperatorTable;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.sql.type.ReturnTypes;
+import org.apache.calcite.sql.util.ListSqlOperatorTable;
+import org.apache.calcite.sql.util.SqlOperatorTables;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Planner;
@@ -31,7 +41,6 @@ import org.opensearch.sql.api.UnifiedQueryContext;
 import org.opensearch.sql.api.UnifiedQueryPlanner;
 import org.opensearch.sql.executor.QueryType;
 
-/** Plans PPL and SQL queries against mock Parquet schema with BoundaryScan absorption. */
 public class ParquetQueryPlanner {
 
   private ParquetQueryPlanner() {}
@@ -45,10 +54,8 @@ public class ParquetQueryPlanner {
     };
   }
 
-  /** Parses PPL, generates RelNode, replaces scans with BoundaryScan, and runs absorption. */
   public static RelNode plan(String pplQuery) throws Exception {
     AbstractSchema schema = createParquetSchema();
-
     UnifiedQueryContext context =
         UnifiedQueryContext.builder()
             .language(QueryType.PPL)
@@ -64,10 +71,31 @@ public class ParquetQueryPlanner {
     }
   }
 
-  /**
-   * Parses ANSI SQL via Calcite's native Planner, replaces scans with BoundaryScan, and runs
-   * absorption.
-   */
+  private static final Set<String> SEARCH_FUNCTIONS =
+      Set.of(
+          "match",
+          "match_phrase",
+          "match_bool_prefix",
+          "match_phrase_prefix",
+          "multi_match",
+          "simple_query_string",
+          "query_string");
+
+  private static SqlOperatorTable createSearchFunctionTable() {
+    ListSqlOperatorTable table = new ListSqlOperatorTable();
+    SEARCH_FUNCTIONS.forEach(
+        name ->
+            table.add(
+                new SqlFunction(
+                    name,
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.BOOLEAN_NULLABLE,
+                    null,
+                    null,
+                    SqlFunctionCategory.USER_DEFINED_FUNCTION)));
+    return table;
+  }
+
   public static RelNode planSql(String sqlQuery) throws Exception {
     AbstractSchema schema = createParquetSchema();
     SchemaPlus rootSchema = CalciteSchema.createRootSchema(false).plus();
@@ -77,10 +105,25 @@ public class ParquetQueryPlanner {
         Frameworks.newConfigBuilder()
             .parserConfig(SqlParser.config().withLex(Lex.MYSQL))
             .defaultSchema(parquetSchema)
+            .operatorTable(
+                SqlOperatorTables.chain(
+                    createSearchFunctionTable(), SqlStdOperatorTable.instance()))
             .build();
     Planner planner = Frameworks.getPlanner(config);
     try {
-      SqlNode parsed = planner.parse(sqlQuery);
+      SqlNode parsed;
+      try {
+        parsed = planner.parse(sqlQuery);
+      } catch (SqlParseException e) {
+        String lower = sqlQuery.toLowerCase();
+        for (String fn : SEARCH_FUNCTIONS) {
+          if (lower.contains(fn + "(")) {
+            throw new UnsupportedOperationException(
+                "Function '" + fn + "' is not supported for Parquet indices");
+          }
+        }
+        throw e;
+      }
       SqlNode validated = planner.validate(parsed);
       RelRoot relRoot = planner.rel(validated);
       RelNode relNode = relRoot.rel;
@@ -91,7 +134,6 @@ public class ParquetQueryPlanner {
     }
   }
 
-  /** Formats a RelNode plan as a JSON explain string. */
   public static String formatExplain(RelNode relNode) {
     String plan = RelOptUtil.toString(relNode);
     return "{\"Parquet\":{\"plan\":\""
