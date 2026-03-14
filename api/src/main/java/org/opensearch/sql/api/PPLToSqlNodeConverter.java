@@ -2797,6 +2797,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (unit == SpanUnit.NONE || !SpanUnit.isTimeUnit(unit)) {
       return times(call("FLOOR", divide(field, value)), value);
     }
+    // For week unit, Calcite FLOOR(field TO WEEK) floors to Sunday.
+    // Shift by -1 day, floor to week, then shift back +1 day to get Monday-based week.
+    if ("w".equals(SpanUnit.getName(unit))) {
+      SqlNode shifted = call("TIMESTAMPADD", identifier("DAY"), intLiteral(-1), field);
+      SqlNode floored = new SqlBasicCall(SqlStdOperatorTable.FLOOR,
+          new SqlNode[] {shifted, new SqlIntervalQualifier(TimeUnit.WEEK, null, POS)}, POS);
+      return call("TIMESTAMPADD", identifier("DAY"), intLiteral(1), floored);
+    }
     return new SqlBasicCall(SqlStdOperatorTable.FLOOR,
         new SqlNode[] {field, new SqlIntervalQualifier(spanUnitToTimeUnit(unit), null, POS)}, POS);
   }
@@ -2877,6 +2885,35 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         || Boolean.TRUE.equals(args.get("usenull").getValue());
     String nullStr = args.get("nullstr") != null
         ? (String) args.get("nullstr").getValue() : "NULL";
+    boolean useOther = args.get("useother") == null
+        || Boolean.TRUE.equals(args.get("useother").getValue());
+    String otherStr = args.get("otherstr") != null
+        ? (String) args.get("otherstr").getValue() : "OTHER";
+    int limit = args.get("limit") != null
+        ? ((Number) args.get("limit").getValue()).intValue() : 10;
+    boolean top = args.get("top") == null
+        || Boolean.TRUE.equals(args.get("top").getValue());
+    boolean hasExplicitLimit = args.get("limit") != null && limit > 0;
+
+    // Determine if columnSplit is a Span (and whether it's numeric)
+    boolean colSplitIsSpan = false;
+    boolean colSplitIsNumericSpan = false;
+    if (node.getColumnSplit() != null) {
+      UnresolvedExpression colInner = node.getColumnSplit() instanceof Alias
+          ? ((Alias) node.getColumnSplit()).getDelegated() : node.getColumnSplit();
+      if (colInner instanceof Span) {
+        colSplitIsSpan = true;
+        SpanUnit su = ((Span) colInner).getUnit();
+        colSplitIsNumericSpan = (su == SpanUnit.NONE || !SpanUnit.isTimeUnit(su));
+      }
+    }
+
+    // Determine if limit logic will be applied
+    boolean applyLimit = hasExplicitLimit
+        && node.getColumnSplit() != null && node.getRowSplit() != null;
+
+    // Fix 2: When no rowSplit and columnSplit is a numeric span, don't cast to VARCHAR
+    boolean skipVarcharCast = (node.getRowSplit() == null && colSplitIsNumericSpan);
 
     List<SqlNode> selectItems = new ArrayList<>();
     List<SqlNode> groupByItems = new ArrayList<>();
@@ -2897,9 +2934,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       nullFilters.add(isNotNull(rowGroupBy));
     }
 
-    // Column split (optional) — cast to VARCHAR for nullstr/otherstr compatibility
+    // Column split (optional)
+    String colAlias = null;
     if (node.getColumnSplit() != null) {
-      SqlNode colSplitSelect = node.getColumnSplit().accept(this, null);
       SqlNode colGroupBy;
       if (node.getColumnSplit() instanceof Alias) {
         colGroupBy = ((Alias) node.getColumnSplit()).getDelegated().accept(this, null);
@@ -2907,21 +2944,34 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         colGroupBy = node.getColumnSplit().accept(this, null);
       }
 
-      // Cast column split to VARCHAR and handle nulls
-      String colAlias = node.getColumnSplit() instanceof Alias
+      colAlias = node.getColumnSplit() instanceof Alias
           ? ((Alias) node.getColumnSplit()).getName() : null;
-      SqlNode colCastExpr = cast(colGroupBy, typeSpec(SqlTypeName.VARCHAR));
-      if (useNull) {
-        // Replace null with nullStr
-        colCastExpr = call("COALESCE", colCastExpr, literal(nullStr));
+
+      SqlNode colSelectExpr;
+      if (skipVarcharCast) {
+        colSelectExpr = colGroupBy;
+      } else if (applyLimit) {
+        // When limit logic will be applied, cast to VARCHAR but defer COALESCE
+        colSelectExpr = cast(colGroupBy, typeSpec(SqlTypeName.VARCHAR));
       } else {
-        // Filter out null column splits
+        // No limit logic — apply full VARCHAR cast + COALESCE inline
+        colSelectExpr = cast(colGroupBy, typeSpec(SqlTypeName.VARCHAR));
+        if (useNull && !colSplitIsSpan) {
+          colSelectExpr = call("COALESCE", colSelectExpr, literal(nullStr));
+        }
+      }
+
+      // Fix 4: For span-based column splits, always filter out NULLs
+      if (colSplitIsSpan) {
+        nullFilters.add(isNotNull(colGroupBy));
+      } else if (!useNull) {
         nullFilters.add(isNotNull(colGroupBy));
       }
+
       if (colAlias != null) {
-        selectItems.add(as(colCastExpr, colAlias));
+        selectItems.add(as(colSelectExpr, colAlias));
       } else {
-        selectItems.add(colCastExpr);
+        selectItems.add(colSelectExpr);
       }
       groupByItems.add(colGroupBy);
     }
@@ -2939,7 +2989,100 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       builder = builder.where(filter);
     }
     pipe = builder.build();
+
+    // Fix 3: Apply limit/top/bottom with useother
+    if (applyLimit) {
+      pipe = applyChartLimit(node, limit, top, useOther, otherStr, useNull, nullStr);
+    }
+
     return pipe;
+  }
+
+  /**
+   * Apply chart limit/top/bottom logic with optional OTHER aggregation.
+   * Ranks column-split values globally by SUM of aggregation across all row-split groups,
+   * then keeps top/bottom N and optionally aggregates the rest into otherStr.
+   * NULL column-split values are excluded from ranking and re-included with nullStr if usenull.
+   */
+  private SqlNode applyChartLimit(Chart node, int limit, boolean top,
+      boolean useOther, String otherStr, boolean useNull, String nullStr) {
+    String rowAlias = node.getRowSplit() instanceof Alias
+        ? ((Alias) node.getRowSplit()).getName() : null;
+    String colAlias = node.getColumnSplit() instanceof Alias
+        ? ((Alias) node.getColumnSplit()).getName() : null;
+    String aggAlias = node.getAggregationFunction() instanceof Alias
+        ? ((Alias) node.getAggregationFunction()).getName() : null;
+    if (rowAlias == null || colAlias == null || aggAlias == null) return pipe;
+
+    // Step 1: Wrap base aggregation as subquery
+    SqlNode base = subquery(pipe, nextAlias());
+
+    // Step 2: Add SUM(agg_val) OVER (PARTITION BY colSplit) for global ranking
+    // NULL colSplit values will have NULL _col_total (excluded from ranking naturally)
+    SqlNodeList colPartBy = new SqlNodeList(List.of(identifier(colAlias)), POS);
+    SqlNode colTotal = as(
+        window(sum(identifier(aggAlias)), colPartBy, SqlNodeList.EMPTY), "_col_total");
+    SqlNode withTotal = select(star(), colTotal).from(base).build();
+    SqlNode withTotalSub = subquery(withTotal, nextAlias());
+
+    // Step 3: Add DENSE_RANK() OVER (ORDER BY _col_total DESC/ASC NULLS LAST) as _rn
+    SqlNode rankOrder = top ? desc(identifier("_col_total")) : identifier("_col_total");
+    SqlNode rn = as(
+        window(call("DENSE_RANK"), SqlNodeList.EMPTY,
+            new SqlNodeList(List.of(nullsLast(rankOrder)), POS)), "_rn");
+    SqlNode ranked = select(identifier(rowAlias), identifier(colAlias),
+        identifier(aggAlias), rn).from(withTotalSub).build();
+    SqlNode rankedSub = subquery(ranked, nextAlias());
+
+    if (!useOther) {
+      // Just filter to top/bottom N (exclude NULLs which have _rn = NULL)
+      pipe = select(identifier(rowAlias), identifier(colAlias), identifier(aggAlias))
+          .from(rankedSub)
+          .where(lte(identifier("_rn"), intLiteral(limit)))
+          .orderBy(identifier(rowAlias), identifier(colAlias))
+          .build();
+    } else {
+      // CASE WHEN colSplit IS NULL THEN nullStr (if usenull, checked first)
+      //      WHEN _rn <= limit THEN colSplit
+      //      ELSE otherStr END
+      List<SqlNode> whens = new ArrayList<>();
+      List<SqlNode> thens = new ArrayList<>();
+      if (useNull) {
+        whens.add(isNull(identifier(colAlias)));
+        thens.add(literal(nullStr));
+      }
+      whens.add(lte(identifier("_rn"), intLiteral(limit)));
+      thens.add(identifier(colAlias));
+      SqlNode caseExpr = caseWhen(whens, thens, literal(otherStr));
+      SqlNode casedCol = as(caseExpr, colAlias);
+
+      // For re-aggregation: COUNT should use SUM (sum of counts), others use same function
+      String aggFuncName = resolveAggFuncName(node.getAggregationFunction());
+      String reaggFuncName = "COUNT".equals(aggFuncName) ? "SUM" : aggFuncName;
+      SqlNode reagg = as(call(reaggFuncName, identifier(aggAlias)), aggAlias);
+
+      // Same CASE expression for GROUP BY
+      SqlNode caseGroupBy = caseWhen(
+          new ArrayList<>(whens), new ArrayList<>(thens), literal(otherStr));
+
+      pipe = select(identifier(rowAlias), casedCol, reagg)
+          .from(rankedSub)
+          .groupBy(identifier(rowAlias), caseGroupBy)
+          .orderBy(identifier(rowAlias), identifier(colAlias))
+          .build();
+    }
+    return pipe;
+  }
+
+  /** Extract the aggregation function name (MAX, MIN, SUM, AVG, COUNT) from the AST node. */
+  private static String resolveAggFuncName(UnresolvedExpression aggExpr) {
+    if (aggExpr instanceof Alias) {
+      aggExpr = ((Alias) aggExpr).getDelegated();
+    }
+    if (aggExpr instanceof AggregateFunction) {
+      return ((AggregateFunction) aggExpr).getFuncName().toUpperCase();
+    }
+    return "MAX"; // fallback
   }
 
   @Override
