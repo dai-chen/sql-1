@@ -106,7 +106,12 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl);
     DynamicPPLToSqlNodeConverter converter = new DynamicPPLToSqlNodeConverter(getV4Schema());
     SqlNode sqlNode = converter.convert(plan);
-    return sqlNode.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
+    String sql = sqlNode.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
+    // CalciteSqlDialect doubles backslashes in string literals, but the SQL parser
+    // (SqlParserUtil.parseString) does NOT un-escape them. Un-double to match what
+    // the string transpiler produces.
+    sql = sql.replace("\\\\", "\\");
+    return sql;
   }
 
   private static ResponseException createSyntheticResponseException(Exception cause) {
