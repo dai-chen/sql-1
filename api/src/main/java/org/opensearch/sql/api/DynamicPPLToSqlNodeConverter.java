@@ -96,6 +96,31 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         .collect(Collectors.toList());
   }
 
+  private boolean isArrayField(String fieldName) {
+    if (tableName == null) return true;
+    Table table = defaultSchema.getTable(tableName);
+    if (table == null) {
+      for (String name : defaultSchema.getTableNames()) {
+        if (name.equalsIgnoreCase(tableName)) { table = defaultSchema.getTable(name); break; }
+      }
+    }
+    if (table == null) {
+      try {
+        org.apache.calcite.jdbc.CalciteSchema cs =
+            org.apache.calcite.jdbc.CalciteSchema.from(defaultSchema);
+        Schema underlying = cs.schema;
+        if (underlying != null) table = underlying.getTable(tableName);
+      } catch (Exception ignored) {}
+    }
+    if (table == null) return true;
+    org.apache.calcite.rel.type.RelDataTypeField f =
+        table.getRowType(typeFactory).getField(fieldName, true, false);
+    if (f == null) return true;
+    org.apache.calcite.rel.type.RelDataType t = f.getType();
+    return org.apache.calcite.sql.type.SqlTypeUtil.isArray(t)
+        || org.apache.calcite.sql.type.SqlTypeUtil.isMultiset(t);
+  }
+
   private static String fieldName(UnresolvedExpression expr) {
     if (expr instanceof Field) return ((Field) expr).getField().toString();
     if (expr instanceof QualifiedName) return ((QualifiedName) expr).toString();
@@ -106,6 +131,22 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   public SqlNode visitRelation(Relation node, Void ctx) {
     this.tableName = node.getTableQualifiedName().toString();
     return super.visitRelation(node, ctx);
+  }
+
+  @Override
+  public SqlNode visitQualifiedName(org.opensearch.sql.ast.expression.QualifiedName node, Void ctx) {
+    List<String> parts = node.getParts();
+    // For multi-part names like skills.name, check if the root is a nested/MAP column
+    if (parts.size() >= 2 && tableName != null && isArrayField(parts.get(0))) {
+      // Root is a nested column; convert to ITEM chain: ITEM(skills, 'name')
+      SqlNode result = identifier(parts.get(0));
+      for (int i = 1; i < parts.size(); i++) {
+        result = new SqlBasicCall(SqlStdOperatorTable.ITEM,
+            new SqlNode[]{result, literal(parts.get(i))}, SqlParserPos.ZERO);
+      }
+      return result;
+    }
+    return super.visitQualifiedName(node, ctx);
   }
 
   @Override
@@ -156,7 +197,35 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       pipe = select(expanded.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
       return pipe;
     }
-    return super.visitProject(node, ctx);
+    // Check if any field is a nested field access (e.g., skills.name) that needs ITEM aliasing
+    boolean hasNestedAccess = false;
+    for (UnresolvedExpression expr : node.getProjectList()) {
+      if (expr instanceof Field) {
+        String name = ((Field) expr).getField().toString();
+        if (name.contains(".")) {
+          String root = name.substring(0, name.indexOf('.'));
+          if (isArrayField(root)) { hasNestedAccess = true; break; }
+        }
+      }
+    }
+    if (!hasNestedAccess) return super.visitProject(node, ctx);
+
+    // Handle nested field access: alias ITEM expressions with the dotted name
+    List<SqlNode> colList = new ArrayList<>();
+    for (UnresolvedExpression expr : node.getProjectList()) {
+      SqlNode col = expr.accept(this, null);
+      if (expr instanceof Field) {
+        String name = ((Field) expr).getField().toString();
+        if (name.contains(".") && col instanceof SqlBasicCall
+            && "ITEM".equals(((SqlBasicCall) col).getOperator().getName())) {
+          colList.add(as(col, name));
+          continue;
+        }
+      }
+      colList.add(col);
+    }
+    pipe = select(colList.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    return pipe;
   }
 
   @Override
@@ -467,7 +536,17 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   public SqlNode visitMvCombine(MvCombine node, Void ctx) {
     String fieldName = node.getField().getField().toString();
-    List<String> allCols = new ArrayList<>(resolveColumns(tableName));
+
+    // Prefer pipe columns (handles narrowed pipes after fields command)
+    List<String> allCols = extractPipeColumns();
+    if (allCols.isEmpty()) {
+      allCols = new ArrayList<>(resolveColumns(tableName));
+    }
+
+    // Validate field exists
+    if (!allCols.isEmpty() && !allCols.contains(fieldName)) {
+      throw new IllegalArgumentException("Field [" + fieldName + "] not found.");
+    }
 
     // Fallback: extract columns from the current pipe's SELECT list
     if (allCols.isEmpty() && pipe instanceof org.apache.calcite.sql.SqlSelect) {
@@ -596,25 +675,30 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     List<String> allCols = resolveColumns(tableName);
     if (allCols.isEmpty()) return pipe;
 
-    // Build: SELECT cols..., _u.field FROM (pipe) CROSS JOIN UNNEST(field) AS _u(field)
+    // Check if the field is an array type; for non-array fields, mvexpand is a no-op
+    if (!isArrayField(fieldName)) return pipe;
+
+    // Predict the subquery alias that wrapAsSubquery() will assign
+    String subqueryAlias = "_t" + (aliasCounter.get() + 1);
+
+    // Build: SELECT _tN.cols..., _u.field FROM (pipe) AS _tN CROSS JOIN UNNEST(field) AS _u(field)
     String unnestAlias = "_u";
     SqlNode unnest = new SqlBasicCall(
         SqlStdOperatorTable.UNNEST,
-        new SqlNode[]{identifier(fieldName)},
+        new SqlNode[]{identifier(subqueryAlias, fieldName)},
         SqlParserPos.ZERO);
-    // AS _u(field) — multi-column alias
     SqlNode aliasedUnnest = new SqlBasicCall(
         SqlStdOperatorTable.AS,
         new SqlNode[]{unnest, identifier(unnestAlias), identifier(fieldName)},
         SqlParserPos.ZERO);
 
-    // Build select list: replace array field with unnested value
+    // Build select list: qualify all columns with subquery alias to avoid ambiguity
     List<SqlNode> selectItems = new ArrayList<>();
     for (String col : allCols) {
       if (col.equals(fieldName)) {
         selectItems.add(as(identifier(unnestAlias, fieldName), fieldName));
       } else {
-        selectItems.add(identifier(col));
+        selectItems.add(identifier(subqueryAlias, col));
       }
     }
 

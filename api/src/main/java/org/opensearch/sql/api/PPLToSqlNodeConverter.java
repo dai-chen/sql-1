@@ -696,6 +696,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
             return id;
           }
         });
+        // After substitution, fix ARRAY(ARRAY(...), ...) → ARRAY_CONCAT(...)
+        expr = fixNestedArrayToConcat(expr);
       }
       // Handle fieldformat prefix/suffix concatenation
       expr = applyLetConcatPrefixSuffix(let, expr);
@@ -2348,10 +2350,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SqlNode end = args.get(2);
       return new SqlBasicCall(SqlLibraryOperators.ARRAY_SLICE, new SqlNode[]{arr, cast(plus(idx, intLiteral(1)), typeSpec(SqlTypeName.INTEGER)), cast(plus(minus(end, idx), intLiteral(1)), typeSpec(SqlTypeName.INTEGER))}, POS);
     }
-    // mvappend: single arg → ARRAY(arg), multiple → ARRAY_CONCAT(args...)
+    // mvappend: single arg → ARRAY(arg), multiple → ARRAY_CONCAT(ensureArray(args)...) or ARRAY(args...)
     if ("mvappend".equals(name)) {
       if (args.size() == 1) return new SqlBasicCall(SqlLibraryOperators.ARRAY, new SqlNode[]{args.get(0)}, POS);
-      return new SqlBasicCall(SqlLibraryOperators.ARRAY_CONCAT, args.toArray(new SqlNode[0]), POS);
+      // If any arg is already an array-producing expression, use ARRAY_CONCAT with scalar args wrapped
+      boolean hasArrayExpr = args.stream().anyMatch(PPLToSqlNodeConverter::isArrayExpression);
+      if (hasArrayExpr) {
+        SqlNode[] wrapped = args.stream().map(PPLToSqlNodeConverter::ensureArrayArg).toArray(SqlNode[]::new);
+        return new SqlBasicCall(SqlLibraryOperators.ARRAY_CONCAT, wrapped, POS);
+      }
+      // All args are scalars/identifiers — use ARRAY() to create array from all values
+      return new SqlBasicCall(SqlLibraryOperators.ARRAY, args.toArray(new SqlNode[0]), POS);
     }
     // mvzip: map to ARRAYS_ZIP
     if ("mvzip".equals(name)) {
@@ -2633,6 +2642,43 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   /** Check if a SqlNode is a string literal. */
   private static boolean isStringLiteral(SqlNode node) {
     return node instanceof SqlLiteral && ((SqlLiteral) node).getTypeName() == SqlTypeName.CHAR;
+  }
+
+  /** Wrap a SqlNode in ARRAY() only if it is definitely a scalar (literal, cast, arithmetic). Field references pass through since they may already be arrays. */
+  private static SqlNode ensureArrayArg(SqlNode node) {
+    if (node instanceof SqlIdentifier) return node;
+    if (isArrayExpression(node)) return node;
+    return new SqlBasicCall(SqlLibraryOperators.ARRAY, new SqlNode[]{node}, POS);
+  }
+
+  /** Check if a SqlNode is known to produce an array value. */
+  private static boolean isArrayExpression(SqlNode node) {
+    if (node instanceof SqlBasicCall) {
+      String op = ((SqlBasicCall) node).getOperator().getName();
+      return "ARRAY".equals(op) || "ARRAY_CONCAT".equals(op) || "ARRAY_COMPACT".equals(op)
+          || "ARRAY_DISTINCT".equals(op) || "SORT_ARRAY".equals(op) || "SPLIT".equals(op)
+          || "ARRAYS_ZIP".equals(op) || "ARRAY_SLICE".equals(op);
+    }
+    return false;
+  }
+
+  /**
+   * After eval substitution, ARRAY(ARRAY(1,2), ARRAY(3,4), 5) may appear.
+   * Convert to ARRAY_CONCAT(ARRAY(1,2), ARRAY(3,4), ARRAY(5)) for proper flattening.
+   */
+  private static SqlNode fixNestedArrayToConcat(SqlNode node) {
+    if (!(node instanceof SqlBasicCall)) return node;
+    SqlBasicCall call = (SqlBasicCall) node;
+    if (!"ARRAY".equals(call.getOperator().getName()) || call.operandCount() < 2) return node;
+    boolean hasNestedArray = false;
+    for (SqlNode operand : call.getOperandList()) {
+      if (isArrayExpression(operand)) { hasNestedArray = true; break; }
+    }
+    if (!hasNestedArray) return node;
+    SqlNode[] wrapped = call.getOperandList().stream()
+        .map(PPLToSqlNodeConverter::ensureArrayArg)
+        .toArray(SqlNode[]::new);
+    return new SqlBasicCall(SqlLibraryOperators.ARRAY_CONCAT, wrapped, POS);
   }
 
   /** Check if a SqlNode produces a string value (literal, CONCAT, or CAST to VARCHAR). */
