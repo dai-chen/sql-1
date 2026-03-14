@@ -706,3 +706,32 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - SqlStarExceptReplace REPLACE only works for columns that already exist. For new columns, use regular SELECT *, expr AS alias. The two-tier pattern (base converter for simple case, dynamic converter for schema-aware override) works well here.
   - PPL_SYNTAX_LEGACY_PREFERRED cluster setting is not passed through to the converter's parse() method. The DEFAULT_SETTINGS in PPLToSqlNodeConverter returns null for this setting, causing legacyPreferred() to always return true. This affects useNull defaults for top/rare commands.
 ---
+
+## 2026-03-14T02:47 - V4-012 (Iteration 13): Parse/fieldformat/eval/basic/replace fixes
+- **What was fixed**: 11 new tests passing across 4 test classes
+  - **Parse group name validation**: Added `RegexCommonUtils.getNamedGroupCandidates(pattern)` call in `visitParse` to validate named capture group names per PPL spec. Throws IllegalArgumentException for invalid names (underscore, hyphen, special chars, digit-start). Fixed 4 CalciteParseCommandIT error validation tests.
+  - **Parse column override**: Added `visitParse()` override in DynamicPPLToSqlNodeConverter that uses `SqlStarExceptReplace` with REPLACE clauses when parse group names match existing table columns, preventing duplicate column ambiguity. Fixed 1 CalciteParseCommandIT test.
+  - **Fieldformat prefix/suffix concatenation**: Added `applyLetConcatPrefixSuffix()` helper in both base and dynamic converters. Wraps expression with CONCAT for fieldformat's `concatPrefix`/`concatSuffix` fields. Null-safe (returns null when inner expression is null). Fixed 3 CalciteFieldFormatCommandIT tests.
+  - **String concatenation detection**: Changed `+` operator handling from `isStringLiteral()` to `isStringProducing()` which also detects CONCAT calls and CAST-to-VARCHAR expressions. Fixed 2 CalciteEvalCommandIT tests.
+  - **Fields+ then fields-**: Fixed `visitProject` exclude path to use `extractPipeColumns()` first, falling back to `resolveColumns(tableName)`. Enables `fields + a, b | fields - a` pattern. Fixed 1 CalcitePPLBasicIT test.
+  - **Replace command refactoring**: (a) Switched from `REPLACE` to `REGEXP_REPLACE` with `escapeRegexChars()` for literal patterns — Calcite planner didn't recognize REPLACE function. (b) Extracted `buildReplacePairExpr()` helper to eliminate 3x code duplication across base and dynamic converters. (c) Added `hasUnescapedWildcard()` for proper escaped wildcard detection. (d) Used `Matcher.quoteReplacement()` for safe replacement string escaping (handles backslashes and $).
+- **Pass rate change**: 63.7% (1443/2264) → ~64.2% (1454/2264) = +0.5pp, +11 tests
+- **Per-class results** (before → after):
+  - CalciteParseCommandIT: 2→7 pass (7 total, 0 fail) ✅ ALL PASS
+  - CalciteEvalCommandIT: 2→4 pass (4 total, 0 fail) ✅ ALL PASS
+  - CalciteFieldFormatCommandIT: 1→4 pass (5 total, 1 fail: .tostring() UDF engine-level)
+  - CalcitePPLBasicIT: 34→35 pass (42 total, 7 fail: pre-existing engine-level)
+- **Remaining V4-012 failures**: ~649 across 80+ classes. Scanned 21 V4-012 explicit classes + 26 additional classes. The remaining failures are overwhelmingly engine-level blockers: spath (14), object fields (5), expand (5), flatten (4), transpose (4), appendpipe (4), enhanced coalesce (4), describe (3), consecutive dedup (2), settings (2), appendcol (2), data type (2), COUNT(DISTINCT) OVER() (1), .tostring() UDF (1). These cannot be fixed in the converter layer.
+- **No regressions**: Verified CalciteDateTimeComparisonIT (191/191), CalciteSortCommandIT (30/30), CalciteTrendlineCommandIT (5/5), CalciteTextFunctionIT (24/24), CalciteCryptographicFunctionIT (4/4) all still pass.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+91/-3: applyLetConcatPrefixSuffix, isStringProducing, hasUnescapedWildcard, escapeRegexChars, buildReplacePairExpr, parse validation)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+73/-24: visitParse override, extractPipeColumns for fields-, buildReplacePairExpr dedup, applyLetConcatPrefixSuffix)
+  - api/src/test/java/org/opensearch/sql/api/PPLToSqlNodeConverterTest.java (+1/-1: updated testReplace expected output)
+- **Learnings for future iterations:**
+  - Calcite planner doesn't recognize `REPLACE` as a function — use `REGEXP_REPLACE` with escaped pattern for literal string replacement.
+  - `Matcher.quoteReplacement()` is the correct way to escape replacement strings for regex — handles both `$` and `\` characters.
+  - `RegexCommonUtils.getNamedGroupCandidates()` validates named group names per PPL spec and throws IllegalArgumentException for invalid names. Call it before extracting groups manually.
+  - `extractPipeColumns()` should be tried before `resolveColumns()` for field exclusion — enables `fields + a, b | fields - a` pattern where the pipe has already narrowed the column set.
+  - Code duplication in replace logic across 3 locations (base visitReplace, dynamic narrowed-pipe visitReplace, dynamic star-replace visitReplace) was a maintenance hazard. Extracted to `buildReplacePairExpr()` helper.
+  - Most remaining V4-012 failures are engine-level blockers (spath, flatten, transpose, expand, consecutive dedup, etc.) that cannot be fixed in the converter.
+---
