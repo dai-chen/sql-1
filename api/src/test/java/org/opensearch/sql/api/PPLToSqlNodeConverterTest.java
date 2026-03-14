@@ -400,9 +400,9 @@ public class PPLToSqlNodeConverterTest {
         FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY "count" DESC) AS "_rn"
         FROM (SELECT "a", COUNT(*) AS "count"
         FROM (SELECT *
-        FROM "t") AS "_t1" AS "_t2"
-        GROUP BY "a") AS "_t3") AS "_t4"
-        WHERE "_rn" <= 3) AS "_t5\"""");
+        FROM "t") AS "_t1"
+        GROUP BY "a") AS "_t2") AS "_t3"
+        WHERE "_rn" <= 3) AS "_t4\"""");
   }
 
   @Test
@@ -414,9 +414,9 @@ public class PPLToSqlNodeConverterTest {
         FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY "count") AS "_rn"
         FROM (SELECT "a", COUNT(*) AS "count"
         FROM (SELECT *
-        FROM "t") AS "_t1" AS "_t2"
-        GROUP BY "a") AS "_t3") AS "_t4"
-        WHERE "_rn" <= 10) AS "_t5\"""");
+        FROM "t") AS "_t1"
+        GROUP BY "a") AS "_t2") AS "_t3"
+        WHERE "_rn" <= 10) AS "_t4\"""");
   }
 
   @Test

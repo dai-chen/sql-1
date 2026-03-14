@@ -41,6 +41,7 @@ import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Replace;
 import org.opensearch.sql.ast.tree.ReplacePair;
+import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.utils.WildcardUtils;
 import org.opensearch.sql.utils.WildcardRenameUtils;
@@ -434,6 +435,47 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       selectItems.add(as(evalAliases.get(col), col));
     }
     pipe = select(selectItems.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitTrendline(Trendline node, Void ctx) {
+    // Call base to build window expressions and set pipe with SELECT *, expr AS alias
+    super.visitTrendline(node, ctx);
+
+    // Check if any trendline alias matches an existing column — if so, use REPLACE
+    Set<String> existingCols = new HashSet<>(resolveColumns(tableName));
+    List<String> overrideCols = new ArrayList<>();
+    for (Trendline.TrendlineComputation comp : node.getComputations()) {
+      if (existingCols.contains(comp.getAlias())) {
+        overrideCols.add(comp.getAlias());
+      }
+    }
+    if (overrideCols.isEmpty()) return pipe;
+
+    // Rebuild: use SqlStarExceptReplace for overrides, keep new columns as-is
+    // Extract the window expressions from the current pipe's SELECT list
+    org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+    SqlNodeList selectList = sel.getSelectList();
+    // selectList is: [*, expr1 AS alias1, expr2 AS alias2, ...]
+    List<SqlNode> replaceClauses = new ArrayList<>();
+    List<SqlNode> newColExprs = new ArrayList<>();
+    for (int i = 1; i < selectList.size(); i++) {
+      SqlNode item = selectList.get(i);
+      String name = extractColumnName(item);
+      if (name != null && existingCols.contains(name)) {
+        replaceClauses.add(item);
+      } else {
+        newColExprs.add(item);
+      }
+    }
+    SqlNode starReplace = new SqlStarExceptReplace(
+        SqlParserPos.ZERO, star(), null,
+        new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+    List<SqlNode> newSelectItems = new ArrayList<>();
+    newSelectItems.add(starReplace);
+    newSelectItems.addAll(newColExprs);
+    sel.setSelectList(new SqlNodeList(newSelectItems, SqlParserPos.ZERO));
     return pipe;
   }
 

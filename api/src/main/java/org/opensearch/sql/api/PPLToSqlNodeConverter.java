@@ -592,17 +592,29 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitSort(Sort node, Void ctx) {
+    // If there's a pending LIMIT (from head), wrap it as subquery first
+    if (pendingFetch != null) {
+      pipe = applyPendingOrderBy(pipe);
+      // Wrap the SqlOrderBy in a proper SELECT * FROM (...) subquery
+      // so downstream sort doesn't produce a double-alias
+      pipe = select(star()).from(subquery(pipe, nextAlias())).build();
+    }
     List<SqlNode> orderItems = new ArrayList<>();
     for (Field f : node.getSortList()) {
       SqlNode col = f.getField().accept(this, null);
       boolean asc = true;
       boolean nullFirst = true;
+      boolean nullFirstExplicit = false;
       for (Argument arg : f.getFieldArgs()) {
         if ("asc".equals(arg.getArgName())) {
           asc = Boolean.TRUE.equals(arg.getValue().getValue());
         } else if ("nullFirst".equals(arg.getArgName())) {
           nullFirst = Boolean.TRUE.equals(arg.getValue().getValue());
+          nullFirstExplicit = true;
         }
+      }
+      if (!nullFirstExplicit) {
+        nullFirst = asc;
       }
       if (!asc) col = desc(col);
       col = nullFirst ? nullsFirst(col) : nullsLast(col);
@@ -610,6 +622,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     // Defer ORDER BY — don't wrap as subquery. Store for later application.
     pendingOrderBy = orderItems;
+    if (node.getCount() != null && node.getCount() > 0) {
+      pendingFetch = intLiteral(node.getCount());
+    }
     return pipe;
   }
 
@@ -1013,9 +1028,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     List<SqlNode> groupNodes = node.getGroupExprList().stream()
         .map(e -> e.accept(this, null)).collect(Collectors.toList());
 
-    // Step 0: wrap + optional null filter
-    pipe = wrapAsSubquery();
+    // Step 0: optional null filter
     if (!useNull) {
+      pipe = wrapAsSubquery();
       List<SqlNode> allCols = new ArrayList<>(groupNodes);
       allCols.addAll(fieldNodes);
       SqlNode nullCheck = allCols.stream().map(c -> isNotNull(c))
@@ -1124,7 +1139,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       pipe = select(star()).from(wrapAsSubquery()).where(nullFilter).build();
     }
 
-    // SELECT *, trendline_exprs
+    // SELECT *, expr AS alias — works for new columns (trendline aliases are typically new)
+    // DynamicPPLToSqlNodeConverter overrides this to use REPLACE for existing columns
     List<SqlNode> selectItems = new ArrayList<>();
     selectItems.add(star());
     selectItems.addAll(windowExprs);
