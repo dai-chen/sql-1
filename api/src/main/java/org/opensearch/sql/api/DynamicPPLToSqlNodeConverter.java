@@ -114,7 +114,8 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       Set<String> excluded = node.getProjectList().stream()
           .map(e -> ((Field) e).getField().toString())
           .collect(Collectors.toSet());
-      List<String> allCols = resolveColumns(tableName);
+      List<String> pipeCols = extractPipeColumns();
+      List<String> allCols = pipeCols.isEmpty() ? resolveColumns(tableName) : pipeCols;
       SqlNode[] cols = allCols.stream()
           .filter(c -> !excluded.contains(c))
           .map(c -> identifier(c))
@@ -255,16 +256,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         String fieldName = field.getField().toString();
         SqlNode expr = identifier(fieldName);
         for (ReplacePair pair : node.getReplacePairs()) {
-          String pattern = pair.getPattern().getValue().toString();
-          String replacement = pair.getReplacement().getValue().toString();
-          if (WildcardUtils.containsWildcard(pattern) || WildcardUtils.containsWildcard(replacement)) {
-            WildcardUtils.validateWildcardSymmetry(pattern, replacement);
-            String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
-            String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
-            expr = call("REGEXP_REPLACE", expr, literal(regexPattern), literal(regexReplacement));
-          } else {
-            expr = call("REPLACE", expr, literal(pattern), literal(replacement));
-          }
+          expr = buildReplacePairExpr(expr, pair);
         }
         replaceExprs.put(fieldName, expr);
       }
@@ -286,16 +278,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       String fieldName = field.getField().toString();
       SqlNode expr = identifier(fieldName);
       for (ReplacePair pair : node.getReplacePairs()) {
-        String pattern = pair.getPattern().getValue().toString();
-        String replacement = pair.getReplacement().getValue().toString();
-        if (WildcardUtils.containsWildcard(pattern) || WildcardUtils.containsWildcard(replacement)) {
-          WildcardUtils.validateWildcardSymmetry(pattern, replacement);
-          String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
-          String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
-          expr = call("REGEXP_REPLACE", expr, literal(regexPattern), literal(regexReplacement));
-        } else {
-          expr = call("REPLACE", expr, literal(pattern), literal(replacement));
-        }
+        expr = buildReplacePairExpr(expr, pair);
       }
       replaceClauses.add(as(expr, fieldName));
     }
@@ -411,6 +394,8 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
           }
         });
       }
+      // Handle fieldformat prefix/suffix concatenation
+      expr = applyLetConcatPrefixSuffix(let, expr);
       evalAliases.put(varName, expr);
       if (existingCols.contains(varName)) {
         overrides.put(varName, expr);
@@ -639,6 +624,52 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     if (node.getLimit() != null) {
       pipe = select(star()).from(wrapAsSubquery()).limit(intLiteral(node.getLimit())).build();
     }
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitParse(org.opensearch.sql.ast.tree.Parse node, Void ctx) {
+    // Call base to build the parse expressions
+    super.visitParse(node, ctx);
+
+    // Check if any group name matches an existing column — if so, use REPLACE
+    Set<String> existingCols = new HashSet<>(resolveColumns(tableName));
+    if (existingCols.isEmpty()) return pipe;
+
+    String pattern =
+        ((org.opensearch.sql.ast.expression.Literal) node.getPattern()).getValue().toString();
+    java.util.regex.Pattern namedGroupPattern =
+        java.util.regex.Pattern.compile("\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>");
+    java.util.regex.Matcher matcher = namedGroupPattern.matcher(pattern);
+    List<String> overrideCols = new ArrayList<>();
+    while (matcher.find()) {
+      String gn = matcher.group(1);
+      if (existingCols.contains(gn)) overrideCols.add(gn);
+    }
+    if (overrideCols.isEmpty()) return pipe;
+
+    // Rebuild: use SqlStarExceptReplace for overrides, keep new columns as-is
+    org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+    SqlNodeList selectList = sel.getSelectList();
+    // selectList is: [*, expr1 AS alias1, expr2 AS alias2, ...]
+    List<SqlNode> replaceClauses = new ArrayList<>();
+    List<SqlNode> newColExprs = new ArrayList<>();
+    for (int i = 1; i < selectList.size(); i++) {
+      SqlNode item = selectList.get(i);
+      String name = extractColumnName(item);
+      if (name != null && existingCols.contains(name)) {
+        replaceClauses.add(item);
+      } else {
+        newColExprs.add(item);
+      }
+    }
+    SqlNode starReplace = new SqlStarExceptReplace(
+        SqlParserPos.ZERO, star(), null,
+        new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
+    List<SqlNode> newSelectItems = new ArrayList<>();
+    newSelectItems.add(starReplace);
+    newSelectItems.addAll(newColExprs);
+    sel.setSelectList(new SqlNodeList(newSelectItems, SqlParserPos.ZERO));
     return pipe;
   }
 }

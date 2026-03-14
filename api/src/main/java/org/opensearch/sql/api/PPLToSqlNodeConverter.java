@@ -707,6 +707,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           }
         });
       }
+      // Handle fieldformat prefix/suffix concatenation
+      expr = applyLetConcatPrefixSuffix(let, expr);
       evalAliases.put(varName, expr);
       evalEntries.add(Map.entry(varName, expr));
     }
@@ -814,6 +816,27 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
     }
     return null;
+  }
+
+  /** Wrap expression with CONCAT for fieldformat prefix/suffix. Returns null-safe result. */
+  protected SqlNode applyLetConcatPrefixSuffix(Let let, SqlNode expr) {
+    if (let.getConcatPrefix() == null && let.getConcatSuffix() == null) return expr;
+    // Cast inner expression to VARCHAR for string concatenation
+    SqlNode strExpr = cast(expr, typeSpec(SqlTypeName.VARCHAR));
+    if (let.getConcatPrefix() != null && let.getConcatSuffix() != null) {
+      SqlNode prefix = literal(let.getConcatPrefix().getValue());
+      SqlNode suffix = literal(let.getConcatSuffix().getValue());
+      return caseWhen(List.of(isNull(expr)), List.of(literal(null)),
+          call("CONCAT", call("CONCAT", prefix, strExpr), suffix));
+    }
+    if (let.getConcatPrefix() != null) {
+      SqlNode prefix = literal(let.getConcatPrefix().getValue());
+      return caseWhen(List.of(isNull(expr)), List.of(literal(null)),
+          call("CONCAT", prefix, strExpr));
+    }
+    SqlNode suffix = literal(let.getConcatSuffix().getValue());
+    return caseWhen(List.of(isNull(expr)), List.of(literal(null)),
+        call("CONCAT", strExpr, suffix));
   }
 
   @Override
@@ -1540,21 +1563,34 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       String fieldName = field.getField().toString();
       SqlNode expr = identifier(fieldName);
       for (ReplacePair pair : node.getReplacePairs()) {
-        String pattern = pair.getPattern().getValue().toString();
-        String replacement = pair.getReplacement().getValue().toString();
-        if (WildcardUtils.containsWildcard(pattern) || WildcardUtils.containsWildcard(replacement)) {
-          WildcardUtils.validateWildcardSymmetry(pattern, replacement);
-          String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
-          String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
-          expr = call("REGEXP_REPLACE", expr, literal(regexPattern), literal(regexReplacement));
-        } else {
-          expr = call("REPLACE", expr, literal(pattern), literal(replacement));
-        }
+        expr = buildReplacePairExpr(expr, pair);
       }
       selectItems.add(as(expr, fieldName));
     }
     pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
     return pipe;
+  }
+
+  /** Escape regex special characters for use in REGEXP_REPLACE pattern. */
+  protected static String escapeRegexChars(String s) {
+    return s.replaceAll("([\\\\\\[\\]{}().*+?^$|])", "\\\\$1");
+  }
+
+  /** Build REGEXP_REPLACE expression for a replace pair (handles wildcard and literal patterns). */
+  protected SqlNode buildReplacePairExpr(SqlNode expr, ReplacePair pair) {
+    String pattern = pair.getPattern().getValue().toString();
+    String replacement = pair.getReplacement().getValue().toString();
+    if (hasUnescapedWildcard(pattern) || hasUnescapedWildcard(replacement)) {
+      WildcardUtils.validateWildcardSymmetry(pattern, replacement);
+      String regexPattern = WildcardUtils.convertWildcardPatternToRegex(pattern);
+      String regexReplacement = WildcardUtils.convertWildcardReplacementToRegex(replacement);
+      return call("REGEXP_REPLACE", expr, literal(regexPattern), literal(regexReplacement));
+    }
+    String unescapedPattern = pattern.replace("\\*", "*");
+    String unescapedReplacement = replacement.replace("\\*", "*");
+    String escapedPattern = escapeRegexChars(unescapedPattern);
+    String escapedRepl = java.util.regex.Matcher.quoteReplacement(unescapedReplacement);
+    return call("REGEXP_REPLACE", expr, literal(escapedPattern), literal(escapedRepl));
   }
 
   @Override
@@ -1612,6 +1648,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     SqlNode sourceField = node.getSourceField().accept(this, null);
     String pattern = ((Literal) node.getPattern()).getValue().toString();
+
+    // Validate named group names (throws IllegalArgumentException for invalid names)
+    RegexCommonUtils.getNamedGroupCandidates(pattern);
 
     // Extract named group names
     java.util.regex.Pattern namedGroupPattern =
@@ -1922,8 +1961,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
             .collect(Collectors.toList());
     // Arithmetic operators
     if ("+".equals(name) && args.size() == 2) {
-      // If either operand is a string literal, use CONCAT instead of +
-      if (isStringLiteral(args.get(0)) || isStringLiteral(args.get(1))) {
+      // If either operand is string-producing, use CONCAT instead of +
+      if (isStringProducing(args.get(0)) || isStringProducing(args.get(1))) {
         return call("CONCAT", args.get(0), args.get(1));
       }
       return plus(args.get(0), args.get(1));
@@ -2576,6 +2615,34 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   /** Check if a SqlNode is a string literal. */
   private static boolean isStringLiteral(SqlNode node) {
     return node instanceof SqlLiteral && ((SqlLiteral) node).getTypeName() == SqlTypeName.CHAR;
+  }
+
+  /** Check if a SqlNode produces a string value (literal, CONCAT, or CAST to VARCHAR). */
+  private static boolean isStringProducing(SqlNode node) {
+    if (isStringLiteral(node)) return true;
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) node;
+      String opName = call.getOperator().getName();
+      if ("CONCAT".equals(opName)) return true;
+      if ("CAST".equals(opName) && call.operandCount() == 2
+          && call.operand(1) instanceof SqlDataTypeSpec) {
+        String typeName = call.operand(1).toString().toUpperCase();
+        if (typeName.contains("VARCHAR") || typeName.contains("CHAR")) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Check if a string contains unescaped wildcard characters (*). */
+  protected static boolean hasUnescapedWildcard(String str) {
+    if (str == null) return false;
+    boolean escaped = false;
+    for (char c : str.toCharArray()) {
+      if (escaped) { escaped = false; continue; }
+      if (c == '\\') { escaped = true; continue; }
+      if (c == '*') return true;
+    }
+    return false;
   }
 
   /** CAST to BOOLEAN with Spark/Postgres semantics. */

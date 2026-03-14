@@ -493,7 +493,7 @@ public class PPLToSqlNodeConverterTest {
   @Test
   public void testReplace() {
     ppl("source=t | replace 'foo' with 'bar' in a").shouldTranslateTo("""
-        SELECT *, REPLACE("a", 'foo', 'bar') AS "a"
+        SELECT *, REGEXP_REPLACE("a", 'foo', 'bar') AS "a"
         FROM (SELECT *
         FROM "t") AS "_t1\"""");
   }
