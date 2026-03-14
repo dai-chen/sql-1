@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.sql.plugin.routing;
+package org.opensearch.sql.common.routing;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -60,5 +60,35 @@ public class ParquetIndexRoutingTest {
   @Test
   public void isParquetIndexFalseForNull() {
     assertFalse(ParquetIndexRouting.isParquetIndex(null));
+  }
+
+  @Test
+  public void extractIndexNameFromSqlBasic() {
+    assertEquals(
+        "parquet_index",
+        ParquetIndexRouting.extractIndexNameFromSql("SELECT * FROM parquet_index"));
+  }
+
+  @Test
+  public void extractIndexNameFromSqlWithWhereClause() {
+    assertEquals(
+        "parquet_index",
+        ParquetIndexRouting.extractIndexNameFromSql(
+            "SELECT * FROM parquet_index WHERE status = 200"));
+  }
+
+  @Test
+  public void extractIndexNameFromSqlCaseInsensitive() {
+    assertEquals("myindex", ParquetIndexRouting.extractIndexNameFromSql("select * from myindex"));
+  }
+
+  @Test
+  public void extractIndexNameFromSqlReturnsNullForNull() {
+    assertNull(ParquetIndexRouting.extractIndexNameFromSql(null));
+  }
+
+  @Test
+  public void extractIndexNameFromSqlReturnsNullForNoFromClause() {
+    assertNull(ParquetIndexRouting.extractIndexNameFromSql("SHOW TABLES"));
   }
 }

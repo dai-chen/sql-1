@@ -33,6 +33,7 @@ import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestChannel;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
+import org.opensearch.sql.common.routing.ParquetIndexRouting;
 import org.opensearch.sql.common.utils.QueryContext;
 import org.opensearch.sql.exception.ExpressionEvaluationException;
 import org.opensearch.sql.exception.SemanticCheckException;
@@ -142,6 +143,19 @@ public class RestSqlAction extends BaseRestHandler {
               request.path(),
               request.params(),
               sqlRequest.cursor());
+
+      // Route Parquet index queries to placeholder error
+      String indexName = ParquetIndexRouting.extractIndexNameFromSql(sqlRequest.getSql());
+      if (indexName != null && ParquetIndexRouting.isParquetIndex(indexName)) {
+        return channel ->
+            sendResponse(
+                channel,
+                "{\"error\":\"Parquet index queries are not yet supported. Index: "
+                    + indexName
+                    + "\"}",
+                BAD_REQUEST);
+      }
+
       return newSqlQueryHandler.prepareRequest(
           newSqlRequest,
           (restChannel, exception) -> {
