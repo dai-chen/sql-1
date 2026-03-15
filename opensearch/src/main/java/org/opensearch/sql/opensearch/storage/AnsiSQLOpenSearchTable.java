@@ -48,6 +48,7 @@ public class AnsiSQLOpenSearchTable extends AbstractTable implements Translatabl
     List<String> fieldNameList = new ArrayList<>();
     List<RelDataType> typeList = new ArrayList<>();
     Map<String, ExprType> fieldTypes = new LinkedHashMap<>(storageTable.getFieldTypes());
+    fieldTypes.putAll(storageTable.getReservedFieldTypes());
     for (Map.Entry<String, ExprType> entry : fieldTypes.entrySet()) {
       if (entry.getValue().getOriginalPath().isPresent()) continue;
       fieldNameList.add(entry.getKey());

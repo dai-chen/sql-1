@@ -47,6 +47,7 @@ import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.AddColTotals;
 import org.opensearch.sql.ast.tree.AddTotals;
+import org.opensearch.sql.ast.tree.Dedupe;
 import org.opensearch.sql.ast.tree.Eval;
 import org.opensearch.sql.ast.tree.FillNull;
 import org.opensearch.sql.ast.tree.Lookup;
@@ -82,6 +83,8 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   private Map<String, String> aliasFieldMapping = Collections.emptyMap();
   /** When non-null, applyPendingOrderBy will strip _source_order after applying ORDER BY. */
   private List<String> pendingStripSourceOrder;
+  /** Maps unqualified field names to their join alias for join condition resolution. */
+  private Map<String, String> joinFieldToAlias = Collections.emptyMap();
 
   public DynamicPPLToSqlNodeConverter(SchemaPlus defaultSchema) {
     this.defaultSchema = defaultSchema;
@@ -187,6 +190,10 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     // Resolve alias fields: replace alias field name with target field name
     if (parts.size() == 1 && aliasFieldMapping.containsKey(parts.get(0))) {
       return identifier(aliasFieldMapping.get(parts.get(0)));
+    }
+    // Qualify unqualified field names in join conditions with their table alias
+    if (parts.size() == 1 && joinFieldToAlias.containsKey(parts.get(0))) {
+      return identifier(joinFieldToAlias.get(parts.get(0)), parts.get(0));
     }
     // For multi-part names like skills.name, check if the root is a nested/MAP column
     if (parts.size() >= 2 && tableName != null && isArrayField(parts.get(0))) {
@@ -819,8 +826,24 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     boolean hasCondition = node.getJoinCondition().isPresent();
     boolean isSelfJoin = isSelfJoinDetected(node);
 
+    // Resolve unqualified field names in join condition to their table aliases
+    if (hasCondition) {
+      String leftTable = extractTableNameFromPlan(node.getLeft());
+      String rightTable = extractTableNameFromPlan(node.getRight());
+      String leftAlias0 = node.getLeftAlias().orElse(leftTable);
+      String rightAlias0 = node.getRightAlias().orElse(rightTable);
+      Map<String, String> fieldMap = new LinkedHashMap<>();
+      for (String col : resolveColumns(leftTable)) fieldMap.put(col, leftAlias0);
+      for (String col : resolveColumns(rightTable)) {
+        if (fieldMap.containsKey(col)) fieldMap.remove(col); // ambiguous — leave unqualified
+        else fieldMap.put(col, rightAlias0);
+      }
+      joinFieldToAlias = fieldMap;
+    }
+
     // Delegate to base for the join construction
     super.visitJoin(node, ctx);
+    joinFieldToAlias = Collections.emptyMap();
 
     // Fix 3: For no-field-list self-join, replace CROSS JOIN with natural join on all columns
     if (isSelfJoin && !hasFieldList && !hasCondition && pipe instanceof SqlJoin) {
@@ -2058,6 +2081,20 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       result = unionAll(result, unionParts.get(i));
     }
     pipe = result;
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitDedupe(Dedupe node, Void ctx) {
+    super.visitDedupe(node, ctx);
+    boolean consecutive =
+        (Boolean) ((Literal) node.getOptions().get(2).getValue()).getValue();
+    if (consecutive) {
+      // Preserve document order so consecutive semantics are visible in the result
+      SqlDataTypeSpec intType = new SqlDataTypeSpec(
+          new SqlBasicTypeNameSpec(SqlTypeName.INTEGER, SqlParserPos.ZERO), SqlParserPos.ZERO);
+      pendingOrderBy = List.of(cast(identifier("_id"), intType));
+    }
     return pipe;
   }
 

@@ -31,6 +31,7 @@ import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOrderBy;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSelectKeyword;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.fun.SqlLibraryOperators;
@@ -570,7 +571,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitFilter(Filter node, Void ctx) {
     SqlNode condition = node.getCondition().accept(this, null);
+    // Preserve join context: if skipNextWrap is set (right after a join),
+    // the WHERE is added to the join's SELECT and the flag is re-set
+    // so downstream commands (fields, sort) can still see join aliases.
+    boolean joinContext = skipNextWrap;
     pipe = select(star()).from(wrapAsSubquery()).where(condition).build();
+    if (joinContext) {
+      skipNextWrap = true;
+    }
     return pipe;
   }
 
@@ -614,7 +622,29 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
       colList.add(col);
     }
-    pipe = select(colList.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    // If in join context (skipNextWrap), replace the select list of the existing
+    // SELECT-over-JOIN to keep join aliases visible.
+    // Only do this when the existing select list is SELECT * (aliases still visible).
+    // If the select list has explicit qualified columns (e.g. from field-list join with
+    // overwrite), wrap as subquery so the qualified aliases resolve ambiguity.
+    if (skipNextWrap && pipe instanceof SqlSelect && ((SqlSelect) pipe).getFrom() instanceof SqlJoin) {
+      skipNextWrap = false;
+      SqlSelect joinSelect = (SqlSelect) pipe;
+      SqlNodeList selList = joinSelect.getSelectList();
+      boolean isSelectStar = selList.size() == 1
+          && selList.get(0) instanceof SqlIdentifier
+          && ((SqlIdentifier) selList.get(0)).isStar();
+      if (isSelectStar) {
+        pipe = select(colList.toArray(new SqlNode[0]))
+            .from(joinSelect.getFrom())
+            .where(joinSelect.getWhere())
+            .build();
+      } else {
+        pipe = select(colList.toArray(new SqlNode[0])).from(subquery(pipe, nextAlias())).build();
+      }
+    } else {
+      pipe = select(colList.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+    }
     return pipe;
   }
 
