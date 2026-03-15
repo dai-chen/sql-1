@@ -35,6 +35,7 @@ import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Function;
 import org.opensearch.sql.ast.expression.Let;
@@ -77,6 +78,10 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   protected String tableName;
   /** Eval aliases being built in the current eval — used by visitFunction to avoid false NULL replacement. */
   private final Set<String> currentEvalAliases = new HashSet<>();
+  /** Alias field name → target field name mapping (e.g. @timestamp → created_at). */
+  private Map<String, String> aliasFieldMapping = Collections.emptyMap();
+  /** When non-null, applyPendingOrderBy will strip _source_order after applying ORDER BY. */
+  private List<String> pendingStripSourceOrder;
 
   public DynamicPPLToSqlNodeConverter(SchemaPlus defaultSchema) {
     this.defaultSchema = defaultSchema;
@@ -152,12 +157,37 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   public SqlNode visitRelation(Relation node, Void ctx) {
     this.tableName = node.getTableQualifiedName().toString();
+    this.aliasFieldMapping = resolveAliasMapping(this.tableName);
     return super.visitRelation(node, ctx);
+  }
+
+  /**
+   * Build a mapping of alias field names to their target field names by inspecting the table's
+   * field types. OpenSearch alias fields have getOriginalPath() set to the target field path.
+   */
+  private Map<String, String> resolveAliasMapping(String tableName) {
+    if (tableName == null) return Collections.emptyMap();
+    Table table = resolveTable(tableName);
+    if (table == null) return Collections.emptyMap();
+    if (!(table instanceof org.opensearch.sql.storage.Table)) return Collections.emptyMap();
+    Map<String, org.opensearch.sql.data.type.ExprType> fieldTypes =
+        ((org.opensearch.sql.storage.Table) table).getFieldTypes();
+    Map<String, String> mapping = new LinkedHashMap<>();
+    for (Map.Entry<String, org.opensearch.sql.data.type.ExprType> entry : fieldTypes.entrySet()) {
+      if (entry.getValue().getOriginalPath().isPresent()) {
+        mapping.put(entry.getKey(), entry.getValue().getOriginalPath().get());
+      }
+    }
+    return mapping;
   }
 
   @Override
   public SqlNode visitQualifiedName(org.opensearch.sql.ast.expression.QualifiedName node, Void ctx) {
     List<String> parts = node.getParts();
+    // Resolve alias fields: replace alias field name with target field name
+    if (parts.size() == 1 && aliasFieldMapping.containsKey(parts.get(0))) {
+      return identifier(aliasFieldMapping.get(parts.get(0)));
+    }
     // For multi-part names like skills.name, check if the root is a nested/MAP column
     if (parts.size() >= 2 && tableName != null && isArrayField(parts.get(0))) {
       // Root is a nested column; convert to ITEM chain: ITEM(skills, 'name')
@@ -813,6 +843,10 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       }
     }
 
+    // Determine if max option was applied (adds _rn column to right side)
+    org.opensearch.sql.ast.expression.Literal maxLit = node.getArgumentMap().get("max");
+    boolean maxApplied = maxLit != null && !maxLit.equals(org.opensearch.sql.ast.expression.Literal.ZERO);
+
     // Handle column deduplication for field-list joins and self-joins
     if (hasFieldList || isSelfJoin) {
       String leftAlias = node.getLeftAlias().orElse(null);
@@ -828,8 +862,34 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         org.opensearch.sql.ast.expression.Literal overwriteLit = node.getArgumentMap().get("overwrite");
         boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
         String ref = overwrite ? rightAlias : leftAlias;
-        SqlNode starRef = new SqlIdentifier(java.util.Arrays.asList(ref, ""), SqlParserPos.ZERO);
-        pipe = select(starRef).from(pipe).build();
+        if (maxApplied) {
+          // Explicit column list to exclude _rn
+          String rightTable = extractTableNameFromPlan(node.getRight());
+          List<String> cols = resolveColumns(rightTable);
+          if (!cols.isEmpty()) {
+            Set<String> emitted = new HashSet<>(cols);
+            List<SqlNode> selectItems = cols.stream()
+                .map(col -> (SqlNode) as(identifier(ref, col), col))
+                .collect(Collectors.toCollection(ArrayList::new));
+            // Include computed columns from join field list not in physical schema
+            if (hasFieldList) {
+              for (Field f : node.getJoinFields().get()) {
+                String col = f.getField().toString();
+                if (!emitted.contains(col)) {
+                  selectItems.add(as(identifier(ref, col), col));
+                  emitted.add(col);
+                }
+              }
+            }
+            pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+          } else {
+            SqlNode starRef = new SqlIdentifier(java.util.Arrays.asList(ref, ""), SqlParserPos.ZERO);
+            pipe = select(starRef).from(pipe).build();
+          }
+        } else {
+          SqlNode starRef = new SqlIdentifier(java.util.Arrays.asList(ref, ""), SqlParserPos.ZERO);
+          pipe = select(starRef).from(pipe).build();
+        }
         skipNextWrap = true;
       } else if (hasFieldList && leftAlias != null && rightAlias != null) {
         // Fix 2: Expand columns explicitly instead of using SqlStarExceptReplace
@@ -846,6 +906,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
         if (!leftCols.isEmpty() && !rightCols.isEmpty()) {
           List<SqlNode> selectItems = new ArrayList<>();
+          Set<String> emitted = new HashSet<>();
           // Left side: all columns, with REPLACE for shared cols if overwrite
           for (String col : leftCols) {
             if (overwrite && sharedSet.contains(col)) {
@@ -853,11 +914,51 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
             } else {
               selectItems.add(as(identifier(leftAlias, col), col));
             }
+            emitted.add(col);
           }
-          // Right side: only columns not already in left side
-          Set<String> leftColSet = new HashSet<>(leftCols);
+          // Right side: only columns not already in left side (exclude _rn from max option)
           for (String col : rightCols) {
-            if (!leftColSet.contains(col)) {
+            if (!emitted.contains(col) && !JOIN_MAX_RN_COLUMN.equals(col)) {
+              selectItems.add(as(identifier(rightAlias, col), col));
+              emitted.add(col);
+            }
+          }
+          // Include computed columns from join field list not in physical schema
+          for (String col : sharedFields) {
+            if (!emitted.contains(col)) {
+              selectItems.add(as(identifier(overwrite ? rightAlias : leftAlias, col), col));
+              emitted.add(col);
+            }
+          }
+          pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+          skipNextWrap = true;
+        }
+      }
+    } else if (maxApplied && hasCondition) {
+      // Criteria join with max: need to exclude _rn from right side
+      String leftAlias = node.getLeftAlias().orElse(null);
+      String rightAlias = node.getRightAlias().orElse(null);
+      if (pipe instanceof SqlJoin) {
+        SqlJoin sqlJoin = (SqlJoin) pipe;
+        if (leftAlias == null) leftAlias = extractAlias(sqlJoin.getLeft());
+        if (rightAlias == null) rightAlias = extractAlias(sqlJoin.getRight());
+      }
+      if (leftAlias != null && rightAlias != null) {
+        String leftTable = extractTableNameFromPlan(node.getLeft());
+        String rightTable = extractTableNameFromPlan(node.getRight());
+        List<String> leftCols = resolveColumns(leftTable);
+        List<String> rightCols = resolveColumns(rightTable);
+        if (!leftCols.isEmpty() && !rightCols.isEmpty()) {
+          List<SqlNode> selectItems = new ArrayList<>();
+          for (String col : leftCols) {
+            selectItems.add(as(identifier(leftAlias, col), col));
+          }
+          // Right side: rename conflicting columns, exclude _rn
+          for (String col : rightCols) {
+            if (JOIN_MAX_RN_COLUMN.equals(col)) continue;
+            if (leftCols.contains(col)) {
+              selectItems.add(as(identifier(rightAlias, col), rightAlias + "." + col));
+            } else {
               selectItems.add(as(identifier(rightAlias, col), col));
             }
           }
@@ -877,11 +978,22 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   private static String extractTableNameFromPlan(org.opensearch.sql.ast.tree.UnresolvedPlan plan) {
-    if (plan instanceof org.opensearch.sql.ast.tree.SubqueryAlias) {
-      plan = (org.opensearch.sql.ast.tree.UnresolvedPlan) plan.getChild().get(0);
+    // Traverse through SubqueryAlias, Project, Eval, Filter etc. to find the base Relation
+    while (plan != null) {
+      if (plan instanceof org.opensearch.sql.ast.tree.SubqueryAlias) {
+        plan = (org.opensearch.sql.ast.tree.UnresolvedPlan) plan.getChild().get(0);
+        continue;
+      }
+      Relation rel = extractRelation(plan);
+      if (rel != null) return rel.getTableQualifiedName().toString();
+      // Traverse into child nodes (Project, Eval, Filter, etc.)
+      if (!plan.getChild().isEmpty()) {
+        plan = (org.opensearch.sql.ast.tree.UnresolvedPlan) plan.getChild().get(0);
+      } else {
+        break;
+      }
     }
-    Relation rel = extractRelation(plan);
-    return rel != null ? rel.getTableQualifiedName().toString() : null;
+    return null;
   }
 
   @Override
@@ -1058,6 +1170,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter);
     sub.pipe = initialPipe;
     sub.tableName = this.tableName;
+    sub.aliasFieldMapping = this.aliasFieldMapping;
     List<UnresolvedPlan> nodes = new ArrayList<>();
     flattenPlan(plan, nodes);
     for (UnresolvedPlan n : nodes) {
@@ -1072,13 +1185,16 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   public SqlNode visitAppend(org.opensearch.sql.ast.tree.Append node, Void ctx) {
     SqlNode mainSql = pipe;
-    // Check if subsearch has a source (Relation node). If not, it's an empty search.
-    if (!hasRelation(node.getSubSearch())) {
+    // Simplify subsearch AST: propagate empty source through joins/lookups
+    UnresolvedPlan prunedSubSearch =
+        node.getSubSearch().accept(new org.opensearch.sql.ast.EmptySourcePropagateVisitor(), null);
+    // Check if simplified subsearch has a source. If not, it's an empty search.
+    if (!hasRelation(prunedSubSearch)) {
       return pipe;
     }
     SqlNode subSql;
     try {
-      subSql = convertSubPlan(node.getSubSearch());
+      subSql = convertSubPlan(prunedSubSearch);
     } catch (Exception e) {
       // Empty subsearch or conversion failure — return main pipe unchanged
       return pipe;
@@ -1091,14 +1207,224 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     if (subCols.isEmpty()) {
       subCols = extractSelectColumnNames(subSql);
     }
+    // Detect type conflicts for common columns
+    detectTypeConflicts(mainSql, subSql, mainCols, subCols);
+    // Compute unified column set for alignment
+    LinkedHashSet<String> unified = new LinkedHashSet<>(mainCols);
+    unified.addAll(subCols);
+    // Extract subsearch ORDER BY before alignment strips it
+    SqlNodeList subOrderBy = extractOrderBy(subSql);
     if (!mainCols.isEmpty() && !subCols.isEmpty() && !mainCols.equals(subCols)) {
-      LinkedHashSet<String> unified = new LinkedHashSet<>(mainCols);
-      unified.addAll(subCols);
       mainSql = alignColumns(mainSql, mainCols, unified);
       subSql = alignColumns(subSql, subCols, unified);
     }
-    pipe = select(star()).from(subquery(unionAll(mainSql, subSql), "_t" + aliasCounter.incrementAndGet())).build();
+    // Strip subsearch ORDER BY (meaningless inside UNION ALL branch)
+    subSql = stripOrderBy(subSql);
+    // Add _source_order (0=main, 1=sub) to preserve main-first ordering
+    mainSql = addSourceOrderColumn(mainSql, 0);
+    subSql = addSourceOrderColumn(subSql, 1);
+    String unionAlias = "_t" + aliasCounter.incrementAndGet();
+    SqlNode union = unionAll(mainSql, subSql);
+    // Build ORDER BY: _source_order first, then subsearch sort columns
+    List<SqlNode> orderItems = new ArrayList<>();
+    orderItems.add(identifier("_source_order"));
+    if (subOrderBy != null) {
+      for (SqlNode item : subOrderBy) {
+        orderItems.add(item);
+      }
+    }
+    // Keep _source_order visible in the pipe so ORDER BY can reference it.
+    // Build: SELECT unified_cols, _source_order FROM (UNION ALL)
+    List<SqlNode> projWithSource = new ArrayList<>();
+    for (String col : unified) {
+      projWithSource.add(identifier(col));
+    }
+    projWithSource.add(identifier("_source_order"));
+    pipe = select(projWithSource.toArray(new SqlNode[0]))
+        .from(subquery(
+            select(star()).from(subquery(union, unionAlias)).build(),
+            "_t" + aliasCounter.incrementAndGet()))
+        .build();
+    // Store order items as pending; they will be applied together with any
+    // downstream head/limit.  After the ORDER BY is consumed we must strip
+    // _source_order — that is done by overriding applyPendingOrderBy below.
+    pendingOrderBy = orderItems;
+    pendingStripSourceOrder = !unified.isEmpty() ? new ArrayList<>(unified) : null;
     return pipe;
+  }
+
+  /** Extract ORDER BY clause from a SqlNode, or null if none. */
+  private SqlNodeList extractOrderBy(SqlNode node) {
+    if (node instanceof SqlOrderBy) {
+      SqlOrderBy ob = (SqlOrderBy) node;
+      return (ob.orderList != null && ob.orderList.size() > 0) ? ob.orderList : null;
+    }
+    // Check if alignColumns preserved ORDER BY
+    if (node instanceof SqlSelect) {
+      SqlSelect sel = (SqlSelect) node;
+      SqlNode from = sel.getFrom();
+      if (from instanceof SqlBasicCall && "AS".equals(((SqlBasicCall) from).getOperator().getName())) {
+        SqlNode inner = ((SqlBasicCall) from).operand(0);
+        return extractOrderBy(inner);
+      }
+    }
+    return null;
+  }
+
+  /** Strip ORDER BY from a SqlNode, returning the inner query. */
+  private SqlNode stripOrderBy(SqlNode node) {
+    if (node instanceof SqlOrderBy) {
+      return ((SqlOrderBy) node).query;
+    }
+    return node;
+  }
+
+  /** Add a literal _source_order column to a SqlNode for append ordering. */
+  private SqlNode addSourceOrderColumn(SqlNode node, int orderValue) {
+    SqlNode target = node;
+    if (target instanceof SqlOrderBy) {
+      target = ((SqlOrderBy) target).query;
+    }
+    return select(star(), as(intLiteral(orderValue), "_source_order"))
+        .from(subquery(target, "_t" + aliasCounter.incrementAndGet())).build();
+  }
+
+  /** Wrap a SqlOrderBy in a subquery to materialize its ordering before UNION ALL. */
+  private SqlNode materializeOrderBy(SqlNode node) {
+    if (node instanceof SqlOrderBy) {
+      return select(star()).from(subquery(node, "_t" + aliasCounter.incrementAndGet())).build();
+    }
+    return node;
+  }
+
+  @Override
+  protected SqlNode applyPendingOrderBy(SqlNode node) {
+    SqlNode result = super.applyPendingOrderBy(node);
+    if (pendingStripSourceOrder != null) {
+      List<String> cols = pendingStripSourceOrder;
+      pendingStripSourceOrder = null;
+      List<SqlNode> projItems = new ArrayList<>();
+      for (String col : cols) {
+        projItems.add(identifier(col));
+      }
+      result = select(projItems.toArray(new SqlNode[0]))
+          .from(subquery(result, "_t" + aliasCounter.incrementAndGet())).build();
+    }
+    return result;
+  }
+
+  /**
+   * Detect type conflicts for common columns between main and sub queries.
+   * Compares types from CAST expressions and schema-resolved types.
+   * Throws IllegalArgumentException if incompatible types are found.
+   */
+  private void detectTypeConflicts(SqlNode mainSql, SqlNode subSql,
+      List<String> mainCols, List<String> subCols) {
+    Set<String> commonCols = new LinkedHashSet<>(mainCols);
+    commonCols.retainAll(new LinkedHashSet<>(subCols));
+    if (commonCols.isEmpty()) return;
+    Map<String, SqlTypeName> mainTypes = extractColumnTypes(mainSql);
+    Map<String, SqlTypeName> subTypes = extractColumnTypes(subSql);
+    for (String col : commonCols) {
+      SqlTypeName mainType = mainTypes.get(col);
+      SqlTypeName subType = subTypes.get(col);
+      if (mainType != null && subType != null && mainType != subType) {
+        throw new IllegalArgumentException(
+            String.format("Unable to process column '%s' due to incompatible types: '%s' and '%s'",
+                col, mainType, subType));
+      }
+    }
+  }
+
+  /** Extract column types from a SqlNode by inspecting CAST expressions and schema. */
+  private Map<String, SqlTypeName> extractColumnTypes(SqlNode node) {
+    Map<String, SqlTypeName> types = new LinkedHashMap<>();
+    SqlNode target = node;
+    if (target instanceof SqlOrderBy) target = ((SqlOrderBy) target).query;
+    if (!(target instanceof SqlSelect)) return types;
+    SqlSelect sel = (SqlSelect) target;
+    if (sel.getSelectList() == null) return types;
+    for (SqlNode item : sel.getSelectList()) {
+      String name = extractColumnName(item);
+      if (name == null) continue;
+      SqlTypeName typeName = extractTypeFromNode(item);
+      if (typeName != null) types.put(name, typeName);
+    }
+    // Try resolving from source table schema for columns without explicit types
+    if (types.size() < sel.getSelectList().size()) {
+      Map<String, SqlTypeName> schemaTypes = resolveSchemaTypes(sel);
+      for (Map.Entry<String, SqlTypeName> e : schemaTypes.entrySet()) {
+        types.putIfAbsent(e.getKey(), e.getValue());
+      }
+    }
+    // Recursively trace types from inner subqueries for columns still missing
+    if (types.size() < sel.getSelectList().size()) {
+      Map<String, SqlTypeName> innerTypes = resolveTypesFromInnerQuery(sel);
+      for (Map.Entry<String, SqlTypeName> e : innerTypes.entrySet()) {
+        types.putIfAbsent(e.getKey(), e.getValue());
+      }
+    }
+    return types;
+  }
+
+  /** Recursively resolve column types from inner subqueries. */
+  private Map<String, SqlTypeName> resolveTypesFromInnerQuery(SqlSelect sel) {
+    SqlNode from = sel.getFrom();
+    if (from == null) return Collections.emptyMap();
+    if (from instanceof SqlBasicCall && "AS".equals(((SqlBasicCall) from).getOperator().getName())) {
+      from = ((SqlBasicCall) from).operand(0);
+    }
+    if (from instanceof SqlSelect || from instanceof SqlOrderBy) {
+      return extractColumnTypes(from);
+    }
+    return Collections.emptyMap();
+  }
+
+  /** Resolve column types from the source table schema. */
+  private Map<String, SqlTypeName> resolveSchemaTypes(SqlSelect sel) {
+    Map<String, SqlTypeName> types = new LinkedHashMap<>();
+    SqlNode from = sel.getFrom();
+    if (from == null) return types;
+    // Unwrap AS alias
+    if (from instanceof SqlBasicCall && "AS".equals(((SqlBasicCall) from).getOperator().getName())) {
+      SqlNode inner = ((SqlBasicCall) from).operand(0);
+      if (inner instanceof SqlSelect) return resolveSchemaTypes((SqlSelect) inner);
+      from = inner;
+    }
+    if (from instanceof SqlIdentifier) {
+      String tbl = ((SqlIdentifier) from).getSimple();
+      Table table = defaultSchema.getTable(tbl);
+      if (table == null) {
+        for (String n : defaultSchema.getTableNames()) {
+          if (n.equalsIgnoreCase(tbl)) { table = defaultSchema.getTable(n); break; }
+        }
+      }
+      if (table != null) {
+        for (org.apache.calcite.rel.type.RelDataTypeField f : table.getRowType(typeFactory).getFieldList()) {
+          types.put(f.getName(), f.getType().getSqlTypeName());
+        }
+      }
+    }
+    return types;
+  }
+
+  /** Extract SqlTypeName from a CAST expression or AS(CAST(...), name). */
+  private SqlTypeName extractTypeFromNode(SqlNode node) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) node;
+      if ("AS".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
+        return extractTypeFromNode(call.operand(0));
+      }
+      if ("CAST".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
+        SqlNode typeNode = call.operand(1);
+        if (typeNode instanceof SqlDataTypeSpec) {
+          return ((SqlDataTypeSpec) typeNode).getTypeName().getSimple() != null
+              ? SqlTypeName.get(((SqlDataTypeSpec) typeNode).getTypeName().getSimple())
+              : null;
+        }
+      }
+    }
+    return null;
   }
 
   private static boolean hasRelation(org.opensearch.sql.ast.tree.UnresolvedPlan plan) {
@@ -1738,8 +2064,44 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   // -- Fix 1: COALESCE with non-existent fields → replace with NULL --
 
   @Override
+  public SqlNode visitAggregateFunction(AggregateFunction node, Void ctx) {
+    String name = node.getFuncName().toLowerCase();
+    if (("earliest".equals(name) || "latest".equals(name))
+        && !aliasFieldMapping.isEmpty()
+        && aliasFieldMapping.containsKey("@timestamp")) {
+      String resolved = aliasFieldMapping.get("@timestamp");
+      SqlNode arg = node.getField().accept(this, null);
+      return call("earliest".equals(name) ? "ARG_MIN" : "ARG_MAX", arg, identifier(resolved));
+    }
+    // PPL SUM returns BIGINT; cast integer args to BIGINT for Calcite type promotion
+    if ("sum".equals(name)) {
+      SqlNode field = node.getField().accept(this, null);
+      String fn = fieldName(node.getField());
+      // Resolve alias to target field for type lookup
+      if (fn != null && aliasFieldMapping.containsKey(fn)) fn = aliasFieldMapping.get(fn);
+      SqlTypeName ft = fn != null ? getFieldSqlType(fn) : null;
+      if (ft == SqlTypeName.INTEGER || ft == SqlTypeName.SMALLINT || ft == SqlTypeName.TINYINT) {
+        SqlDataTypeSpec bigintType = new SqlDataTypeSpec(
+            new SqlBasicTypeNameSpec(SqlTypeName.BIGINT, SqlParserPos.ZERO), SqlParserPos.ZERO);
+        return call("SUM", cast(field, bigintType));
+      }
+      return call("SUM", field);
+    }
+    return super.visitAggregateFunction(node, ctx);
+  }
+
+  @Override
   public SqlNode visitFunction(Function node, Void ctx) {
-    if ("coalesce".equalsIgnoreCase(node.getFuncName())) {
+    // Resolve @timestamp alias for earliest/latest functions
+    String name = node.getFuncName().toLowerCase();
+    if (("earliest".equals(name) || "latest".equals(name))
+        && !aliasFieldMapping.isEmpty()
+        && aliasFieldMapping.containsKey("@timestamp")) {
+      String resolved = aliasFieldMapping.get("@timestamp");
+      SqlNode arg = node.getFuncArgs().get(0).accept(this, null);
+      return call("earliest".equals(name) ? "ARG_MIN" : "ARG_MAX", arg, identifier(resolved));
+    }
+    if ("coalesce".equalsIgnoreCase(name)) {
       Set<String> cols = new HashSet<>(resolveColumnsWithPipeExtras());
       cols.addAll(currentEvalAliases);
       List<SqlNode> args = new ArrayList<>();

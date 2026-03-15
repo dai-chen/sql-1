@@ -1070,12 +1070,102 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       default: calciteJoinType = condition != null ? JoinType.INNER : JoinType.CROSS; break;
     }
 
+    // Handle max option: limit right-side matches per join key group
+    Literal maxLit = node.getArgumentMap().get("max");
+    if (maxLit != null && !maxLit.equals(Literal.ZERO)) {
+      int maxVal = (Integer) maxLit.getValue();
+      rightSide = applyJoinMaxToRightSide(rightSide, maxVal, node, effectiveRightAlias);
+    }
+
     SqlNode joinNode = SqlNodeDSL.join(leftSide, calciteJoinType, rightSide, condition);
 
     // Set pipe to raw SqlJoin so aliases stay visible to downstream stages.
     pipe = joinNode;
     skipNextWrap = true;
     return pipe;
+  }
+
+  /**
+   * Wrap the right side of a join with ROW_NUMBER + filter to limit matches per join key group.
+   * The resulting right side will contain an extra {@code _rn} column that must be removed
+   * by downstream processing (e.g., DynamicPPLToSqlNodeConverter).
+   */
+  protected SqlNode applyJoinMaxToRightSide(
+      SqlNode rightSide, int maxVal, Join node, String effectiveRightAlias) {
+    // Determine partition keys for ROW_NUMBER
+    List<SqlNode> partitionKeys = getJoinMaxPartitionKeys(node, effectiveRightAlias);
+    if (partitionKeys.isEmpty()) return rightSide;
+
+    // Extract inner query and alias from the right side (which is AS(inner, alias))
+    String alias = extractAlias(rightSide);
+    SqlNode inner;
+    if (rightSide instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) rightSide;
+      if ("AS".equals(call.getOperator().getName())) {
+        inner = call.operand(0);
+      } else {
+        inner = rightSide;
+      }
+    } else {
+      inner = rightSide;
+    }
+
+    // Build: SELECT *, ROW_NUMBER() OVER (PARTITION BY keys ORDER BY keys) AS _rn FROM inner
+    String innerAlias = "_rn_inner";
+    SqlNodeList partBy = new SqlNodeList(partitionKeys, SqlParserPos.ZERO);
+    SqlNode rowNum = as(
+        window(call("ROW_NUMBER"), partBy, new SqlNodeList(partitionKeys, SqlParserPos.ZERO)),
+        JOIN_MAX_RN_COLUMN);
+    SqlNode withRn = select(star(), rowNum).from(subquery(inner, innerAlias)).build();
+
+    // Build: SELECT * FROM (withRn) WHERE _rn <= maxVal
+    String filterAlias = "_rn_filter";
+    SqlNode filtered = select(star()).from(subquery(withRn, filterAlias))
+        .where(lte(identifier(JOIN_MAX_RN_COLUMN), intLiteral(maxVal))).build();
+
+    // Re-apply the original alias
+    return alias != null ? subquery(filtered, alias) : subquery(filtered, effectiveRightAlias);
+  }
+
+  /** Column name used for the ROW_NUMBER in join max option. */
+  protected static final String JOIN_MAX_RN_COLUMN = "_rn";
+
+  /** Extract partition keys for the join max ROW_NUMBER window. */
+  private List<SqlNode> getJoinMaxPartitionKeys(Join node, String effectiveRightAlias) {
+    if (node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty()) {
+      // Field-list join: partition by field names (unqualified, on right side)
+      return node.getJoinFields().get().stream()
+          .map(f -> (SqlNode) identifier(f.getField().toString()))
+          .collect(Collectors.toList());
+    } else if (node.getJoinCondition().isPresent()) {
+      // Criteria join: extract right-side column names from the ON condition
+      return extractRightColumnsFromCondition(node.getJoinCondition().get(), effectiveRightAlias);
+    }
+    return List.of();
+  }
+
+  /** Extract right-side column references from a join condition expression. */
+  private List<SqlNode> extractRightColumnsFromCondition(
+      UnresolvedExpression condition, String rightAlias) {
+    List<SqlNode> result = new ArrayList<>();
+    collectRightColumns(condition, rightAlias, result);
+    return result;
+  }
+
+  private void collectRightColumns(
+      UnresolvedExpression expr, String rightAlias, List<SqlNode> result) {
+    if (expr instanceof QualifiedName) {
+      List<String> parts = ((QualifiedName) expr).getParts();
+      if (parts.size() >= 2 && parts.get(0).equals(rightAlias)) {
+        // Right-side qualified reference like r.country -> use unqualified name
+        result.add(identifier(parts.get(parts.size() - 1)));
+      }
+    }
+    for (var child : expr.getChild()) {
+      if (child instanceof UnresolvedExpression) {
+        collectRightColumns((UnresolvedExpression) child, rightAlias, result);
+      }
+    }
   }
 
   /** Extract alias from a SqlNode that is an AS expression (e.g., subquery(..., alias)). */
