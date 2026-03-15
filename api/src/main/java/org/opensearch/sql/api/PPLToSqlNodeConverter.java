@@ -292,13 +292,15 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     for (UnresolvedPlan node : nodes) {
       current = node.accept(this, null);
     }
+    // If the final result is a raw SqlJoin (from visitJoin), wrap it in SELECT * first
+    // so that ORDER BY / LIMIT and downstream processing work correctly.
+    if (current instanceof SqlJoin) {
+      current = select(star()).from(current).build();
+      pipe = current;
+    }
     // Apply any deferred ORDER BY / LIMIT that wasn't consumed by visitHead
     if (pendingOrderBy != null || pendingFetch != null) {
       current = applyPendingOrderBy(current);
-    }
-    // If the final result is a raw SqlJoin (from visitJoin), wrap it in SELECT *
-    if (current instanceof SqlJoin) {
-      current = select(star()).from(current).build();
     }
     return current;
   }
@@ -337,6 +339,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   // -- Known alias tracking: aliases from joins, subqueries, lookups --
   protected final Set<String> knownAliases = new java.util.HashSet<>();
+
+  // -- Alias mapping: SubqueryAlias name → effective join alias (for rewriting references) --
+  protected final Map<String, String> aliasMapping = new HashMap<>();
 
   private String nextAlias() {
     String alias = "_t" + aliasCounter.incrementAndGet();
@@ -380,7 +385,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitRelation(Relation node, Void ctx) {
     String tableName = node.getTableQualifiedName().toString();
+    knownAliases.add(tableName);
     pipe = select(star()).from(table(tableName)).build();
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitSubqueryAlias(SubqueryAlias node, Void ctx) {
+    knownAliases.add(node.getAlias());
     return pipe;
   }
 
@@ -1013,7 +1025,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     String leftAlias = node.getLeftAlias().orElse(null);
     String effectiveLeftAlias;
     SqlNode leftSide;
-    if (leftAlias != null) {
+
+    if (pipe instanceof SqlJoin) {
+      // Multi-join chain: use the raw SqlJoin directly as the left side.
+      leftSide = pipe;
+      effectiveLeftAlias = leftAlias; // may be null for multi-join
+    } else if (leftAlias != null) {
       leftSide = subquery(pipe, leftAlias);
       effectiveLeftAlias = leftAlias;
     } else {
@@ -1023,22 +1040,25 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
 
     String rightAlias = node.getRightAlias().orElse(null);
-    // Extract the SubqueryAlias name from the right side (if any) before resolveJoinRight
-    // overrides it with rightAlias. This is needed for downstream references like `fields tt.name`.
-    String subqueryAliasName = extractSubqueryAliasName(node.getRight());
     SqlNode rightSide = resolveJoinRight(node.getRight(), rightAlias);
     String effectiveRightAlias = rightAlias != null ? rightAlias : extractAlias(rightSide);
 
-    knownAliases.add(effectiveLeftAlias);
+    if (effectiveLeftAlias != null) knownAliases.add(effectiveLeftAlias);
     if (effectiveRightAlias != null) knownAliases.add(effectiveRightAlias);
-    // Also track the SubqueryAlias name if it differs from the effective right alias
-    if (subqueryAliasName != null && !subqueryAliasName.equals(effectiveRightAlias)) {
-      knownAliases.add(subqueryAliasName);
+    // Track all SubqueryAlias names from the right side and map them to the effective alias
+    for (String saName : extractAllSubqueryAliasNames(node.getRight())) {
+      knownAliases.add(saName);
+      if (effectiveRightAlias != null && !saName.equals(effectiveRightAlias)) {
+        aliasMapping.put(saName, effectiveRightAlias);
+      }
     }
     // Track the left SubqueryAlias name too (source = table as tt | JOIN left=t1 ...)
     String leftSubqueryAlias = extractSubqueryAliasName(node.getLeft());
     if (leftSubqueryAlias != null && !leftSubqueryAlias.equals(effectiveLeftAlias)) {
       knownAliases.add(leftSubqueryAlias);
+      if (effectiveLeftAlias != null) {
+        aliasMapping.put(leftSubqueryAlias, effectiveLeftAlias);
+      }
     }
 
     SqlNode condition = null;
@@ -1185,12 +1205,41 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return null;
   }
 
+  /** Extract the source table name from a pipe that is SELECT * FROM "tableName". */
+  private static String extractTableNameFromPipe(SqlNode pipe) {
+    if (!(pipe instanceof org.apache.calcite.sql.SqlSelect)) return null;
+    org.apache.calcite.sql.SqlSelect sel = (org.apache.calcite.sql.SqlSelect) pipe;
+    SqlNode from = sel.getFrom();
+    if (from instanceof SqlIdentifier && !((SqlIdentifier) from).isStar()) {
+      return ((SqlIdentifier) from).getSimple();
+    }
+    return null;
+  }
+
   /** Extract SubqueryAlias name from an AST plan node. */
   private static String extractSubqueryAliasName(UnresolvedPlan plan) {
     if (plan instanceof SubqueryAlias) {
       return ((SubqueryAlias) plan).getAlias();
     }
     return null;
+  }
+
+  /** Extract all SubqueryAlias names from an AST plan node (including nested ones). */
+  private static List<String> extractAllSubqueryAliasNames(UnresolvedPlan plan) {
+    List<String> names = new ArrayList<>();
+    collectSubqueryAliasNames(plan, names);
+    return names;
+  }
+
+  private static void collectSubqueryAliasNames(UnresolvedPlan plan, List<String> names) {
+    if (plan instanceof SubqueryAlias) {
+      names.add(((SubqueryAlias) plan).getAlias());
+    }
+    for (Node child : plan.getChild()) {
+      if (child instanceof UnresolvedPlan) {
+        collectSubqueryAliasNames((UnresolvedPlan) child, names);
+      }
+    }
   }
 
   @Override
@@ -2057,6 +2106,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     if (parts.size() == 1 && binReplacements.containsKey(parts.get(0))) {
       return binReplacements.get(parts.get(0));
+    }
+    // Rewrite SubqueryAlias references to effective join aliases
+    if (parts.size() > 1 && aliasMapping.containsKey(parts.get(0))) {
+      List<String> rewritten = new ArrayList<>(parts);
+      rewritten.set(0, aliasMapping.get(parts.get(0)));
+      return identifier(rewritten.toArray(new String[0]));
     }
     // For multi-part names, check if the first part is a known alias (join, subquery, lookup).
     // If not, treat as a single dotted column name (OpenSearch object field).
