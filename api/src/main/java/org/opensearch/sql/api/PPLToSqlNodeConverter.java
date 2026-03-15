@@ -680,7 +680,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitAggregation(Aggregation node, Void ctx) {
-    // Aggregation resets row order — discard any pending ORDER BY from a prior sort
+    // Apply any pending FETCH (from head) before aggregation discards it.
+    // Discard pendingOrderBy (sort before stats is semantically meaningless).
+    if (pendingFetch != null) {
+      pipe = applyPendingOrderBy(pipe);
+      pipe = select(star()).from(subquery(pipe, nextAlias())).build();
+    }
     pendingOrderBy = null;
     pendingFetch = null;
     pendingOffset = null;
@@ -2676,9 +2681,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       List<UnresolvedExpression> args = node.getArgList();
       if (args != null && !args.isEmpty()) {
         SqlNode limit = args.get(0).accept(this, null);
-        return call("VALUES", field, limit);
+        return call("PPL_VALUES", field, limit);
       }
-      return call("VALUES", field);
+      return call("PPL_VALUES", field);
     }
     if ("median".equals(name))
       return call("percentile_approx", node.getField().accept(this, null), intLiteral(50));

@@ -284,7 +284,7 @@ public class UnifiedQueryContext implements AutoCloseable {
           PPLReturnTypes.STRING_ARRAY,
           PPLOperandTypes.ANY_OPTIONAL_INTEGER);
       SqlAggFunction values = createUserDefinedAggFunction(
-          ValuesAggFunction.class, "VALUES",
+          ValuesAggFunction.class, "PPL_VALUES",
           PPLReturnTypes.STRING_ARRAY,
           PPLOperandTypes.ANY_OPTIONAL_INTEGER);
 
