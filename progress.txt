@@ -1152,3 +1152,33 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Lookup REPLACE/APPEND with SqlStarExceptReplace is cleaner than explicit column enumeration. The StarExceptReplaceRewriter handles expansion during validation.
   - CalciteGeoPointFormatsIT consistently crashes the test cluster with StackOverflowError in JSONObject.wrap — must be excluded from batch runs or run last.
 ---
+
+## 2026-03-14T23:33 - V4-025: Fix remaining long-tail failures (COALESCE + AppendPipe + Span type)
+- **What was fixed**: 6 new tests passing across 2 test classes
+  - **COALESCE with non-existent fields** (4 tests): Override visitFunction in DynamicPPLToSqlNodeConverter to intercept `coalesce` calls. For each argument that is a Field or QualifiedName, checks if the field exists in the schema via resolveColumnsWithPipeExtras() + currentEvalAliases set. Non-existent fields replaced with SqlLiteral.createNull(POS). The currentEvalAliases set tracks aliases being built in the current eval statement (e.g., `result1` when processing `result2 = coalesce(result1, age)`). Initial fix only checked QualifiedName (never matched because PPL parser wraps in Field nodes). Fixed to check both Field and QualifiedName.
+  - **AppendPipe command** (2 tests): Added visitAppendPipe in PPLToSqlNodeConverter. Saves current pipe, creates sub-converter via convertSubPipeline() with pipe set to current state, runs sub-pipeline commands, UNION ALLs original with result. DynamicPPLToSqlNodeConverter override adds column alignment: extracts columns from both sides, computes unified column set, NULL-fills missing columns on each side before UNION ALL.
+  - **Span type preservation** (0 tests — engine-blocked): Added visitSpan override in DynamicPPLToSqlNodeConverter that wraps TIME/DATE span results with CAST(... AS TIME/DATE) based on schema field type via getFieldSqlType(). SQL generation is correct but Calcite engine-level type inference overrides the CAST during RelNode optimization. All 5 span type tests remain engine-blocked.
+- **Pass rate change**: 74.1% (1672/2255) → ~74.4% (estimated 1678/2255) = +0.3pp, +6 tests
+- **Per-class results** (before → after):
+  - CalcitePPLEnhancedCoalesceIT: 11→15 pass (15 total, 0 fail) ✅ ALL PASS — +4
+  - CalcitePPLAppendPipeCommandIT: 0→2 pass (4 total, 2 fail) — +2
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLRenameIT: 19/22 (no regression) ✅
+  - CalciteFillNullCommandIT: 11/13 (no regression) ✅
+  - CalciteAddTotalsCommandIT: 11/11 (no regression) ✅
+  - CalciteAddColTotalsCommandIT: 6/6 (no regression) ✅
+- **Remaining failures**:
+  - AppendPipe (2): testAppendDifferentIndex (cross-index plan failure, 500 error), testAppendpipeWithConflictTypeColumn (expected exception not thrown — query succeeds instead of failing)
+  - Span type (5): All engine-blocked — CAST(... AS TIME) in SQL is correct but Calcite RelNode type inference returns TIMESTAMP
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+25: visitAppendPipe, convertSubPipeline)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+145: visitFunction coalesce override, visitAppendPipe column alignment, visitSpan type preservation, convertSubPipeline override, currentEvalAliases tracking, alignColumns, extractColumnsFromSqlNode, flattenPlan, getFieldSqlType helpers)
+- **Learnings for future iterations:**
+  - PPL parser wraps field references in Function arguments as Field(QualifiedName), NOT bare QualifiedName. Always check for both node types when inspecting function arguments.
+  - resolveColumnsWithPipeExtras() is better than resolveColumns() + extractPipeColumns() for field existence checks — it includes both schema columns and eval-created aliases from the pipe's SELECT list.
+  - For eval statements with multiple assignments (eval a=..., b=coalesce(a, ...)), the currentEvalAliases set must be populated BEFORE processing any assignment so that later assignments can reference earlier ones.
+  - AppendPipe semantics: sub-pipeline operates on a COPY of the current pipe data, not a different source. The sub-converter must start with pipe = current pipe state.
+  - Column alignment for UNION ALL: when two sides have different column sets, compute unified superset and NULL-fill missing columns on each side. Use extractColumnsFromSqlNode() to get column names from SqlSelect/SqlOrderBy/SqlJoin nodes.
+  - Calcite engine-level type inference can override explicit CAST in SQL. CAST(FLOOR(time_field TO HOUR) AS TIME) produces correct SQL but the RelNode optimizer infers TIMESTAMP from FLOOR. This is an engine-level limitation that cannot be fixed in the converter.
+---
