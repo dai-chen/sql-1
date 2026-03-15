@@ -322,7 +322,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     LinkedHashMap<String, String> mappings = new LinkedHashMap<>();
     if (hasWildcard) {
       // For wildcard expansion, use table columns if pipe columns are just *
-      List<String> expandCols = pipeCols.isEmpty() ? resolveColumns(tableName) : pipeCols;
+      List<String> expandCols = new ArrayList<>(pipeCols.isEmpty() ? resolveColumns(tableName) : pipeCols);
       if (expandCols.isEmpty()) {
         return super.visitRename(node, ctx);
       }
@@ -332,11 +332,25 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         if (WildcardRenameUtils.isWildcardPattern(sourcePattern)) {
           List<String> matchingFields = WildcardRenameUtils.matchFieldNames(sourcePattern, expandCols);
           for (String fld : matchingFields) {
-            mappings.put(fld, WildcardRenameUtils.applyWildcardTransformation(
-                sourcePattern, targetPattern, fld));
+            String newName = WildcardRenameUtils.applyWildcardTransformation(
+                sourcePattern, targetPattern, fld);
+            // Track the original→final mapping through chains
+            String origField = fld;
+            for (Map.Entry<String, String> prev : mappings.entrySet()) {
+              if (prev.getValue().equals(fld)) { origField = prev.getKey(); break; }
+            }
+            if (!origField.equals(fld)) {
+              mappings.remove(origField);
+            }
+            mappings.put(origField.equals(fld) ? fld : origField, newName);
+            // Update expandCols to reflect this rename for subsequent mappings
+            int idx = expandCols.indexOf(fld);
+            if (idx >= 0) expandCols.set(idx, newName);
           }
         } else {
           mappings.put(sourcePattern, targetPattern);
+          int idx = expandCols.indexOf(sourcePattern);
+          if (idx >= 0) expandCols.set(idx, targetPattern);
         }
       }
     } else {
@@ -440,7 +454,41 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
       return pipe;
     }
-    // Pipe is not narrowed — use SqlStarExceptReplace with REPLACE
+    // Check if any replace target field is NOT in the table schema (e.g. eval-created)
+    List<String> schemaCols = resolveColumns(tableName);
+    Set<String> schemaColSet = new LinkedHashSet<>(schemaCols);
+    boolean allInSchema = true;
+    for (Field field : node.getFieldList()) {
+      if (!schemaColSet.contains(field.getField().toString())) {
+        allInSchema = false;
+        break;
+      }
+    }
+    if (!allInSchema) {
+      // Some replace targets are eval-created — use explicit column enumeration
+      List<String> allCols = resolveColumnsWithPipeExtras();
+      pipe = wrapAsSubquery();
+      Map<String, SqlNode> replaceExprs = new LinkedHashMap<>();
+      for (Field field : node.getFieldList()) {
+        String fieldName = field.getField().toString();
+        SqlNode expr = identifier(fieldName);
+        for (ReplacePair pair : node.getReplacePairs()) {
+          expr = buildReplacePairExpr(expr, pair);
+        }
+        replaceExprs.put(fieldName, expr);
+      }
+      List<SqlNode> selectItems = new ArrayList<>();
+      for (String col : allCols) {
+        if (replaceExprs.containsKey(col)) {
+          selectItems.add(as(replaceExprs.get(col), col));
+        } else {
+          selectItems.add(identifier(col));
+        }
+      }
+      pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+      return pipe;
+    }
+    // Pipe is not narrowed and all targets in schema — use SqlStarExceptReplace with REPLACE
     pipe = wrapAsSubquery();
     List<SqlNode> replaceClauses = new ArrayList<>();
     for (Field field : node.getFieldList()) {

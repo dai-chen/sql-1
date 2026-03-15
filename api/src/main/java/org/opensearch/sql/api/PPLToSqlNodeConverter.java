@@ -22,6 +22,7 @@ import org.antlr.v4.runtime.tree.ParseTree;
 import org.apache.calcite.avatica.util.TimeUnit;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
+import org.apache.calcite.sql.SqlCharStringLiteral;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlIntervalQualifier;
@@ -2804,6 +2805,16 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     // json_valid → expr IS JSON VALUE (postfix operator)
     if ("json_valid".equals(name))
       return new SqlBasicCall(SqlStdOperatorTable.IS_JSON_VALUE, new SqlNode[]{args.get(0)}, POS);
+    // replace(field, pattern, replacement): convert \N back-references to $N for REGEXP_REPLACE
+    if ("replace".equals(name) && args.size() == 3) {
+      SqlNode replArg = args.get(2);
+      if (replArg instanceof SqlCharStringLiteral) {
+        String repl = ((SqlCharStringLiteral) replArg).getNlsString().getValue();
+        String converted = repl.replaceAll("\\\\(\\d+)", "\\$$1");
+        args.set(2, literal(converted));
+      }
+      return call("REGEXP_REPLACE", args.toArray(new SqlNode[0]));
+    }
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     return call(sqlName, args.toArray(new SqlNode[0]));
