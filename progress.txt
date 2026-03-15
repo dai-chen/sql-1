@@ -1311,3 +1311,35 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - aliasMapping rewriting in visitQualifiedName is essential for `table as alias` patterns where the alias differs from the join alias.
   - SqlOrderBy(SqlJoin) is invalid — must wrap SqlJoin in SELECT* first before applying ORDER BY.
 ---
+
+## 2026-03-15T06:57 - V4-012 (Iteration 32): Consecutive dedup + non-equi join + metadata fields
+- **What was fixed**: 5 new tests passing across 4 test classes
+  - **Consecutive dedup ORDER BY**: Added `visitDedupe` override in DynamicPPLToSqlNodeConverter. When `consecutive=true`, sets `pendingOrderBy = List.of(cast(identifier("_id"), intType))` to add `ORDER BY CAST("_id" AS INTEGER)` to the final SQL. The gaps-and-islands algorithm in the base converter already generates correct SQL for consecutive dedup, but without ORDER BY the result rows come back in arbitrary order, failing the test's consecutive-value assertions.
+  - **AnsiSQLOpenSearchTable metadata fields**: Added `fieldTypes.putAll(storageTable.getReservedFieldTypes())` in `getRowType()` to include metadata fields (`_id`, `_index`, `_score`, `_maxscore`, `_sort`, `_routing`) in the ANSI SQL table schema. Previously these were missing, causing `Column '_id' not found` errors when the generated SQL referenced `_id` (e.g., in consecutive dedup's `CAST("_id" AS INTEGER)`). This also fixed 2 CalciteWhereCommandIT tests that filter on `_id`.
+  - **Non-equi join field resolution**: Added `joinFieldToAlias` Map in DynamicPPLToSqlNodeConverter that maps unqualified field names to their table alias. In `visitJoin`, resolves columns from both left and right tables, maps unique columns to their alias, and removes ambiguous columns (present in both tables). In `visitQualifiedName`, when a single-part name is found in `joinFieldToAlias`, creates a compound identifier (`alias.field`). This fixes `ON age < salary` where `age` and `salary` are in different tables.
+  - **Join alias preservation through WHERE**: Modified `visitFilter` to preserve `skipNextWrap` flag when in join context. After a join, WHERE was wrapping the result in a subquery, losing join aliases. Now the flag is re-set so downstream commands (fields, sort) can still see join aliases.
+  - **visitProject join context handling**: When `skipNextWrap` is set and pipe is a SELECT-over-JOIN with SELECT *, replaces the select list directly on the existing SELECT instead of wrapping in a subquery. This preserves join alias visibility for field projections after WHERE.
+- **Pass rate change**: 75.6% (1705/2255 est) → 76.1% (1710/2255 est) = +0.5pp, +5 tests
+- **Per-class results** (before → after):
+  - CalcitePPLDedupIT: 11→12 pass (12 total, 0 fail) ✅ ALL PASS — +1 (consecutive dedup)
+  - CalciteDedupCommandIT: 3→4 pass (4 total, 0 fail) ✅ ALL PASS — +1 (consecutive dedup)
+  - CalcitePPLJoinIT: 28→29 pass (39 total, 10 fail) — +1 (testNonEquiJoin)
+  - CalciteWhereCommandIT: 28→30 pass (37 total, 4 fail, 3 skip) — +2 (metadata field tests)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLBasicIT: 36/42 (no regression) ✅
+- **Remaining failures in targeted classes**:
+  - JoinIT (10): testMultipleJoins, testMultipleJoinsWithoutTableAliases, testMultipleJoinsWithRelationSubquery (multi-join chains), testSimpleSortPushDownForSMJ, testComplexSortPushDownForSMJ (expression join conditions — pre-existing), testJoinWithFieldList, testJoinWithFieldListMaxEqualsOne (field-list data mismatch), testInnerJoinWithRelationSubquery (row ordering), testJoinSubsearchMaxOut (max option), testJoinWhenLegacyNotPreferred (settings)
+  - WhereCommandIT (4): testFilterOnNestedFields, testFilterOnComputedNestedFields, testFilterOnNestedAndRootFields (nested field ITEM operator — engine-blocked), testInWithIncompatibleType (type validation)
+- **Regression analysis**: testNonEquiJoin was a REGRESSION (in regressions-vs-baseline.txt). testConsecutiveDedup and testConsecutiveImplicitFallbackV2 were PRE-EXISTING failures. testWhereWithMetadataFields/2 were PRE-EXISTING.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+37: visitDedupe override, joinFieldToAlias map, visitJoin field resolution, visitQualifiedName join field lookup)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+32/-1: visitFilter skipNextWrap preservation, visitProject join context handling)
+  - opensearch/src/main/java/org/opensearch/sql/opensearch/storage/AnsiSQLOpenSearchTable.java (+1: reserved field types)
+- **Learnings for future iterations:**
+  - AnsiSQLOpenSearchTable.getRowType() was missing reserved field types (_id, _index, etc.). The PPL path (OpenSearchTypeFactory.convertSchema) already included them, but the ANSI SQL path didn't. This caused all SQL queries referencing _id to fail with "Column not found".
+  - Consecutive dedup's gaps-and-islands algorithm produces correct rows but without ORDER BY, the result order is arbitrary. Must add ORDER BY CAST("_id" AS INTEGER) to preserve document order.
+  - In join context, visitFilter must preserve the skipNextWrap flag so downstream commands can still see join aliases. Without this, WHERE wraps the join in a subquery, losing alias visibility.
+  - visitProject in join context should replace the select list on the existing SELECT-over-JOIN (when it's SELECT *) instead of wrapping in a subquery. This preserves join alias visibility for field projections.
+  - joinFieldToAlias resolves unqualified field names in join conditions by mapping unique columns to their table alias. Ambiguous columns (present in both tables) are removed from the map, leaving them unqualified for Calcite to resolve.
+---
