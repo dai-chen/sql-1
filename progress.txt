@@ -1343,3 +1343,32 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - visitProject in join context should replace the select list on the existing SELECT-over-JOIN (when it's SELECT *) instead of wrapping in a subquery. This preserves join alias visibility for field projections.
   - joinFieldToAlias resolves unqualified field names in join conditions by mapping unique columns to their table alias. Ambiguous columns (present in both tables) are removed from the map, leaving them unqualified for Calcite to resolve.
 ---
+
+## 2026-03-15T11:06 - V4-012 (Iteration 33): Replace escape sequences + chained wildcard rename + capture groups
+- **What was fixed**: 6 new tests passing across 3 test classes
+  - **Replace escape sequences** (3 tests): Fixed `visitReplace` in DynamicPPLToSqlNodeConverter. When replace target columns are NOT in the table schema (eval-created columns like `eval note = 'price: *sale*'`), the `SELECT * REPLACE(expr AS col)` pattern fails because `StarExceptReplaceRewriter` validates REPLACE columns against the table schema only. Fix: before creating `SqlStarExceptReplace`, check if all replace target fields exist in `resolveColumns(tableName)`. If any are missing (eval-created), use `resolveColumnsWithPipeExtras()` to get the full column list and build explicit column enumeration instead. This is the same pattern as the narrowed-pipe path but triggered by eval-created columns.
+  - **Chained wildcard rename** (1 test): Fixed `visitRename` in DynamicPPLToSqlNodeConverter. For chained wildcard renames like `rename *ame as *_ame, *_ame as *_AME`, the second rename needs to match against the OUTPUT of the first rename (which includes `n_ame`), not the original columns. Fix: after processing each wildcard mapping, update `expandCols` list to reflect the renames applied so far. Also track original→final mapping through chains so `name → n_ame → n_AME` produces a single `name → n_AME` mapping.
+  - **Replace capture group back-references** (2 tests): Added special case for `replace()` function in `visitFunction`. PPL `replace(field, pattern, replacement)` uses Java-style back-references (`\1`, `\2`) but Calcite's REGEXP_REPLACE uses `$1`, `$2`. Fix: when function is `replace` with 3 args and the replacement arg is a string literal, convert `\N` to `$N` via `repl.replaceAll("\\\\(\\d+)", "\\$$1")`.
+- **Pass rate change**: 75.6% (1710/2255 est) → 76.1% (1716/2255 est) = +0.3pp, +6 tests
+- **Per-class results** (before → after):
+  - CalciteReplaceCommandIT: 16→19 pass (21 total, 2 fail) — +3 (escape sequence tests)
+  - CalcitePPLRenameIT: 19→20 pass (22 total, 2 fail) — +1 (chained wildcard)
+  - CalcitePPLStringBuiltinFunctionIT: 24→26 pass (27 total, 1 fail) — +2 (capture groups)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalciteTrendlineCommandIT: 5/5 (no regression) ✅
+- **Remaining failures in targeted classes**:
+  - ReplaceCommandIT (2): testReplaceAfterFieldRemoved (expected exception not thrown), testReplaceNonExistentField (error message mismatch)
+  - RenameIT (2): testWildcardPatternDifferentCounts (error message mismatch), testRefRenamedField (error message mismatch)
+  - StringBuiltinFunctionIT (1): testReplaceWithInvalidRegexPattern (error message mismatch)
+- **Full suite note**: Full suite run corrupted by CalciteGeoPointFormatsIT StackOverflowError crash cascading to all subsequent tests. Rate calculated from per-class targeted runs.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+38/-4: visitReplace eval-created column detection, visitRename chained wildcard update)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+10/-1: replace() capture group back-reference conversion, SqlCharStringLiteral import)
+- **Learnings for future iterations:**
+  - `SELECT * REPLACE(expr AS col)` fails when the column was created by eval (not in the original table schema). The `StarExceptReplaceRewriter` validates REPLACE columns against the table schema only. Must detect eval-created columns and use explicit column enumeration instead.
+  - `resolveColumnsWithPipeExtras()` is the correct method for getting the full column list including eval-created columns. It combines `resolveColumns(tableName)` with extra aliased columns from the pipe's SELECT list.
+  - Chained wildcard renames need to update the column list after each mapping so subsequent renames see the output of prior renames. Without this, `rename *ame as *_ame, *_ame as *_AME` produces `n_ame` instead of `n_AME`.
+  - PPL `replace()` uses Java-style back-references (`\1`, `\2`) but Calcite's REGEXP_REPLACE uses `$1`, `$2`. Must convert at the converter level.
+  - The full test suite is unreliable due to CalciteGeoPointFormatsIT StackOverflowError crash cascading to all subsequent tests. Always verify with targeted class runs.
+---
