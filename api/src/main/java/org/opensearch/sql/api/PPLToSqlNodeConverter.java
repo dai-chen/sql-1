@@ -1409,9 +1409,33 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitAppend(Append node, Void ctx) {
     SqlNode mainSql = pipe;
-    SqlNode subSql = convertSubPlan(node.getSubSearch());
+    // Check if subsearch has a source (Relation node). If not, it's an empty search.
+    if (!hasRelation(node.getSubSearch())) {
+      return pipe;
+    }
+    SqlNode subSql;
+    try {
+      subSql = convertSubPlan(node.getSubSearch());
+    } catch (Exception e) {
+      // Empty subsearch or conversion failure — return main pipe unchanged
+      return pipe;
+    }
+    if (subSql == null) {
+      return pipe;
+    }
     pipe = select(star()).from(subquery(unionAll(mainSql, subSql), nextAlias())).build();
     return pipe;
+  }
+
+  private static boolean hasRelation(UnresolvedPlan plan) {
+    if (plan == null) return false;
+    if (plan instanceof Relation) return true;
+    for (Node child : plan.getChild()) {
+      if (child instanceof UnresolvedPlan && hasRelation((UnresolvedPlan) child)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @Override

@@ -785,20 +785,38 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
   @Override
   public SqlNode visitJoin(org.opensearch.sql.ast.tree.Join node, Void ctx) {
+    boolean hasFieldList = node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty();
+    boolean hasCondition = node.getJoinCondition().isPresent();
+    boolean isSelfJoin = isSelfJoinDetected(node);
+
     // Delegate to base for the join construction
     super.visitJoin(node, ctx);
 
-    // If this is a field-list join or self-join, handle column deduplication
-    boolean hasFieldList = node.getJoinFields().isPresent() && !node.getJoinFields().get().isEmpty();
-    boolean isSelfJoin = isSelfJoinDetected(node);
-
-    if (hasFieldList || isSelfJoin) {
-      // Wrap the raw SqlJoin in a SELECT with column deduplication
-      // For field-list joins: SELECT l.* REPLACE(r.field AS field), r.* EXCEPT(field1, field2, ...)
-      // For self-joins: SELECT r.* (or l.* depending on overwrite)
+    // Fix 3: For no-field-list self-join, replace CROSS JOIN with natural join on all columns
+    if (isSelfJoin && !hasFieldList && !hasCondition && pipe instanceof SqlJoin) {
+      SqlJoin sqlJoin = (SqlJoin) pipe;
       String leftAlias = node.getLeftAlias().orElse(null);
       String rightAlias = node.getRightAlias().orElse(null);
-      // Resolve effective aliases from the SqlJoin node
+      if (leftAlias == null) leftAlias = extractAlias(sqlJoin.getLeft());
+      if (rightAlias == null) rightAlias = extractAlias(sqlJoin.getRight());
+      String rightTable = extractTableNameFromPlan(node.getRight());
+      List<String> cols = resolveColumns(rightTable);
+      if (!cols.isEmpty() && leftAlias != null && rightAlias != null) {
+        // Build ON condition for all common columns
+        SqlNode condition = null;
+        for (String col : cols) {
+          SqlNode eqNode = eq(identifier(leftAlias, col), identifier(rightAlias, col));
+          condition = condition == null ? eqNode : and(condition, eqNode);
+        }
+        pipe = join(sqlJoin.getLeft(), JoinType.INNER, sqlJoin.getRight(), condition);
+        skipNextWrap = true;
+      }
+    }
+
+    // Handle column deduplication for field-list joins and self-joins
+    if (hasFieldList || isSelfJoin) {
+      String leftAlias = node.getLeftAlias().orElse(null);
+      String rightAlias = node.getRightAlias().orElse(null);
       if (pipe instanceof SqlJoin) {
         SqlJoin sqlJoin = (SqlJoin) pipe;
         if (leftAlias == null) leftAlias = extractAlias(sqlJoin.getLeft());
@@ -806,7 +824,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       }
 
       if (isSelfJoin && leftAlias != null && rightAlias != null) {
-        // Self-join: select from one side to avoid duplicates
+        // Self-join: select from one side to avoid duplicate columns
         org.opensearch.sql.ast.expression.Literal overwriteLit = node.getArgumentMap().get("overwrite");
         boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
         String ref = overwrite ? rightAlias : leftAlias;
@@ -814,41 +832,38 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         pipe = select(starRef).from(pipe).build();
         skipNextWrap = true;
       } else if (hasFieldList && leftAlias != null && rightAlias != null) {
+        // Fix 2: Expand columns explicitly instead of using SqlStarExceptReplace
         List<String> sharedFields = node.getJoinFields().get().stream()
             .map(f -> f.getField().toString()).collect(Collectors.toList());
+        Set<String> sharedSet = new HashSet<>(sharedFields);
         org.opensearch.sql.ast.expression.Literal overwriteLit = node.getArgumentMap().get("overwrite");
         boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
 
-        // Build: SELECT l.* REPLACE(r.field AS field), r.* EXCEPT(field1, field2, ...)
-        List<SqlNode> replaceClauses = new ArrayList<>();
-        if (overwrite) {
-          for (String f : sharedFields) {
-            replaceClauses.add(as(identifier(rightAlias, f), f));
+        String leftTable = extractTableNameFromPlan(node.getLeft());
+        String rightTable = extractTableNameFromPlan(node.getRight());
+        List<String> leftCols = resolveColumns(leftTable);
+        List<String> rightCols = resolveColumns(rightTable);
+
+        if (!leftCols.isEmpty() && !rightCols.isEmpty()) {
+          List<SqlNode> selectItems = new ArrayList<>();
+          // Left side: all columns, with REPLACE for shared cols if overwrite
+          for (String col : leftCols) {
+            if (overwrite && sharedSet.contains(col)) {
+              selectItems.add(as(identifier(rightAlias, col), col));
+            } else {
+              selectItems.add(as(identifier(leftAlias, col), col));
+            }
           }
+          // Right side: only columns not already in left side
+          Set<String> leftColSet = new HashSet<>(leftCols);
+          for (String col : rightCols) {
+            if (!leftColSet.contains(col)) {
+              selectItems.add(as(identifier(rightAlias, col), col));
+            }
+          }
+          pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+          skipNextWrap = true;
         }
-        SqlNode leftStar;
-        if (!replaceClauses.isEmpty()) {
-          leftStar = new org.opensearch.sql.calcite.parser.SqlStarExceptReplace(
-              SqlParserPos.ZERO,
-              new SqlIdentifier(java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO),
-              null,
-              new SqlNodeList(replaceClauses, SqlParserPos.ZERO));
-        } else {
-          leftStar = new SqlIdentifier(java.util.Arrays.asList(leftAlias, ""), SqlParserPos.ZERO);
-        }
-
-        // Build EXCEPT list for right side
-        SqlNodeList exceptList = new SqlNodeList(
-            sharedFields.stream().map(f -> (SqlNode) identifier(f)).collect(Collectors.toList()),
-            SqlParserPos.ZERO);
-        SqlNode rightStar = new org.opensearch.sql.calcite.parser.SqlStarExceptReplace(
-            SqlParserPos.ZERO,
-            new SqlIdentifier(java.util.Arrays.asList(rightAlias, ""), SqlParserPos.ZERO),
-            exceptList,
-            null);
-
-        pipe = select(leftStar, rightStar).from(pipe).build();
-        skipNextWrap = true;
       }
     }
     return pipe;
@@ -1055,6 +1070,50 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   }
 
   @Override
+  public SqlNode visitAppend(org.opensearch.sql.ast.tree.Append node, Void ctx) {
+    SqlNode mainSql = pipe;
+    // Check if subsearch has a source (Relation node). If not, it's an empty search.
+    if (!hasRelation(node.getSubSearch())) {
+      return pipe;
+    }
+    SqlNode subSql;
+    try {
+      subSql = convertSubPlan(node.getSubSearch());
+    } catch (Exception e) {
+      // Empty subsearch or conversion failure — return main pipe unchanged
+      return pipe;
+    }
+    if (subSql == null) {
+      return pipe;
+    }
+    List<String> mainCols = extractColumnsFromSqlNode(mainSql);
+    List<String> subCols = extractColumnsFromSqlNode(subSql);
+    if (subCols.isEmpty()) {
+      subCols = extractSelectColumnNames(subSql);
+    }
+    if (!mainCols.isEmpty() && !subCols.isEmpty() && !mainCols.equals(subCols)) {
+      LinkedHashSet<String> unified = new LinkedHashSet<>(mainCols);
+      unified.addAll(subCols);
+      mainSql = alignColumns(mainSql, mainCols, unified);
+      subSql = alignColumns(subSql, subCols, unified);
+    }
+    pipe = select(star()).from(subquery(unionAll(mainSql, subSql), "_t" + aliasCounter.incrementAndGet())).build();
+    return pipe;
+  }
+
+  private static boolean hasRelation(org.opensearch.sql.ast.tree.UnresolvedPlan plan) {
+    if (plan == null) return false;
+    if (plan instanceof Relation) return true;
+    for (org.opensearch.sql.ast.Node child : plan.getChild()) {
+      if (child instanceof org.opensearch.sql.ast.tree.UnresolvedPlan
+          && hasRelation((org.opensearch.sql.ast.tree.UnresolvedPlan) child)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @Override
   public SqlNode visitAppendPipe(org.opensearch.sql.ast.tree.AppendPipe node, Void ctx) {
     SqlNode originalPipe = pipe;
     SqlNode subResult = convertSubPipeline(node.getSubQuery(), pipe);
@@ -1075,6 +1134,18 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   private SqlNode alignColumns(SqlNode source, List<String> sourceCols, LinkedHashSet<String> targetCols) {
     Set<String> sourceSet = new HashSet<>(sourceCols);
     if (sourceSet.containsAll(targetCols)) return source;
+    // Preserve ORDER BY if present
+    SqlNodeList orderList = null;
+    SqlNode fetch = null;
+    SqlNode offset = null;
+    SqlNode inner = source;
+    if (inner instanceof SqlOrderBy) {
+      SqlOrderBy ob = (SqlOrderBy) inner;
+      orderList = ob.orderList;
+      fetch = ob.fetch;
+      offset = ob.offset;
+      inner = ob.query;
+    }
     List<SqlNode> items = new ArrayList<>();
     for (String col : targetCols) {
       if (sourceSet.contains(col)) {
@@ -1083,7 +1154,11 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         items.add(as(SqlLiteral.createNull(SqlParserPos.ZERO), col));
       }
     }
-    return select(items.toArray(new SqlNode[0])).from(subquery(source, "_t" + aliasCounter.incrementAndGet())).build();
+    SqlNode aligned = select(items.toArray(new SqlNode[0])).from(subquery(inner, "_t" + aliasCounter.incrementAndGet())).build();
+    if (orderList != null && orderList.size() > 0) {
+      aligned = new SqlOrderBy(SqlParserPos.ZERO, aligned, orderList, offset, fetch);
+    }
+    return aligned;
   }
 
   private List<String> extractColumnsFromSqlNode(SqlNode node) {
