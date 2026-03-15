@@ -81,6 +81,7 @@ import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.Aggregation;
 import org.opensearch.sql.ast.tree.Append;
+import org.opensearch.sql.ast.tree.AppendPipe;
 import org.opensearch.sql.ast.tree.Bin;
 import org.opensearch.sql.ast.tree.Chart;
 import org.opensearch.sql.ast.tree.CountBin;
@@ -1411,6 +1412,30 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     SqlNode subSql = convertSubPlan(node.getSubSearch());
     pipe = select(star()).from(subquery(unionAll(mainSql, subSql), nextAlias())).build();
     return pipe;
+  }
+
+  @Override
+  public SqlNode visitAppendPipe(AppendPipe node, Void ctx) {
+    SqlNode originalPipe = pipe;
+    // Apply sub-pipeline commands to a copy of the current pipe
+    SqlNode subResult = convertSubPipeline(node.getSubQuery(), pipe);
+    pipe = unionAll(originalPipe, subResult);
+    return pipe;
+  }
+
+  /** Convert a sub-pipeline starting from the given initial pipe state. */
+  protected SqlNode convertSubPipeline(UnresolvedPlan plan, SqlNode initialPipe) {
+    PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter(aliasCounter);
+    sub.pipe = initialPipe;
+    List<UnresolvedPlan> nodes = new ArrayList<>();
+    flatten(plan, nodes);
+    for (UnresolvedPlan n : nodes) {
+      n.accept(sub, null);
+    }
+    if (sub.pendingOrderBy != null || sub.pendingFetch != null) {
+      sub.pipe = sub.applyPendingOrderBy(sub.pipe);
+    }
+    return sub.pipe;
   }
 
   @Override

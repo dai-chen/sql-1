@@ -36,9 +36,12 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.opensearch.sql.ast.expression.Field;
+import org.opensearch.sql.ast.expression.Function;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.QualifiedName;
+import org.opensearch.sql.ast.expression.Span;
+import org.opensearch.sql.ast.expression.SpanUnit;
 import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.AddColTotals;
@@ -72,6 +75,8 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   private final SchemaPlus defaultSchema;
   private final RelDataTypeFactory typeFactory = new JavaTypeFactoryImpl();
   protected String tableName;
+  /** Eval aliases being built in the current eval — used by visitFunction to avoid false NULL replacement. */
+  private final Set<String> currentEvalAliases = new HashSet<>();
 
   public DynamicPPLToSqlNodeConverter(SchemaPlus defaultSchema) {
     this.defaultSchema = defaultSchema;
@@ -487,6 +492,18 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
   @Override
   public SqlNode visitEval(Eval node, Void ctx) {
+    // Track eval aliases so visitFunction won't replace them with NULL
+    for (Let let : node.getExpressionList()) {
+      currentEvalAliases.add(let.getVar().getField().toString());
+    }
+    try {
+      return visitEvalInternal(node, ctx);
+    } finally {
+      currentEvalAliases.clear();
+    }
+  }
+
+  private SqlNode visitEvalInternal(Eval node, Void ctx) {
     List<String> allCols = resolveColumns(tableName);
     if (allCols.isEmpty()) {
       // No schema columns available — delegate to base which handles
@@ -1019,6 +1036,78 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
     DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter);
     return sub.convert(plan);
+  }
+
+  @Override
+  protected SqlNode convertSubPipeline(UnresolvedPlan plan, SqlNode initialPipe) {
+    DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter);
+    sub.pipe = initialPipe;
+    sub.tableName = this.tableName;
+    List<UnresolvedPlan> nodes = new ArrayList<>();
+    flattenPlan(plan, nodes);
+    for (UnresolvedPlan n : nodes) {
+      n.accept(sub, null);
+    }
+    if (sub.pendingOrderBy != null || sub.pendingFetch != null) {
+      sub.pipe = sub.applyPendingOrderBy(sub.pipe);
+    }
+    return sub.pipe;
+  }
+
+  @Override
+  public SqlNode visitAppendPipe(org.opensearch.sql.ast.tree.AppendPipe node, Void ctx) {
+    SqlNode originalPipe = pipe;
+    SqlNode subResult = convertSubPipeline(node.getSubQuery(), pipe);
+    // Extract columns from both sides to check if alignment is needed
+    List<String> origCols = extractColumnsFromSqlNode(originalPipe);
+    List<String> subCols = extractColumnsFromSqlNode(subResult);
+    if (!origCols.isEmpty() && !subCols.isEmpty() && !origCols.equals(subCols)) {
+      // Compute unified column set preserving order
+      LinkedHashSet<String> unified = new LinkedHashSet<>(origCols);
+      unified.addAll(subCols);
+      originalPipe = alignColumns(originalPipe, origCols, unified);
+      subResult = alignColumns(subResult, subCols, unified);
+    }
+    pipe = unionAll(originalPipe, subResult);
+    return pipe;
+  }
+
+  private SqlNode alignColumns(SqlNode source, List<String> sourceCols, LinkedHashSet<String> targetCols) {
+    Set<String> sourceSet = new HashSet<>(sourceCols);
+    if (sourceSet.containsAll(targetCols)) return source;
+    List<SqlNode> items = new ArrayList<>();
+    for (String col : targetCols) {
+      if (sourceSet.contains(col)) {
+        items.add(as(identifier(col), col));
+      } else {
+        items.add(as(SqlLiteral.createNull(SqlParserPos.ZERO), col));
+      }
+    }
+    return select(items.toArray(new SqlNode[0])).from(subquery(source, "_t" + aliasCounter.incrementAndGet())).build();
+  }
+
+  private List<String> extractColumnsFromSqlNode(SqlNode node) {
+    SqlNode target = node;
+    if (target instanceof SqlOrderBy) target = ((SqlOrderBy) target).query;
+    if (!(target instanceof SqlSelect)) return Collections.emptyList();
+    SqlSelect sel = (SqlSelect) target;
+    SqlNodeList selectList = sel.getSelectList();
+    if (selectList == null) return Collections.emptyList();
+    List<String> cols = new ArrayList<>();
+    for (SqlNode item : selectList) {
+      String name = extractColumnName(item);
+      if (name == null) return Collections.emptyList();
+      cols.add(name);
+    }
+    return cols;
+  }
+
+  private static void flattenPlan(UnresolvedPlan node, List<UnresolvedPlan> out) {
+    List<? extends org.opensearch.sql.ast.Node> children = node.getChild();
+    if (!children.isEmpty()) {
+      flattenPlan((UnresolvedPlan) children.get(0), out);
+    }
+    out.add(node);
   }
 
   @Override
@@ -1569,5 +1658,61 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     }
     pipe = result;
     return pipe;
+  }
+
+  // -- Fix 1: COALESCE with non-existent fields → replace with NULL --
+
+  @Override
+  public SqlNode visitFunction(Function node, Void ctx) {
+    if ("coalesce".equalsIgnoreCase(node.getFuncName())) {
+      Set<String> cols = new HashSet<>(resolveColumnsWithPipeExtras());
+      cols.addAll(currentEvalAliases);
+      List<SqlNode> args = new ArrayList<>();
+      for (UnresolvedExpression arg : node.getFuncArgs()) {
+        String fieldName = null;
+        if (arg instanceof Field) {
+          fieldName = ((Field) arg).getField().toString();
+        } else if (arg instanceof QualifiedName) {
+          fieldName = ((QualifiedName) arg).toString();
+        }
+        if (fieldName != null && !cols.contains(fieldName)) {
+          args.add(SqlLiteral.createNull(SqlParserPos.ZERO));
+        } else {
+          args.add(arg.accept(this, null));
+        }
+      }
+      return call("COALESCE", args.toArray(new SqlNode[0]));
+    }
+    return super.visitFunction(node, ctx);
+  }
+
+  // -- Fix 3: Span type preservation for TIME/DATE fields --
+
+  @Override
+  public SqlNode visitSpan(Span node, Void ctx) {
+    SqlNode result = super.visitSpan(node, ctx);
+    if (tableName == null || node.getUnit() == SpanUnit.NONE || !SpanUnit.isTimeUnit(node.getUnit())) {
+      return result;
+    }
+    String fieldName = node.getField() instanceof QualifiedName
+        ? ((QualifiedName) node.getField()).toString()
+        : (node.getField() instanceof Field ? ((Field) node.getField()).getField().toString() : null);
+    if (fieldName == null) return result;
+    SqlTypeName fieldType = getFieldSqlType(fieldName);
+    if (fieldType == SqlTypeName.TIME) {
+      return cast(result, new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIME, SqlParserPos.ZERO), SqlParserPos.ZERO));
+    }
+    if (fieldType == SqlTypeName.DATE) {
+      return cast(result, new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.DATE, SqlParserPos.ZERO), SqlParserPos.ZERO));
+    }
+    return result;
+  }
+
+  private SqlTypeName getFieldSqlType(String fieldName) {
+    Table table = resolveTable(tableName);
+    if (table == null) return null;
+    org.apache.calcite.rel.type.RelDataTypeField f =
+        table.getRowType(typeFactory).getField(fieldName, true, false);
+    return f != null ? f.getType().getSqlTypeName() : null;
   }
 }
