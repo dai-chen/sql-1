@@ -1182,3 +1182,40 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Column alignment for UNION ALL: when two sides have different column sets, compute unified superset and NULL-fill missing columns on each side. Use extractColumnsFromSqlNode() to get column names from SqlSelect/SqlOrderBy/SqlJoin nodes.
   - Calcite engine-level type inference can override explicit CAST in SQL. CAST(FLOOR(time_field TO HOUR) AS TIME) produces correct SQL but the RelNode optimizer infers TIMESTAMP from FLOOR. This is an engine-level limitation that cannot be fixed in the converter.
 ---
+
+## 2026-03-15T00:53 - V4-012 (Iteration 28): Append command + join field-list dedup + natural self-join
+- **What was fixed**: 4 new tests passing across 2 test classes
+  - **Append command schema-aware column alignment**: Added `visitAppend` override in DynamicPPLToSqlNodeConverter. Extracts columns from main pipe and subsearch, computes unified column set, NULL-fills missing columns on each side via `alignColumns()`, then UNION ALLs the aligned results. Fixes column count mismatches when main pipe and subsearch have different schemas.
+  - **Empty subsearch handling**: Added `hasRelation()` helper that recursively checks if a plan has a Relation node. Subsearches without a source (e.g., `append [ ]`, `append [ | stats ... ]`) are skipped, returning the main pipe unchanged. Prevents NPE in `wrapAsSubquery()` when sub-converter's `pipe` is null.
+  - **Join field-list column dedup**: Fixed right-side column selection in `visitJoin` override. Previously excluded only shared/join fields from right side (`!sharedSet.contains(col)`), but columns like `country` that exist in both tables but aren't join fields were duplicated. Now excludes ALL left-side columns from right side (`!leftColSet.contains(col)`).
+  - **No-field-list self-join → natural join**: When a self-join has no field-list and no explicit condition, resolves all columns from the table schema and builds an ON condition joining on all columns. Converts CROSS JOIN (64 rows for 8-row table) to INNER JOIN (8 rows).
+  - **alignColumns ORDER BY preservation**: When aligning a `SqlOrderBy` node, extracts the ORDER BY/FETCH/OFFSET, aligns the inner query, then re-applies the ORDER BY to the aligned result. Prevents sort loss in UNION ALL branches.
+- **Pass rate change**: 74.1% (1672/2255) → ~74.3% (estimated 1676/2255) = +0.2pp, +4 tests
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 14→17 pass (39 total, 22 fail) — +3 (testJoinWithFieldList2, testJoinWithoutFieldList, testJoinWithoutFieldListMaxEqualsOne)
+  - CalcitePPLAppendCommandIT: 0→1 pass (8 total, 7 fail) — +1 (testAppendEmptySearchCommand)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLLookupIT: 16/17 (no regression) ✅
+- **Remaining AppendCommandIT failures (7)**:
+  - testAppend, testAppendWithMergedColumn: Data ordering — subsearch sort not preserved through UNION ALL (ORDER BY inside UNION ALL branch is semantically meaningless in standard SQL)
+  - testAppendDifferentIndex: Type mismatch — SUM returns `int` instead of `bigint` for bank index
+  - testAppendSchemaMergeWithTimestampUDT: `birthdate` type is `timestamp` instead of `string` — engine-level
+  - testAppendSchemaMergeWithIpUDT: 500 Failed to plan — engine-level
+  - testAppendWithConflictTypeColumn: Expected exception not thrown — type conflict detection not implemented
+  - testAppendEmptySearchWithJoin: Column count mismatch (3 vs 2) — empty search with join needs special handling
+- **Remaining JoinIT failures (22)**:
+  - 15 tests: 500 errors — multiple joins, alias override, SMJ, non-equi join, cross join fallback
+  - 4 tests: Column count — max option not implemented, self-join with field-list
+  - 2 tests: Data mismatch — duplicate rows from join, row ordering
+  - 1 test: Legacy preference setting not passed through
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+99/-38: visitAppend, hasRelation, join field-list fix, natural self-join, alignColumns ORDER BY)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+26/-5: base visitAppend try-catch, hasRelation)
+- **Learnings for future iterations:**
+  - ORDER BY inside a UNION ALL branch is semantically meaningless in standard SQL. Databases may or may not preserve it. For guaranteed ordering, need a synthetic ROW_NUMBER() column or apply ORDER BY to the outer UNION ALL result.
+  - Join field-list column dedup must exclude ALL left-side columns from the right side, not just the shared/join fields. Columns like `country` that exist in both tables but aren't join fields would otherwise be duplicated.
+  - `hasRelation()` recursive check is the correct way to detect empty subsearches. The PPL parser creates Append nodes with subsearches that have no Relation node for `append [ ]` and `append [ | stats ... ]` patterns.
+  - Self-joins without field-list should use natural join semantics (join on all common columns). The base converter produces CROSS JOIN when there's no condition, which is wrong for self-joins.
+  - `alignColumns` must preserve ORDER BY from the source node. Wrapping a SqlOrderBy in a new SELECT strips the ORDER BY.
+---
