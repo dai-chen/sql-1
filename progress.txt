@@ -1246,3 +1246,34 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - visitAggregation must only apply pendingFetch (from head), not pendingOrderBy (from sort). Sort before stats is semantically meaningless — aggregation resets row order. Applying pendingOrderBy wraps the pipe in an extra subquery that can break join alias visibility.
   - applyPendingOrderBy returns a SqlOrderBy node. Must wrap in SELECT * FROM (...) AS alias (same pattern as visitSort) to create a proper subquery, not just call wrapAsSubquery() which produces double-alias.
 ---
+
+## 2026-03-15T03:06 - V4-012 (Iteration 30): Alias field aggregation + append ordering + join max eval-alias
+- **What was fixed**: 9 new tests passing across 3 test classes
+  - **visitAggregateFunction override** (2 tests): Added override in DynamicPPLToSqlNodeConverter for two fixes: (a) earliest/latest aggregate functions: when `@timestamp` is an alias field not in schema, resolves to target field (e.g., `original_date`) in ARG_MIN/ARG_MAX calls. (b) SUM BIGINT promotion: for SUM on integer-type fields (INTEGER, SMALLINT, TINYINT), casts argument to BIGINT before aggregation to match PPL's expected return type semantics.
+  - **Append command ordering** (4 tests): Redesigned visitAppend in DynamicPPLToSqlNodeConverter to preserve row ordering through UNION ALL. Added `_source_order` synthetic column (0 for main, 1 for subsearch) and stored ORDER BY items (including _source_order + subsearch sort columns) as pendingOrderBy. Added `pendingStripSourceOrder` field to track columns to project in final strip after ORDER BY + FETCH are applied together. Fixes testAppend and testAppendWithMergedColumn ordering issues. Also fixed testAppendDifferentIndex (SUM type) and testAppendEmptySearchWithJoin (column alignment).
+  - **Join max option eval-alias** (1 test): Fixed field-list join column dedup in DynamicPPLToSqlNodeConverter.visitJoin to include computed columns from eval (not in physical table schema) in the output. Previously resolveColumns() only returned physical columns, dropping eval aliases like `name2`.
+- **Pass rate change**: 74.8% (1687/2255 est) → 75.2% (1696/2255 est) = +0.4pp, +9 tests
+- **Per-class results** (before → after):
+  - CalciteAliasFieldAggregationIT: 6→8 pass (9 total, 1 fail: testTakeWithAliasField engine-level timestamp formatting) — +2
+  - CalcitePPLAppendCommandIT: 1→5 pass (8 total, 3 fail: timestamp UDT, IP UDT, conflict detection — all engine-level) — +4
+  - CalcitePPLJoinIT: 17→20 pass (39 total, 19 fail) — +3
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLAggregationIT: 96/100 (no regression) ✅
+  - CalciteAddTotalsCommandIT: 11/11 (no regression) ✅
+  - CalciteAddColTotalsCommandIT: 6/6 (no regression) ✅
+- **Full suite note**: Full suite run corrupted by CalciteGeoPointFormatsIT StackOverflowError crash cascading to all subsequent tests (291/2356 reported, but actual rate is ~75.2% based on per-class verified results). Rate calculated from per-class targeted runs.
+- **Remaining failures in targeted classes**:
+  - AliasFieldAggregationIT (1): testTakeWithAliasField — TAKE UDF returns raw epoch timestamps instead of formatted strings. Engine-level.
+  - AppendCommandIT (3): testAppendSchemaMergeWithTimestampUDT (birthdate type timestamp vs string), testAppendSchemaMergeWithIpUDT (500 Failed to plan — IP type in UNION ALL), testAppendWithConflictTypeColumn (expected exception not thrown — type conflict detection not implemented). All engine-level.
+  - JoinIT (19): multi-join chains (alias scoping), alias override/SubqueryAlias resolution, non-equi/cross join, max option (subsearch max out cluster setting), field-list data mismatches, legacy preference setting.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+394 lines: visitAggregateFunction, append ordering, join eval-alias)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+90 lines: pendingStripSourceOrder support)
+- **Learnings for future iterations:**
+  - OpenSearch mapping alias fields (e.g., @timestamp → created_at) are intentionally excluded from the Calcite schema (OpenSearchTypeFactory.convertSchema skips fields with originalPath). The converter must resolve alias fields to their target fields when generating SQL.
+  - visitAggregateFunction is separate from visitFunction in the AST visitor. earliest/latest as aggregates go through visitAggregateFunction, not visitFunction. Must override both for complete alias field resolution.
+  - SUM(INTEGER) returns INTEGER in Calcite by default. PPL expects BIGINT. Must CAST argument to BIGINT before SUM.
+  - ORDER BY inside UNION ALL branches is semantically meaningless in standard SQL. To preserve append ordering, use a synthetic _source_order column and ORDER BY it in the outer query.
+  - The full test suite is unreliable due to CalciteGeoPointFormatsIT StackOverflowError crash cascading to all subsequent tests. Always verify with targeted class runs.
+---
