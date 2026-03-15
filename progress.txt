@@ -1219,3 +1219,30 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Self-joins without field-list should use natural join semantics (join on all common columns). The base converter produces CROSS JOIN when there's no condition, which is wrong for self-joins.
   - `alignColumns` must preserve ORDER BY from the source node. Wrapping a SqlOrderBy in a new SELECT strips the ORDER BY.
 ---
+
+## 2026-03-15T01:53 - V4-012 (Iteration 29): Fix list/values aggregates + head-before-stats
+- **What was fixed**: 15 new tests passing across 3 test classes
+  - **PPL_VALUES rename**: Renamed VALUES UDF to PPL_VALUES in PPLBuiltinOperators, UnifiedQueryContext, and PPLToSqlNodeConverter. `VALUES` is a SQL reserved keyword — when the converter generated `VALUES(field)`, the SQL parser interpreted it as a VALUES clause instead of a function call, causing 500 "Failed to plan query" errors. The rename to PPL_VALUES avoids the keyword conflict. The non-V4 path (CalciteRelNodeVisitor) uses PPLBuiltinOperators.VALUES directly at the RelNode level, so it automatically picks up the name change without issues.
+  - **Head-before-stats pendingFetch**: In visitAggregation(), before clearing pending fields, check if pendingFetch is set (from a prior `head N` command). If so, apply it to the pipe via applyPendingOrderBy() and wrap as subquery. This ensures `head 5 | stats list(str2)` generates `SELECT LIST("str2") FROM (SELECT * FROM "table" FETCH NEXT 5 ROWS ONLY) AS "_t2"` instead of losing the FETCH clause. Only applies pendingFetch, NOT pendingOrderBy — sort before stats is semantically meaningless (aggregation resets row order). Initial implementation applied both, which caused a regression in testComplexCrossJoin (sort before stats wrapped the join in an extra subquery that broke SQL).
+- **Pass rate change**: 74.1% (1672/2255) → 74.8% (1687/2255 est) = +0.7pp, +15 tests
+- **Per-class results** (before → after):
+  - CalciteMultiValueStatsIT: 13→26 pass (31 total, 5 fail) — +13
+  - CalcitePPLAggregationIT: 95→96 pass (100 total, 4 fail) — +1
+  - CalcitePPLAggregationPaginatingIT: 95→96 pass (100 total, 4 fail) — +1
+  - CalcitePPLJoinIT: 17/39 (no regression) ✅
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+- **Remaining 5 CalciteMultiValueStatsIT failures** (all engine-level):
+  - testListFunctionWithBinary: 500 error (binary type not supported)
+  - testListFunctionWithDate/Time/Timestamp: LIST UDF returns raw epoch values instead of formatted strings
+  - testValuesFunctionRespectsConfiguredLimit: PPL_VALUES UDF doesn't read plugins.ppl.values.max.limit cluster setting
+- **Full suite note**: Full suite run corrupted by CalciteGeoPointFormatsIT StackOverflowError crash cascading to all subsequent tests. Rate calculated from per-class verified results.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+8/-3: visitAggregation pendingFetch fix, PPL_VALUES rename)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (+1/-1: PPL_VALUES rename)
+  - core/src/main/java/org/opensearch/sql/expression/function/PPLBuiltinOperators.java (+1/-1: PPL_VALUES rename)
+- **Learnings for future iterations:**
+  - SQL reserved keywords (VALUES, SELECT, FROM, etc.) cannot be used as UDF names in the V4 path because the SQL parser interprets them as keywords, not function calls. Always prefix PPL-specific UDFs with PPL_ to avoid conflicts.
+  - visitAggregation must only apply pendingFetch (from head), not pendingOrderBy (from sort). Sort before stats is semantically meaningless — aggregation resets row order. Applying pendingOrderBy wraps the pipe in an extra subquery that can break join alias visibility.
+  - applyPendingOrderBy returns a SqlOrderBy node. Must wrap in SELECT * FROM (...) AS alias (same pattern as visitSort) to create a proper subquery, not just call wrapAsSubquery() which produces double-alias.
+---
