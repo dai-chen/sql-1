@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 74.1% (1672/2255, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
+- Current rate: 75.6% (1705/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -1276,4 +1276,38 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - SUM(INTEGER) returns INTEGER in Calcite by default. PPL expects BIGINT. Must CAST argument to BIGINT before SUM.
   - ORDER BY inside UNION ALL branches is semantically meaningless in standard SQL. To preserve append ordering, use a synthetic _source_order column and ORDER BY it in the outer query.
   - The full test suite is unreliable due to CalciteGeoPointFormatsIT StackOverflowError crash cascading to all subsequent tests. Always verify with targeted class runs.
+---
+
+## 2026-03-15T06:40 - V4-012 (Iteration 31): Join multi-join chains + alias tracking
+- **What was fixed**: 9 new tests passing across 2 test classes
+  - **Multi-join chain handling**: When pipe is already a raw SqlJoin (from a prior join), use it directly as the left side of the next join without wrapping in a subquery. This preserves alias visibility across chained joins (e.g., `source=t1 | join t2 | join t3`).
+  - **visitSubqueryAlias override**: New visitor that tracks SubqueryAlias names in knownAliases. When PPL has `table as alias`, the alias is now recognized for qualified name resolution.
+  - **visitRelation adds table name to knownAliases**: Table names are now tracked so table-qualified references (e.g., `tableName.field`) resolve correctly as compound identifiers instead of dotted field names.
+  - **extractAllSubqueryAliasNames recursive traversal**: Replaces single-level extractSubqueryAliasName. Recursively traverses all child nodes to find nested SubqueryAlias names (handles `SubqueryAlias("t2", Project(..., SubqueryAlias("tt", Relation)))` pattern where Project is inserted by AstBuilder.projectExceptMeta).
+  - **aliasMapping for SubqueryAlias→effective alias rewriting**: New Map<String,String> tracks SubqueryAlias→effective join alias mappings. visitQualifiedName rewrites references like `tt.name` to `t2.name` when `tt` is a SubqueryAlias mapped to effective alias `t2`.
+  - **convert() SqlJoin wrapping order**: Moved SqlJoin→SELECT* wrapping BEFORE applyPendingOrderBy() to prevent SqlOrderBy(SqlJoin) which Calcite's parser rejects.
+- **Pass rate change**: 75.2% (1696/2255 est) → 75.6% (1705/2255 est) = +0.4pp, +9 tests
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 20→28 pass (39 total, 11 fail) — +8
+  - CalcitePPLBasicIT: 35→36 pass (42 total, 6 fail) — +1 bonus
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalciteBinCommandIT: 32/70 (no regression) ✅
+  - CalcitePPLExistsSubqueryIT: 15/19 (no regression) ✅
+  - CalcitePPLLookupIT: 16/17 (no regression) ✅
+- **Remaining 11 CalcitePPLJoinIT failures**:
+  - testMultipleJoins, testMultipleJoinsWithoutTableAliases, testMultipleJoinsWithRelationSubquery: alias visibility lost through downstream pipe wrapping (architectural limitation of skipNextWrap single-flag approach)
+  - testSimpleSortPushDownForSMJ, testComplexSortPushDownForSMJ: sort-merge join hint not implemented
+  - testNonEquiJoin: non-equi join condition generates invalid SQL
+  - testJoinWithFieldList, testJoinWithFieldListMaxEqualsOne: field-list column pruning returns too many columns
+  - testInnerJoinWithRelationSubquery: data ordering mismatch
+  - testJoinSubsearchMaxOut: max option row count mismatch
+  - testJoinWhenLegacyNotPreferred: legacy preference setting not passed through
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+67/-12)
+- **Learnings for future iterations:**
+  - extractTableNameFromPipe optimization (using table name as default left alias) breaks self-joins where both sides reference the same table. Removed in favor of always using generated aliases when no explicit left alias is given.
+  - Multi-join chains work when pipe is used directly as SqlJoin left side. The nested SqlJoin preserves all alias visibility from inner joins.
+  - SubqueryAlias nodes can be nested inside Project nodes (from AstBuilder.projectExceptMeta). Must recursively traverse all children, not just SubqueryAlias chains.
+  - aliasMapping rewriting in visitQualifiedName is essential for `table as alias` patterns where the alias differs from the join alias.
+  - SqlOrderBy(SqlJoin) is invalid — must wrap SqlJoin in SELECT* first before applying ORDER BY.
 ---
