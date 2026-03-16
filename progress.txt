@@ -1400,3 +1400,34 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - PPL `WEEK` UDF (PPLBuiltinOperators.WEEK) fails at compilation with `NoSuchMethodException: week(long)` — the ImplementorUDF pattern is incompatible with the V4 SQL string path. UDFs designed for the direct RelNode path don't work when SQL is serialized and re-parsed.
   - `yearweek` in MySQL uses a different default mode than `week` — and the year in yearweek can differ from the date's year for dates near year boundaries. The current implementation doesn't handle this edge case.
 ---
+
+## 2026-03-16T18:15 - V4-012 (Iteration 35): date_format/strftime/get_format implementation
+- **What was fixed**: 7 new tests passing in CalciteDateTimeFunctionIT (27→34)
+  - **date_format proper implementation**: Replaced simplified CAST-to-VARCHAR handler with full format string translation. Parses MySQL format specifiers at converter time and builds a CONCAT tree of SQL expressions using EXTRACT, LPAD, CASE WHEN, etc. Handles: %Y (4-digit year), %y (2-digit year), %m (zero-padded month), %c (month no pad), %d (zero-padded day), %e (day no pad), %H (24h hour), %k (24h hour no pad), %h/%I (12h hour), %l (12h hour no pad), %M (month name in date_format, minute in strftime), %i (minute in date_format), %S/%s (second), %a (abbreviated weekday), %b (abbreviated month), %p (AM/PM), %P (am/pm lowercase), %Z (timezone='UTC'), %% (literal %), %D (ordinal day), %f (microseconds), %j (day of year), %W (full weekday), %w (day of week 0-6), %r (12h time), %T (24h time), %F (%Y-%m-%d shorthand), %3Q (milliseconds), %n (newline), %t (tab).
+  - **strftime unix timestamp detection**: `convertStrftimeArg()` detects numeric vs timestamp inputs. Numeric literals/expressions use `TIMESTAMPADD(SECOND, value, TIMESTAMP '1970-01-01 00:00:00')`. String literals that look numeric are converted. Identifiers use magnitude-based heuristic (>10^10 = milliseconds, divide by 1000; otherwise = seconds).
+  - **get_format proper implementation**: Returns correct MySQL format strings based on type (DATE/DATETIME/TIME) and locale (USA/JIS/ISO/EUR/INTERNAL). E.g., `get_format(DATE, 'USA')` → `%m.%d.%Y`, `get_format(DATE, 'EUR')` → `%d.%m.%Y`.
+  - **isStrftime flag**: `buildDateFormatExpr(ts, fmt, isStrftime, origNumeric)` handles the semantic difference between date_format and strftime for %M (month name vs minute).
+  - **CAST to TIMESTAMP(6)**: date_format uses TIMESTAMP(6) precision to preserve microseconds.
+- **Pass rate change**: 76.3% (1720/2255 est) → 76.6% (1727/2255 est) = +0.3pp, +7 tests
+- **Per-class results** (before → after):
+  - CalciteDateTimeFunctionIT: 27→34 pass (65 total, 29 fail, 2 skip) — +7
+  - CalcitePPLBuiltinFunctionsNullIT: 63/71 (no regression, testDateFormatNull was already passing) ✅
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLBasicIT: 36/42 (no regression) ✅
+- **Remaining 29 CalciteDateTimeFunctionIT failures**:
+  - 9 TIME casting (engine-blocked): testHour, testMinute, testSecond, testHour_of_day, testMinute_of_hour, testSecond_of_minute, testMinute_of_day, testTimeToSec, testExtract — CAST to TIME fails at runtime
+  - 6 timezone (engine-blocked): testConvertTZ (12 fail), testDateTime (timezone conversion)
+  - 2 date_format precision: testDateFormat (%f microseconds: engine only preserves milliseconds), testStrftimeWithDateFields (epoch_millis field loses nanosecond precision)
+  - 4 date arithmetic: testDateAdd, testDateSub, testAddDateWithDays/Interval, testSubDateDays/Interval — pre-existing failures
+  - 3 other: testYearWeek (mode edge case), testWeek (mode 1 "4+ days" rule), testMicrosecond (engine precision)
+  - 3 more: testFromUnixTime, testUnixTimeStamp, testStrToDate, testTimeDiff, testMakeTime, testToSeconds, testDateDiff — pre-existing
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+331/-11)
+- **Learnings for future iterations:**
+  - MySQL format specifiers and strftime specifiers have different meanings for %M: date_format %M = full month name, strftime %M = minute. Use a boolean flag to differentiate.
+  - Calcite TIMESTAMP type only preserves millisecond precision (3 decimal places). %f (microseconds, 6 digits) will show trailing zeros for the last 3 digits. This is an engine limitation.
+  - For strftime with field references (not literals), use magnitude-based heuristic to detect millisecond vs second timestamps: if value > 10^10, it's likely milliseconds (divide by 1000).
+  - LPAD(CAST(EXTRACT(part FROM ts) AS VARCHAR), N, '0') is the correct pattern for zero-padded date parts.
+  - CASE WHEN with DAYOFWEEK() for weekday/month name mappings must cast results to VARCHAR to avoid CHAR(N) padding.
+  - get_format(DATE, 'USA') returns '%m.%d.%Y' (not '%m/%d/%Y') per MySQL documentation.
+---
