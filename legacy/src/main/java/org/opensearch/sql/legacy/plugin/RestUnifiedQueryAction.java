@@ -11,10 +11,13 @@ import static org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
 import static org.opensearch.sql.protocol.response.format.JsonResponseFormatter.Style.PRETTY;
 
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.schema.SchemaPlus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestChannel;
+import org.opensearch.sql.analytics.schema.OpenSearchSchemaBuilder;
 import org.opensearch.sql.api.UnifiedQueryContext;
 import org.opensearch.sql.api.UnifiedQueryPlanner;
 import org.opensearch.sql.calcite.CalcitePlanContext;
@@ -34,8 +37,14 @@ import org.opensearch.sql.protocol.response.format.ResponseFormatter;
 public class RestUnifiedQueryAction {
 
   private static final Logger LOG = LogManager.getLogger(RestUnifiedQueryAction.class);
+  private static final String SCHEMA_NAME = "opensearch";
 
   private final AnalyticsExecutionEngine analyticsEngine = new AnalyticsExecutionEngine();
+  private final ClusterService clusterService;
+
+  public RestUnifiedQueryAction(ClusterService clusterService) {
+    this.clusterService = clusterService;
+  }
 
   /**
    * Execute a query through the unified query pipeline.
@@ -46,20 +55,29 @@ public class RestUnifiedQueryAction {
    * @param isExplain whether this is an explain request
    */
   public void execute(String query, QueryType queryType, RestChannel channel, boolean isExplain) {
-    try (UnifiedQueryContext context = UnifiedQueryContext.builder().language(queryType).build()) {
+    try {
+      SchemaPlus schema = OpenSearchSchemaBuilder.buildSchema(clusterService.state());
 
-      UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
-      RelNode plan = planner.plan(query);
-      CalcitePlanContext planContext = context.getPlanContext();
+      try (UnifiedQueryContext context =
+          UnifiedQueryContext.builder()
+              .language(queryType)
+              .catalog(SCHEMA_NAME, schema)
+              .defaultNamespace(SCHEMA_NAME)
+              .build()) {
 
-      if (isExplain) {
-        analyticsEngine.explain(
-            plan,
-            org.opensearch.sql.ast.statement.ExplainMode.STANDARD,
-            planContext,
-            createExplainListener(channel));
-      } else {
-        analyticsEngine.execute(plan, planContext, createQueryListener(channel));
+        UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
+        RelNode plan = planner.plan(query);
+        CalcitePlanContext planContext = context.getPlanContext();
+
+        if (isExplain) {
+          analyticsEngine.explain(
+              plan,
+              org.opensearch.sql.ast.statement.ExplainMode.STANDARD,
+              planContext,
+              createExplainListener(channel));
+        } else {
+          analyticsEngine.execute(plan, planContext, createQueryListener(channel));
+        }
       }
     } catch (Exception e) {
       reportError(channel, e);

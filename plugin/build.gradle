@@ -161,6 +161,7 @@ dependencies {
 
     api project(":ppl")
     api project(':api')
+    api project(':analytics-engine-stub')
     api project(':legacy')
     api project(':opensearch')
     api project(':prometheus')

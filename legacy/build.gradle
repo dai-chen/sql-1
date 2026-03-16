@@ -117,6 +117,7 @@ dependencies {
     implementation group: 'org.opensearch.plugin', name: 'geo', version: "${opensearch_version}"
     api project(':sql')
     api project(':api')
+    api project(':analytics-engine-stub')
     api project(':common')
     api project(':opensearch')
 

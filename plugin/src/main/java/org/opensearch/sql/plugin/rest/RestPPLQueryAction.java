@@ -17,6 +17,7 @@ import java.util.Set;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchException;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.index.IndexNotFoundException;
@@ -47,8 +48,9 @@ public class RestPPLQueryAction extends BaseRestHandler {
   private static final Logger LOG = LogManager.getLogger();
 
   /** Constructor of RestPPLQueryAction. */
-  public RestPPLQueryAction() {
+  public RestPPLQueryAction(ClusterService clusterService) {
     super();
+    this.unifiedQueryHandler = new RestUnifiedQueryAction(clusterService);
   }
 
   private static boolean isClientError(Exception e) {
@@ -84,7 +86,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
   }
 
   /** Unified query handler for Parquet-backed indices (Analytics engine path). */
-  private final RestUnifiedQueryAction unifiedQueryHandler = new RestUnifiedQueryAction();
+  private final RestUnifiedQueryAction unifiedQueryHandler;
 
   @Override
   protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient nodeClient) {

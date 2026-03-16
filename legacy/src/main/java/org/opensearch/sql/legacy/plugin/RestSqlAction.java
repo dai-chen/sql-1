@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchException;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Injector;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.rest.RestStatus;
@@ -90,7 +91,8 @@ public class RestSqlAction extends BaseRestHandler {
     super();
     this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     this.newSqlQueryHandler = new RestSQLQueryAction(injector);
-    this.unifiedQueryHandler = new RestUnifiedQueryAction();
+    this.unifiedQueryHandler =
+        new RestUnifiedQueryAction(injector.getInstance(ClusterService.class));
   }
 
   @Override
