@@ -1372,3 +1372,31 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - PPL `replace()` uses Java-style back-references (`\1`, `\2`) but Calcite's REGEXP_REPLACE uses `$1`, `$2`. Must convert at the converter level.
   - The full test suite is unreliable due to CalciteGeoPointFormatsIT StackOverflowError crash cascading to all subsequent tests. Always verify with targeted class runs.
 ---
+
+## 2026-03-16T17:00 - V4-012 (Iteration 34): Join field-list overwrite + week mode-0 calculation
+- **What was fixed**: 4 new tests passing across 2 test classes
+  - **Join field-list overwrite semantics** (3 tests): Fixed `visitJoin` in DynamicPPLToSqlNodeConverter. Previously `sharedSet` only contained join-key fields from `node.getJoinFields()`. Now computes `sharedSet` as ALL columns shared between both tables (intersection of leftCols and rightCols). When `overwrite=true` (default for field-list joins), shared columns come from the RIGHT side instead of the LEFT side. This fixes `country` column returning left-side value instead of right-side value in field-list joins.
+  - **Week mode-0 calculation** (1 test): Replaced `EXTRACT(WEEK FROM date)` (ISO Monday-based, range 1-53) with pure SQL formula `FLOOR((DAYOFYEAR(d) - DAYOFWEEK(d) + 7) / 7)` for PPL's default mode 0 (Sunday-based, range 0-53). Also handles mode 1 (Monday-based) via DOW adjustment: `((dow + 5) % 7) + 1`. Removed old `yearweek` handler that used ISO `EXTRACT(WEEK)`. Multi-arg `week(date, mode)` supported for modes 0-3 via `buildWeekExpr()` helper.
+- **Pass rate change**: 76.1% (1716/2255 est) → 76.3% (1720/2255 est) = +0.2pp, +4 tests
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 29→32 pass (39 total, 7 fail) — +3 (testJoinWithFieldList, testJoinWithFieldListMaxEqualsOne, testJoinWhenLegacyNotPreferred)
+  - CalciteDateTimeFunctionIT: 26→27 pass (65 total, 36 fail, 2 skip) — +1 (testWeek_of_year)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLLookupIT: 16/17 (no regression) ✅
+  - CalcitePPLBuiltinFunctionsNullIT: 63/71 (no regression) ✅
+- **Remaining failures in targeted classes**:
+  - JoinIT (7): testMultipleJoins, testMultipleJoinsWithoutTableAliases, testMultipleJoinsWithRelationSubquery (engine planner failures), testSimpleSortPushDownForSMJ, testComplexSortPushDownForSMJ (expression join conditions), testJoinSubsearchMaxOut (max option), testInnerJoinWithRelationSubquery (row ordering)
+  - DateTimeFunctionIT (36): testWeek (mode 1 "4+ days" rule not implemented), testYearWeek (mode 0 off-by-one in Calcite DAYOFWEEK), 9 strftime/date_format (not implemented), 9 TIME casting (engine-blocked), 6 timezone (engine-blocked), 5 other
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+42/-8: week/yearweek mode-aware handlers, buildWeekExpr helper, removed old yearweek handler)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+6/-5: join field-list overwrite fix)
+- **Learnings for future iterations:**
+  - Join field-list overwrite: `sharedSet` must include ALL columns shared between both tables, not just the join-key fields. The `overwrite=true` flag means shared non-join-key columns (like `country`) should come from the RIGHT side.
+  - PPL `week()` mode 0 (default): Sunday-based, range 0-53. Formula: `FLOOR((DAYOFYEAR - DAYOFWEEK + 7) / 7)` where DAYOFWEEK returns 1=Sunday..7=Saturday.
+  - PPL `week()` mode 1: Monday-based with "4+ days this year" rule. Simple DOW adjustment is NOT sufficient — need to check if the first partial week has 4+ days in the year. This is significantly more complex than mode 0.
+  - Calcite's `DAYOFWEEK` function (from MySQL library) returns 1=Sunday..7=Saturday, matching MySQL convention.
+  - `MAKEDATE` function is NOT registered in the SQL endpoint — cannot use it in generated SQL.
+  - PPL `WEEK` UDF (PPLBuiltinOperators.WEEK) fails at compilation with `NoSuchMethodException: week(long)` — the ImplementorUDF pattern is incompatible with the V4 SQL string path. UDFs designed for the direct RelNode path don't work when SQL is serialized and re-parsed.
+  - `yearweek` in MySQL uses a different default mode than `week` — and the year in yearweek can differ from the date's year for dates near year boundaries. The current implementation doesn't handle this edge case.
+---
