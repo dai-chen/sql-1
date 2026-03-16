@@ -83,10 +83,14 @@ public class RestSqlAction extends BaseRestHandler {
   /** New SQL query request handler. */
   private final RestSQLQueryAction newSqlQueryHandler;
 
+  /** Unified query handler for Parquet-backed indices (Analytics engine path). */
+  private final RestUnifiedQueryAction unifiedQueryHandler;
+
   public RestSqlAction(Settings settings, Injector injector) {
     super();
     this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     this.newSqlQueryHandler = new RestSQLQueryAction(injector);
+    this.unifiedQueryHandler = new RestUnifiedQueryAction();
   }
 
   @Override
@@ -142,6 +146,15 @@ public class RestSqlAction extends BaseRestHandler {
               request.path(),
               request.params(),
               sqlRequest.cursor());
+
+      // PoC: Route to unified query pipeline for Parquet-backed indices
+      if (isParquetQuery(sqlRequest.getSql())) {
+        boolean isExplain = isExplainRequest(request);
+        return channel ->
+            unifiedQueryHandler.execute(
+                sqlRequest.getSql(), org.opensearch.sql.executor.QueryType.SQL, channel, isExplain);
+      }
+
       return newSqlQueryHandler.prepareRequest(
           newSqlRequest,
           (restChannel, exception) -> {
@@ -265,6 +278,14 @@ public class RestSqlAction extends BaseRestHandler {
 
   private static boolean isExplainRequest(final RestRequest request) {
     return request.path().endsWith("/_explain");
+  }
+
+  /**
+   * PoC: Check if the query targets a Parquet-backed index. Currently uses a hardcoded prefix
+   * convention ("parquet_" in table name). In production, this would check index settings.
+   */
+  private static boolean isParquetQuery(String sql) {
+    return sql != null && sql.toLowerCase().contains("parquet_");
   }
 
   private static boolean isClientError(Exception e) {
