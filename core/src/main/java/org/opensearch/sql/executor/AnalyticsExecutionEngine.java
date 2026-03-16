@@ -52,6 +52,7 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
       // client.execute(AnalyticsQueryAction.INSTANCE, new AnalyticsQueryRequest(relNodeJson),
       //     ActionListener.wrap(response -> listener.onResponse(response), listener::onFailure));
 
+      // TODO: Worker thread
       // Stub: return empty result with schema derived from RelNode
       List<Schema.Column> columns =
           plan.getRowType().getFieldList().stream()
@@ -63,6 +64,7 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
                           OpenSearchTypeFactory.convertRelDataTypeToExprType(f.getType())))
               .toList();
       listener.onResponse(
+              // TOOD: no dependency on ExprValue. Java object format response.
           new QueryResponse(new Schema(columns), Collections.emptyList(), Cursor.None));
     } catch (Exception e) {
       listener.onFailure(e);

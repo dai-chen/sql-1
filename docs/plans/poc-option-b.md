@@ -13,12 +13,12 @@ PPL V3 introduces custom User-Defined Types (UDTs) — notably `EXPR_TIMESTAMP` 
 - Can RelNode trees containing UDT-typed expressions be correctly processed by the Analytics engine's `QueryPlanExecutor`?
 - Do UDF implementations that depend on UDTs (e.g., datetime functions) produce valid RelNode subtrees that survive optimization and execution in the Analytics engine?
 
-### Key Area 2: RelNode (De-)Serialization via Calcite JSON Serializer
+### Key Area 2: RelNode Handoff Mechanism
 
-The handoff between the SQL/PPL plugin and the Analytics engine requires serializing `RelNode` across a transport action boundary. The PoC must determine whether Calcite's built-in JSON serializer (`RelJsonWriter` / `RelJsonReader`) can handle this reliably:
-- Can the full range of RelNode types produced by PPL V3 and ANSI SQL paths be round-tripped through JSON serialization?
-- Are custom operators, UDFs, and UDTs preserved correctly through serialization/deserialization?
-- What are the limitations (e.g., custom `RexNode` types, non-standard `RelTraitSet` entries) and do they require custom serialization extensions?
+The handoff between the SQL/PPL plugin and the Analytics engine requires passing a `RelNode` for execution. The PoC must determine the right communication mechanism:
+- Both plugins run in the same JVM — is direct in-process invocation sufficient, or is a transport action needed?
+- If in-process: how does the SQL plugin obtain `QueryPlanExecutor` from the Analytics engine given their separate Guice injectors?
+- If transport action: can Calcite's built-in JSON serializer (`RelJsonWriter` / `RelJsonReader`) round-trip the RelNode trees reliably, including custom PPL operators?
 
 ## References
 
@@ -125,27 +125,25 @@ From `analytics-engine` plugin (for reference/mock):
 
 **Done when**: Schema can be registered in a Calcite `FrameworkConfig` and used to plan queries. Unit tests validate type mapping and EngineCapabilities. Phase 3 ITs updated to use real schema and still pass.
 
-### Phase 5: RelNode Serialization Investigation (Key Area 2)
+### Phase 5: Direct Guice Integration with Analytics Engine (B-2, B-3)
+
+**Investigation findings** (replaces original Phase 5 and 6):
+- The Analytics engine plugin (`AnalyticsPlugin`) uses `ExtensiblePlugin` for SPI discovery of back-end engines, NOT for transport actions. It registers NO transport actions.
+- `QueryPlanExecutor<RelNode, Iterable<Object[]>>` and `EngineContext` are bound via `createGuiceModules()` into the **node-level Guice injector**.
+- The SQL plugin creates its **own private Guice injector** in `createComponents()`, completely isolated from the node-level injector. Direct `@Inject` across plugins does not work.
+- **RelNode serialization is unnecessary** — both plugins run in the same JVM, so the `RelNode` object can be passed directly in-process.
+- Calcite's `RelJsonWriter`/`RelJsonReader` CAN round-trip standard RelNode trees (all bugs fixed in 1.41.0), but custom PPL operators need operator table configuration. This remains a fallback option if cross-node execution is needed in the future.
+
+**Integration approach**: The Analytics engine's `createComponents()` returns `DefaultPlanExecutor` and `DefaultEngineContext`, which are bound by concrete class in the node-level injector. Since the SQL plugin's REST handlers and transport actions are created manually (not by the node injector), the `QueryPlanExecutor` must be passed through the component chain explicitly — similar to how `ClusterService` is passed today.
 
 **Work**:
-- Test Calcite's built-in JSON serializer (`RelJsonWriter` / `RelJsonReader`) with RelNode trees from Phase 1 and 2.
-- Verify round-trip serialization for: simple filter/project, aggregations, sort/limit, UDF calls, UDT-typed expressions.
-- Document which RelNode types and operators serialize correctly and which require custom handling.
-- If Calcite JSON serializer is insufficient, prototype a minimal custom serialization extension or fall back to Java serialization.
+- Modify `AnalyticsExecutionEngine` to accept a `QueryPlanExecutor<RelNode, Iterable<Object[]>>` and call `executor.execute(plan, context)` directly instead of transport action.
+- For the PoC (without the real Analytics engine plugin loaded), keep the stub `DefaultPlanExecutor` that returns empty results.
+- Document the Guice integration pattern for production: the SQL plugin would obtain `QueryPlanExecutor` from the node-level injector via a service locator or by refactoring to use `createGuiceModules()`.
 
-**Done when**: Serialization feasibility documented. Round-trip tests for representative RelNode trees pass or limitations are clearly identified.
+**Done when**: `AnalyticsExecutionEngine` uses `QueryPlanExecutor` interface directly. The stub returns empty results (same behavior as current). Integration pattern documented for when the real Analytics engine plugin is available.
 
-### Phase 6: RelNode Handoff & Execution (B-2, B-3, M-5)
-
-**Work**:
-- Implement a transport action in a stub analytics-plugin (test plugin in `integ-test/`) that accepts a serialized `RelNode`.
-- SQL/PPL plugin hands off the optimized `RelNode` via this transport action.
-- Use the serialization approach validated in Phase 5.
-- Stub analytics-plugin deserializes and executes (mock execution returning hardcoded rows, or integrate with DataFusion if available).
-
-**Done when**: Full round-trip works: REST → routing → RelNode generation → transport action → stub execution → response formatting. All ITs pass through the transport action path.
-
-### Phase 7 (Optional): Cross-Cutting Concerns (TBD-1, TBD-2, TBD-3)
+### Phase 6 (Optional): Cross-Cutting Concerns (TBD-1, TBD-2, TBD-3)
 
 **Work**:
 - **Resource management**: Verify `querySizeLimit` is enforced on the Parquet path. Identify where circuit breaker and timeout should be added (document findings, not full implementation).
@@ -179,11 +177,11 @@ All test queries should be covered as integration tests in `integ-test/`.
 - Unsupported operations produce clear error messages (fail-fast validated).
 - Explain API returns meaningful output for Parquet queries.
 - Datetime functions work correctly with standard Calcite types (Key Area 1: no UDT interference confirmed).
-- RelNode serialization feasibility determined (Key Area 2: Calcite JSON serializer tested).
+- RelNode handoff mechanism determined (Key Area 2: direct in-process invocation via QueryPlanExecutor, no serialization needed).
 - All test queries pass as ITs in `integ-test/`.
 
 ## Dependencies on Analytics Engine Team
 
-- Transport action interface definition (B-3): what serialization format for RelNode?
 - `EngineCapabilities` baseline: which operators/functions are supported in the initial release?
 - `analytics-framework` artifact availability: is it published to Maven for cross-repo dependency, or do we need composite build / copy?
+- Guice integration pattern: how should the SQL plugin obtain `QueryPlanExecutor` and `EngineContext` from the Analytics engine? Options: (a) refactor SQL plugin to use `createGuiceModules()` so both are in the node-level injector, (b) service locator pattern, (c) explicit component passing via `createComponents()` return values.
