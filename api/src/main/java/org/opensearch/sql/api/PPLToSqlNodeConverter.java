@@ -775,6 +775,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           .reduce((a, b) -> and(a, b))
           .get();
       builder = builder.where(nullFilter);
+    } else if (node.getSpan() != null && isTimeSpan(node.getSpan()) && !groupByItems.isEmpty()) {
+      // Time-based spans always filter out NULL values (PPL semantics)
+      SqlNode spanGroupBy = groupByItems.get(0);
+      builder = builder.where(isNotNull(spanGroupBy));
     }
 
     pipe = builder.build();
@@ -2095,6 +2099,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (expr instanceof Field) return ((Field) expr).getField().toString();
     if (expr instanceof QualifiedName) return ((QualifiedName) expr).toString();
     return expr.toString();
+  }
+
+  /** Check if a span expression uses a time unit. */
+  private static boolean isTimeSpan(UnresolvedExpression expr) {
+    if (expr instanceof Alias) return isTimeSpan(((Alias) expr).getDelegated());
+    return expr instanceof Span && SpanUnit.isTimeUnit(((Span) expr).getUnit());
   }
 
   private SqlNode resolveJoinRight(UnresolvedPlan plan, String alias) {

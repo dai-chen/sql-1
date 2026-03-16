@@ -393,6 +393,10 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
             .map(col -> col + " IS NOT NULL")
             .collect(java.util.stream.Collectors.joining(" AND "));
         sb.where = (sb.where == null) ? nullFilter : sb.where + " AND " + nullFilter;
+      } else if (node.getSpan() != null && isTimeSpan(node.getSpan())) {
+        // Time-based spans always filter out NULL values (PPL semantics)
+        String spanNullFilter = groupBy.get(0) + " IS NOT NULL";
+        sb.where = (sb.where == null) ? spanNullFilter : sb.where + " AND " + spanNullFilter;
       }
     }
   }
@@ -1821,6 +1825,12 @@ public class PPLToSqlTranspiler extends AbstractNodeVisitor<String, Void> {
     if (expr instanceof Field) return ((Field) expr).getField().toString();
     if (expr instanceof QualifiedName) return ((QualifiedName) expr).toString();
     return expr.toString();
+  }
+
+  /** Check if a span expression uses a time unit. */
+  private static boolean isTimeSpan(UnresolvedExpression expr) {
+    if (expr instanceof Alias) return isTimeSpan(((Alias) expr).getDelegated());
+    return expr instanceof Span && SpanUnit.isTimeUnit(((Span) expr).getUnit());
   }
 
   /** Convert a SearchExpression tree to a SQL WHERE clause fragment. */

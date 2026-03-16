@@ -44,6 +44,7 @@ import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.ast.expression.Span;
 import org.opensearch.sql.ast.expression.SpanUnit;
 import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
+import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.AddColTotals;
 import org.opensearch.sql.ast.tree.AddTotals;
@@ -2238,6 +2239,16 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     if (table == null) return null;
     org.apache.calcite.rel.type.RelDataTypeField f =
         table.getRowType(typeFactory).getField(fieldName, true, false);
-    return f != null ? f.getType().getSqlTypeName() : null;
+    if (f == null) return null;
+    org.apache.calcite.rel.type.RelDataType type = f.getType();
+    if (type instanceof AbstractExprRelDataType<?> udt) {
+      switch (udt.getUdt()) {
+        case EXPR_TIME: return SqlTypeName.TIME;
+        case EXPR_DATE: return SqlTypeName.DATE;
+        case EXPR_TIMESTAMP: return SqlTypeName.TIMESTAMP;
+        default: return type.getSqlTypeName();
+      }
+    }
+    return type.getSqlTypeName();
   }
 }
