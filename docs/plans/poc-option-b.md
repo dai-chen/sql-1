@@ -80,14 +80,12 @@ From `analytics-engine` plugin (for reference/mock):
 ### Phase 1: ANSI SQL RelNode Generation (U-2, U-3, U-4)
 
 **Work**:
-- Copy `UnifiedQueryPlanner.java` from the [ANSI SQL PoC](https://github.com/dai-chen/sql-1/blob/poc/unified-sql-support/api/src/main/java/org/opensearch/sql/api/UnifiedQueryPlanner.java) into the `api/` module.
-- Validate ANSI SQL → RelNode generation using Calcite's native SQL parser (`SqlParser` → `SqlValidator` → `SqlToRelConverter` → `RelNode`).
-- Wire in a mock Schema (hardcoded Parquet index with representative column types).
+- Add ANSI SQL support logic based on the Calcite native SQL path from [`UnifiedQueryPlanner`](https://github.com/dai-chen/sql-1/blob/poc/unified-sql-support/api/src/main/java/org/opensearch/sql/api/UnifiedQueryPlanner.java): `SqlParser` → `SqlValidator` → `SqlToRelConverter` → `RelNode`, plus `AGGREGATE_CASE_TO_FILTER` HepPlanner rule for filter aggregation pushdown.
+- Wire in a mock Schema for unit testing (hardcoded Parquet index with representative column types). This mock will be replaced by `SchemaProvider` from the Analytics engine in Phase 4.
 - Verify full-text search functions (`match`, `match_phrase`, `query_string`) are handled correctly in absorption rules.
 - Verify datetime functions work correctly with standard Calcite types (Key Area 1: UDT concern).
-- Apply `AGGREGATE_CASE_TO_FILTER` HepPlanner rule for filter aggregation pushdown.
 
-**Done when**: SQL queries generate correct RelNode. Search functions are absorbed or fail-fast as expected. Unit tests validate RelNode generation.
+**Done when**: SQL queries generate correct RelNode. Search functions are absorbed or fail-fast as expected. Unit tests validate RelNode generation (using mock schema).
 
 ### Phase 2: PPL RelNode Generation (B-1, U-1, U-3, U-4)
 
@@ -114,6 +112,8 @@ From `analytics-engine` plugin (for reference/mock):
 **Done when**: `POST _plugins/_ppl` and `POST _plugins/_sql` return a valid JDBC-formatted response for a Parquet index query using the existing response formatter. `_explain` returns a plan. Lucene queries are unaffected. ITs pass.
 
 ### Phase 4: Analytics Engine Integration (M-3, M-4)
+
+**Reference**: [Analytics engine sandbox plugins](https://github.com/opensearch-project/OpenSearch/tree/main/sandbox/plugins)
 
 **Work**:
 - Determine dependency approach: depend on `analytics-framework` directly from the OpenSearch repo, or copy SPI interfaces into `analytics-engine-stub/`.
