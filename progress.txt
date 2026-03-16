@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 75.6% (1705/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
+- Current rate: 76.9% (1733/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -1430,4 +1430,30 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - LPAD(CAST(EXTRACT(part FROM ts) AS VARCHAR), N, '0') is the correct pattern for zero-padded date parts.
   - CASE WHEN with DAYOFWEEK() for weekday/month name mappings must cast results to VARCHAR to avoid CHAR(N) padding.
   - get_format(DATE, 'USA') returns '%m.%d.%Y' (not '%m/%d/%Y') per MySQL documentation.
+---
+
+## 2026-03-16T19:58 - V4-012 (Iteration 36): Time span type fix + NULL time span filtering
+- **What was fixed**: 6 new tests passing across 2 test classes
+  - **getFieldSqlType UDT detection** (4 tests): Modified `getFieldSqlType()` in DynamicPPLToSqlNodeConverter to detect OpenSearch UDT types. The method previously called `f.getType().getSqlTypeName()` which returns VARCHAR for UDT types (ExprTimeType, ExprDateType, ExprTimestampType) because they wrap VARCHAR internally. Now checks `if (type instanceof AbstractExprRelDataType<?> udt)` and maps `EXPR_TIME→TIME`, `EXPR_DATE→DATE`, `EXPR_TIMESTAMP→TIMESTAMP`. This enables the existing `visitSpan` CAST logic (added in V4-025) to correctly fire for time-type fields, wrapping span results with `CAST(... AS TIME)`.
+  - **NULL time span filtering** (2 tests): Added `isTimeSpan()` helper that checks if a span expression uses a time unit (via `SpanUnit.isTimeUnit()`). In `visitAggregation`, when a time-based span is used for grouping and `bucket_nullable` is not explicitly set to false, adds `WHERE spanGroupBy IS NOT NULL` filter. This matches PPL semantics where NULL time span values are excluded from aggregation results. Fixed `testCountByNullableTimeSpan` which expected 4 rows but got 5 (the extra row was a NULL time span group).
+- **Pass rate change**: 76.6% (1727/2255 est) → 76.9% (1733/2255 est) = +0.3pp, +6 tests
+- **Per-class results** (before → after):
+  - CalcitePPLAggregationIT: 96→99 pass (100 total, 1 fail: testSpanByImplicitTimestamp engine-level) — +3
+  - CalcitePPLAggregationPaginatingIT: 96→99 pass (100 total, 1 fail: testSpanByImplicitTimestamp engine-level) — +3
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalciteBinCommandIT: 32/70 (no regression) ✅
+  - CalciteStatsCommandIT: 61/63 (no regression) ✅
+- **Remaining 1 failure per AggregationIT class**:
+  - testSpanByImplicitTimestamp: "Failed to plan query" — engine-level, not converter-fixable
+- **Attempted but reverted**: Subsearch maxout LIMIT injection. The fix wrapped subsearch results with FETCH NEXT N ROWS ONLY, but this doesn't work for correlated subqueries because FETCH applies per-correlation (per outer row), not globally. The V3 engine's SubsearchUtils partitions WHERE conditions into correlated vs non-correlated and inserts the limit BETWEEN them. Implementing this in the V4 converter requires schema-aware condition partitioning — deferred to a future iteration.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+11: getFieldSqlType UDT detection)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+10: isTimeSpan helper, NULL time span filter in visitAggregation)
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlTranspiler.java (+8: isTimeSpan helper, NULL time span filter — matching fix in string transpiler)
+- **Learnings for future iterations:**
+  - OpenSearch TIME/DATE/TIMESTAMP fields are stored as UDTs (ExprTimeType, ExprDateType, ExprTimestampType) wrapping VARCHAR. `getSqlTypeName()` returns VARCHAR, not the semantic type. Must use `instanceof AbstractExprRelDataType` and `getUdt()` to get the correct type.
+  - The V4-025 visitSpan CAST logic was correct all along — it was just never firing because getFieldSqlType returned VARCHAR. The "engine-blocked" assessment was wrong.
+  - Subsearch maxout in correlated subqueries requires condition partitioning (separating correlated from non-correlated WHERE conditions). Simple FETCH wrapping doesn't work because SQL engines evaluate FETCH per-correlation in EXISTS/IN subqueries.
+  - PPL semantics exclude NULL time span values from aggregation results. The V3 engine handles this in CalciteRelNodeVisitor.getTimeSpanField(). The V4 converter must add explicit WHERE IS NOT NULL for time-based span GROUP BY keys.
 ---
