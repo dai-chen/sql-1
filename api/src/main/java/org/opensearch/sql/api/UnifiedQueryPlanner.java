@@ -6,14 +6,22 @@
 package org.opensearch.sql.api;
 
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.apache.calcite.config.Lex;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalSort;
+import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.tools.FrameworkConfig;
+import org.apache.calcite.tools.Frameworks;
+import org.apache.calcite.tools.Planner;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
+import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.CalciteRelNodeVisitor;
 import org.opensearch.sql.common.antlr.Parser;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
@@ -44,7 +52,10 @@ public class UnifiedQueryPlanner {
    * @param context the unified query context containing CalcitePlanContext
    */
   public UnifiedQueryPlanner(UnifiedQueryContext context) {
-    this.parser = buildQueryParser(context.getPlanContext().queryType);
+    this.parser =
+        context.getPlanContext().queryType == QueryType.SQL
+            ? null
+            : buildQueryParser(context.getPlanContext().queryType);
     this.context = context;
   }
 
@@ -52,17 +63,37 @@ public class UnifiedQueryPlanner {
    * Parses and analyzes a query string into a Calcite logical plan (RelNode). TODO: Generate
    * optimal physical plan to fully unify query execution and leverage Calcite's optimizer.
    *
-   * @param query the raw query string in PPL or other supported syntax
+   * @param query the raw query string in PPL, SQL, or other supported syntax
    * @return a logical plan representing the query
    */
   public RelNode plan(String query) {
     try {
+      if (context.getPlanContext().queryType == QueryType.SQL) {
+        return planWithCalcite(query);
+      }
       return preserveCollation(analyze(parse(query)));
     } catch (SyntaxCheckException e) {
       // Re-throw syntax error without wrapping
       throw e;
     } catch (Exception e) {
       throw new IllegalStateException("Failed to plan query", e);
+    }
+  }
+
+  private RelNode planWithCalcite(String query) throws Exception {
+    CalcitePlanContext planContext = context.getPlanContext();
+    FrameworkConfig sqlConfig =
+        Frameworks.newConfigBuilder(planContext.config)
+            .parserConfig(SqlParser.config().withLex(Lex.JAVA))
+            .build();
+    Planner planner = Frameworks.getPlanner(sqlConfig);
+    try {
+      SqlNode parsed = planner.parse(query);
+      SqlNode validated = planner.validate(parsed);
+      RelRoot relRoot = planner.rel(validated);
+      return relRoot.rel;
+    } finally {
+      planner.close();
     }
   }
 
