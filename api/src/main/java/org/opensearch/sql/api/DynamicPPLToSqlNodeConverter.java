@@ -964,9 +964,8 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         skipNextWrap = true;
       } else if (hasFieldList && leftAlias != null && rightAlias != null) {
         // Fix 2: Expand columns explicitly instead of using SqlStarExceptReplace
-        List<String> sharedFields = node.getJoinFields().get().stream()
+        List<String> joinFields = node.getJoinFields().get().stream()
             .map(f -> f.getField().toString()).collect(Collectors.toList());
-        Set<String> sharedSet = new HashSet<>(sharedFields);
         org.opensearch.sql.ast.expression.Literal overwriteLit = node.getArgumentMap().get("overwrite");
         boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
 
@@ -976,9 +975,13 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         List<String> rightCols = resolveColumns(rightTable);
 
         if (!leftCols.isEmpty() && !rightCols.isEmpty()) {
+          // All columns shared between both tables (not just join keys)
+          Set<String> rightColSet = new HashSet<>(rightCols);
+          Set<String> sharedSet = leftCols.stream()
+              .filter(rightColSet::contains).collect(Collectors.toCollection(HashSet::new));
           List<SqlNode> selectItems = new ArrayList<>();
           Set<String> emitted = new HashSet<>();
-          // Left side: all columns, with REPLACE for shared cols if overwrite
+          // Left side: all columns; shared cols come from right if overwrite=true
           for (String col : leftCols) {
             if (overwrite && sharedSet.contains(col)) {
               selectItems.add(as(identifier(rightAlias, col), col));
@@ -995,7 +998,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
             }
           }
           // Include computed columns from join field list not in physical schema
-          for (String col : sharedFields) {
+          for (String col : joinFields) {
             if (!emitted.contains(col)) {
               selectItems.add(as(identifier(overwrite ? rightAlias : leftAlias, col), col));
               emitted.add(col);

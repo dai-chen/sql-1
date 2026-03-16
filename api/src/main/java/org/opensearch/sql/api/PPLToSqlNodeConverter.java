@@ -2070,6 +2070,27 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return call(sqlName, sqlArgs);
   }
 
+  /**
+   * Build week number expression for given mode.
+   * Mode 0,2: Sunday-based (DAYOFWEEK: 1=Sun). Mode 1,3: Monday-based.
+   * Mode 0,1: range 0-53. Mode 2,3: range 1-53.
+   */
+  private SqlNode buildWeekExpr(SqlNode d, int mode) {
+    SqlNode doy = cast(call("DAYOFYEAR", d), typeSpec(SqlTypeName.INTEGER));
+    SqlNode dow = cast(call("DAYOFWEEK", d), typeSpec(SqlTypeName.INTEGER));
+    boolean sundayBased = (mode % 2 == 0); // modes 0,2,4,6 = Sunday; 1,3,5,7 = Monday
+    SqlNode adjDow;
+    if (sundayBased) {
+      adjDow = dow; // 1=Sunday..7=Saturday
+    } else {
+      // Convert to 1=Monday..7=Sunday: ((dow + 5) % 7) + 1
+      adjDow = plus(call("MOD", plus(dow, intLiteral(5)), intLiteral(7)), intLiteral(1));
+    }
+    return cast(call("FLOOR", divide(
+        cast(plus(minus(doy, adjDow), intLiteral(7)), typeSpec(SqlTypeName.DOUBLE)),
+        intLiteral(7))), typeSpec(SqlTypeName.INTEGER));
+  }
+
   private static String getFieldName(UnresolvedExpression expr) {
     if (expr instanceof Field) return ((Field) expr).getField().toString();
     if (expr instanceof QualifiedName) return ((QualifiedName) expr).toString();
@@ -2395,8 +2416,30 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return castExtract("SECOND", args.get(0));
     if ("quarter".equals(name) && args.size() == 1)
       return castExtract("QUARTER", args.get(0));
-    if (("weekofyear".equals(name) || "week_of_year".equals(name) || "week".equals(name)) && args.size() == 1)
-      return castExtract("WEEK", args.get(0));
+    // week/weekofyear/week_of_year: PPL mode 0 (Sunday-based, range 0-53)
+    // EXTRACT(WEEK) returns ISO week (Monday-based, range 1-53) — wrong for PPL default
+    // Formula: FLOOR((DAYOFYEAR(d) - dow_adjusted + 7) / 7)
+    if ("weekofyear".equals(name) || "week_of_year".equals(name) || "week".equals(name)) {
+      SqlNode d = ensureTimestamp(args.get(0));
+      int mode = 0;
+      List<UnresolvedExpression> rawArgs = node.getFuncArgs();
+      if (rawArgs.size() >= 2 && rawArgs.get(1) instanceof org.opensearch.sql.ast.expression.Literal) {
+        mode = ((Number) ((org.opensearch.sql.ast.expression.Literal) rawArgs.get(1)).getValue()).intValue();
+      }
+      return buildWeekExpr(d, mode);
+    }
+    // yearweek: YEAR*100 + WEEK
+    if ("yearweek".equals(name)) {
+      SqlNode d = ensureTimestamp(args.get(0));
+      int mode = 0;
+      List<UnresolvedExpression> rawArgs = node.getFuncArgs();
+      if (rawArgs.size() >= 2 && rawArgs.get(1) instanceof org.opensearch.sql.ast.expression.Literal) {
+        mode = ((Number) ((org.opensearch.sql.ast.expression.Literal) rawArgs.get(1)).getValue()).intValue();
+      }
+      SqlNode year = cast(call("YEAR", d), typeSpec(SqlTypeName.INTEGER));
+      SqlNode week = buildWeekExpr(d, mode);
+      return plus(times(year, intLiteral(100)), week);
+    }
     if ("hour_of_day".equals(name) && args.size() == 1)
       return castExtract("HOUR", args.get(0));
     if ("minute_of_hour".equals(name) && args.size() == 1)
@@ -2498,16 +2541,6 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           List.of(isNull(args.get(0))),
           List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.INTEGER))),
           cast(call("MOD", plus(call("DAYOFWEEK", ts), intLiteral(5)), intLiteral(7)), typeSpec(SqlTypeName.INTEGER)));
-    }
-    // yearweek
-    if ("yearweek".equals(name)) {
-      SqlNode ts = ensureTimestamp(args.get(0));
-      SqlNode yearPart = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.YEAR, null, POS), ts}, POS);
-      SqlNode weekPart = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.WEEK, null, POS), ts}, POS);
-      return caseWhen(
-          List.of(isNull(args.get(0))),
-          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.INTEGER))),
-          cast(plus(times(yearPart, intLiteral(100)), weekPart), typeSpec(SqlTypeName.INTEGER)));
     }
     // unix_timestamp
     if ("unix_timestamp".equals(name)) {
