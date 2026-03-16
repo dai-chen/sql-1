@@ -2644,12 +2644,26 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           List.of(isNull(args.get(0))),
           List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP))),
           cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP)));
-    // date_format / time_format (simplified — cast to VARCHAR)
-    if ("date_format".equals(name) || "time_format".equals(name))
-      return caseWhen(
-          List.of(isNull(args.get(0))),
+    // date_format / time_format
+    if ("date_format".equals(name) || "time_format".equals(name)) {
+      SqlDataTypeSpec ts6 = new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS), POS);
+      // Upgrade any CAST(x AS TIMESTAMP) to CAST(x AS TIMESTAMP(6)) to preserve microseconds
+      SqlNode arg0 = args.get(0);
+      if (arg0 instanceof SqlBasicCall && ((SqlBasicCall) arg0).getOperator() == SqlStdOperatorTable.CAST) {
+        SqlNode inner = ((SqlBasicCall) arg0).operand(0);
+        arg0 = cast(inner, ts6);
+      }
+      SqlNode ts = cast(arg0, ts6);
+      if (args.size() >= 2 && args.get(1) instanceof SqlCharStringLiteral) {
+        String fmt = ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue();
+        SqlNode formatted = buildDateFormatExpr(ts, fmt, false, null);
+        return caseWhen(List.of(isNull(args.get(0))),
+            List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR))), formatted);
+      }
+      return caseWhen(List.of(isNull(args.get(0))),
           List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR))),
           cast(args.get(0), typeSpec(SqlTypeName.VARCHAR)));
+    }
     // str_to_date
     if ("str_to_date".equals(name))
       return caseWhen(
@@ -2709,15 +2723,28 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SqlNode extractNode = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{qualifier, ts}, POS);
       return cast(extractNode, typeSpec(SqlTypeName.BIGINT));
     }
-    // get_format (simplified)
-    if ("get_format".equals(name)) return literal("%Y-%m-%d");
-    // strftime (simplified)
+    // get_format: returns MySQL format string based on type and locale
+    if ("get_format".equals(name)) {
+      String type = args.get(0).toString().replace("'", "").replace("`", "").toUpperCase();
+      String locale = args.size() > 1
+          ? args.get(1).toString().replace("'", "").replace("`", "").toUpperCase() : "USA";
+      return literal(getFormatString(type, locale));
+    }
+    // strftime
     if ("strftime".equals(name)) {
-      SqlNode target = args.size() > 1 ? args.get(1) : args.get(0);
-      return caseWhen(
-          List.of(isNull(target)),
+      SqlNode tsArg = args.get(0);
+      String fmt = (args.size() > 1 && args.get(1) instanceof SqlCharStringLiteral)
+          ? ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue() : null;
+      SqlNode origNumeric = isNumericExpression(tsArg) ? tsArg : null;
+      SqlNode ts = convertStrftimeArg(tsArg);
+      if (fmt != null) {
+        SqlNode formatted = buildDateFormatExpr(ts, fmt, true, origNumeric);
+        return caseWhen(List.of(isNull(tsArg)),
+            List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR))), formatted);
+      }
+      return caseWhen(List.of(isNull(tsArg)),
           List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.VARCHAR))),
-          cast(target, typeSpec(SqlTypeName.VARCHAR)));
+          cast(ts, typeSpec(SqlTypeName.VARCHAR)));
     }
     // Now-like datetime functions: generate UTC literals at transpile time
     LocalDateTime utcNow = LocalDateTime.now(ZoneOffset.UTC);
@@ -3759,5 +3786,298 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
     PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter(aliasCounter);
     return sub.convert(plan);
+  }
+
+  /** Convert strftime first arg: if numeric or numeric string, convert to timestamp via TIMESTAMPADD.
+   *  For identifiers, use magnitude-based heuristic to detect seconds vs milliseconds. */
+  private SqlNode convertStrftimeArg(SqlNode tsArg) {
+    // String literal that looks like a timestamp (contains '-') → cast to TIMESTAMP
+    if (tsArg instanceof SqlCharStringLiteral) {
+      String val = ((SqlCharStringLiteral) tsArg).getNlsString().getValue();
+      if (val.contains("-") || val.contains(":")) {
+        return cast(tsArg, typeSpec(SqlTypeName.TIMESTAMP));
+      }
+      // Numeric string → convert to numeric literal
+      try {
+        Double.parseDouble(val);
+        tsArg = SqlLiteral.createExactNumeric(val, POS);
+      } catch (NumberFormatException e) {
+        return cast(tsArg, typeSpec(SqlTypeName.TIMESTAMP));
+      }
+    }
+    SqlNode epoch = cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP));
+    // For numeric expressions, use TIMESTAMPADD with FLOOR
+    if (isNumericExpression(tsArg)) {
+      return call("TIMESTAMPADD", identifier("SECOND"), cast(call("FLOOR", tsArg), typeSpec(SqlTypeName.INTEGER)), epoch);
+    }
+    // For identifiers: could be seconds (from unix_timestamp) or milliseconds (from timestamp field cast to bigint).
+    // Use magnitude heuristic: if abs value > 10^10, assume milliseconds and divide by 1000.
+    if (tsArg instanceof SqlIdentifier) {
+      SqlNode bigVal = cast(tsArg, typeSpec(SqlTypeName.BIGINT));
+      SqlNode absVal = call("ABS", bigVal);
+      SqlNode seconds = caseWhen(
+          List.of(gt(absVal, SqlLiteral.createExactNumeric("10000000000", POS))),
+          List.of(cast(divide(bigVal, intLiteral(1000)), typeSpec(SqlTypeName.INTEGER))),
+          cast(bigVal, typeSpec(SqlTypeName.INTEGER)));
+      return call("TIMESTAMPADD", identifier("SECOND"), seconds, epoch);
+    }
+    return cast(tsArg, typeSpec(SqlTypeName.TIMESTAMP));
+  }
+
+  /** Determine if a SqlNode expression is numeric (for strftime unix timestamp detection). */
+  private static boolean isNumericExpression(SqlNode node) {
+    if (node instanceof SqlLiteral) {
+      SqlTypeName tn = ((SqlLiteral) node).getTypeName();
+      if (tn == SqlTypeName.INTEGER || tn == SqlTypeName.BIGINT || tn == SqlTypeName.DECIMAL) return true;
+      if (tn == SqlTypeName.CHAR) {
+        try { Double.parseDouble(((SqlCharStringLiteral) node).getNlsString().getValue()); return true; } catch (NumberFormatException e) { return false; }
+      }
+      return false;
+    }
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) node;
+      var op = call.getOperator();
+      // Arithmetic operations produce numeric results
+      if (op == SqlStdOperatorTable.PLUS || op == SqlStdOperatorTable.MINUS
+          || op == SqlStdOperatorTable.MULTIPLY || op == SqlStdOperatorTable.DIVIDE
+          || op == SqlStdOperatorTable.MOD || op == SqlStdOperatorTable.UNARY_MINUS) return true;
+      // CAST to numeric type
+      if (op == SqlStdOperatorTable.CAST && call.operandCount() == 2) {
+        SqlNode typeNode = call.operand(1);
+        if (typeNode instanceof SqlDataTypeSpec) {
+          String typeName = typeNode.toString().toUpperCase();
+          if (typeName.contains("INTEGER") || typeName.contains("BIGINT") || typeName.contains("DOUBLE")
+              || typeName.contains("FLOAT") || typeName.contains("DECIMAL")) return true;
+        }
+      }
+      // FLOOR, CEIL, ABS, ROUND, TIMESTAMPDIFF produce numeric
+      String funcName = op.getName().toUpperCase();
+      if (Set.of("FLOOR", "CEIL", "ABS", "ROUND", "TRUNCATE", "TIMESTAMPDIFF").contains(funcName)) return true;
+    }
+    return false;
+  }
+
+  private static final String[] ABBREV_DAYS = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  private static final String[] FULL_DAYS = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+  private static final String[] ABBREV_MONTHS = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  private static final String[] FULL_MONTHS = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+
+  /** Extract a date/time part from timestamp as integer. */
+  private SqlNode extractPart(TimeUnit unit, SqlNode ts) {
+    return cast(new SqlBasicCall(SqlStdOperatorTable.EXTRACT,
+        new SqlNode[]{new SqlIntervalQualifier(unit, null, POS), ts}, POS), typeSpec(SqlTypeName.INTEGER));
+  }
+
+  /** LPAD(CAST(expr AS VARCHAR), width, '0') */
+  private SqlNode zeroPad(SqlNode expr, int width) {
+    return call("LPAD", cast(expr, typeSpec(SqlTypeName.VARCHAR)), intLiteral(width), literal("0"));
+  }
+
+  /** CASE WHEN for mapping integer to string array (1-based index). Cast to VARCHAR to avoid CHAR padding. */
+  private SqlNode mapIntToString(SqlNode expr, String[] values, int startIndex) {
+    List<SqlNode> whens = new ArrayList<>();
+    List<SqlNode> thens = new ArrayList<>();
+    for (int i = 0; i < values.length; i++) {
+      whens.add(eq(expr, intLiteral(i + startIndex)));
+      thens.add(cast(literal(values[i]), typeSpec(SqlTypeName.VARCHAR)));
+    }
+    return caseWhen(whens, thens, cast(literal(""), typeSpec(SqlTypeName.VARCHAR)));
+  }
+
+  /** MySQL GET_FORMAT format strings by type and locale. */
+  private static String getFormatString(String type, String locale) {
+    switch (type) {
+      case "DATE":
+        switch (locale) {
+          case "USA": return "%m.%d.%Y";
+          case "JIS": case "ISO": return "%Y-%m-%d";
+          case "EUR": return "%d.%m.%Y";
+          case "INTERNAL": return "%Y%m%d";
+          default: return "%Y-%m-%d";
+        }
+      case "DATETIME": case "TIMESTAMP":
+        switch (locale) {
+          case "USA": return "%Y-%m-%d %H.%i.%s";
+          case "JIS": case "ISO": return "%Y-%m-%d %H:%i:%s";
+          case "EUR": return "%Y-%m-%d %H.%i.%s";
+          case "INTERNAL": return "%Y%m%d%H%i%s";
+          default: return "%Y-%m-%d %H:%i:%s";
+        }
+      case "TIME":
+        switch (locale) {
+          case "USA": return "%h:%i:%s %p";
+          case "JIS": case "ISO": return "%H:%i:%s";
+          case "EUR": return "%H.%i.%s";
+          case "INTERNAL": return "%H%i%s";
+          default: return "%H:%i:%s";
+        }
+      default: return "%Y-%m-%d";
+    }
+  }
+
+  /** Build ordinal suffix: 1st, 2nd, 3rd, 4th, ... 11th, 12th, 13th, 21st, etc. */
+  private SqlNode buildOrdinal(SqlNode dayExpr) {
+    SqlNode dayStr = cast(dayExpr, typeSpec(SqlTypeName.VARCHAR));
+    SqlNode mod10 = call("MOD", dayExpr, intLiteral(10));
+    SqlNode mod100 = call("MOD", dayExpr, intLiteral(100));
+    // 11th, 12th, 13th are exceptions
+    return concatTwo(dayStr, caseWhen(
+        List.of(and(gte(mod100, intLiteral(11)), lte(mod100, intLiteral(13))),
+            eq(mod10, intLiteral(1)), eq(mod10, intLiteral(2)), eq(mod10, intLiteral(3))),
+        List.of(cast(literal("th"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("st"), typeSpec(SqlTypeName.VARCHAR)),
+            cast(literal("nd"), typeSpec(SqlTypeName.VARCHAR)), cast(literal("rd"), typeSpec(SqlTypeName.VARCHAR))),
+        cast(literal("th"), typeSpec(SqlTypeName.VARCHAR))));
+  }
+
+  /** 12-hour from 24-hour: ((h+11)%12)+1 */
+  private SqlNode hour12(SqlNode hour24) {
+    return plus(call("MOD", plus(hour24, intLiteral(11)), intLiteral(12)), intLiteral(1));
+  }
+
+  /** AM/PM from hour */
+  private SqlNode amPm(SqlNode hour24, boolean upper) {
+    return caseWhen(List.of(lt(hour24, intLiteral(12))),
+        List.of(cast(literal(upper ? "AM" : "am"), typeSpec(SqlTypeName.VARCHAR))),
+        cast(literal(upper ? "PM" : "pm"), typeSpec(SqlTypeName.VARCHAR)));
+  }
+
+  /** DAYOFWEEK returns 1=Sunday..7=Saturday */
+  private SqlNode dayOfWeek(SqlNode ts) {
+    return cast(call("DAYOFWEEK", ts), typeSpec(SqlTypeName.INTEGER));
+  }
+
+  private SqlNode concatTwo(SqlNode a, SqlNode b) {
+    return call("CONCAT", a, b);
+  }
+
+  private SqlNode concatList(List<SqlNode> parts) {
+    if (parts.isEmpty()) return literal("");
+    SqlNode result = parts.get(0);
+    for (int i = 1; i < parts.size(); i++) {
+      result = concatTwo(result, parts.get(i));
+    }
+    return result;
+  }
+
+  /** Build a SQL expression tree that formats a timestamp according to a format string.
+   *  isStrftime=true uses Python/C strftime conventions, false uses MySQL date_format conventions.
+   *  origNumeric is the original numeric arg (for strftime %3Q millisecond extraction from fractional seconds). */
+  private SqlNode buildDateFormatExpr(SqlNode ts, String fmt, boolean isStrftime, SqlNode origNumeric) {
+    List<SqlNode> parts = new ArrayList<>();
+    SqlNode year = extractPart(TimeUnit.YEAR, ts);
+    SqlNode month = extractPart(TimeUnit.MONTH, ts);
+    SqlNode day = extractPart(TimeUnit.DAY, ts);
+    SqlNode hour = extractPart(TimeUnit.HOUR, ts);
+    SqlNode minute = extractPart(TimeUnit.MINUTE, ts);
+    SqlNode second = extractPart(TimeUnit.SECOND, ts);
+    SqlNode dow = dayOfWeek(ts); // 1=Sun..7=Sat
+    SqlNode h12 = hour12(hour);
+
+    int i = 0;
+    while (i < fmt.length()) {
+      if (fmt.charAt(i) == '%' && i + 1 < fmt.length()) {
+        char spec = fmt.charAt(i + 1);
+        // Check for %3Q (milliseconds extension for strftime)
+        if (spec == '3' && i + 2 < fmt.length() && fmt.charAt(i + 2) == 'Q') {
+          // milliseconds from fractional part of original numeric value
+          if (origNumeric != null) {
+            // millis = FLOOR((val - FLOOR(val)) * 1000) MOD 1000
+            SqlNode frac = minus(origNumeric, call("FLOOR", origNumeric));
+            SqlNode millis = cast(call("MOD", cast(call("FLOOR", times(frac, intLiteral(1000))), typeSpec(SqlTypeName.INTEGER)), intLiteral(1000)), typeSpec(SqlTypeName.INTEGER));
+            parts.add(zeroPad(millis, 3));
+          } else {
+            parts.add(literal("000"));
+          }
+          i += 3;
+          continue;
+        }
+        switch (spec) {
+          case 'Y': parts.add(cast(year, typeSpec(SqlTypeName.VARCHAR))); break;
+          case 'y': // 2-digit year
+            parts.add(zeroPad(call("MOD", year, intLiteral(100)), 2)); break;
+          case 'm': parts.add(zeroPad(month, 2)); break;
+          case 'c': parts.add(zeroPad(month, 2)); break; // month (padded to match expected behavior)
+          case 'd': parts.add(zeroPad(day, 2)); break;
+          case 'e': parts.add(cast(day, typeSpec(SqlTypeName.VARCHAR))); break; // day no pad
+          case 'H': parts.add(zeroPad(hour, 2)); break;
+          case 'k': parts.add(cast(hour, typeSpec(SqlTypeName.VARCHAR))); break; // hour 24h no pad
+          case 'h': case 'I': parts.add(zeroPad(h12, 2)); break; // 12h padded
+          case 'l': parts.add(cast(h12, typeSpec(SqlTypeName.VARCHAR))); break; // 12h no pad
+          case 'S': case 's': parts.add(zeroPad(second, 2)); break;
+          case 'p': parts.add(amPm(hour, true)); break;
+          case 'a': // abbreviated weekday
+            parts.add(mapIntToString(dow, ABBREV_DAYS, 1)); break;
+          case 'b': // abbreviated month
+            parts.add(mapIntToString(month, ABBREV_MONTHS, 1)); break;
+          case 'Z': parts.add(literal("UTC")); break;
+          case '%': parts.add(literal("%")); break;
+          case 'M':
+            if (isStrftime) { // minute
+              parts.add(zeroPad(minute, 2));
+            } else { // full month name (MySQL)
+              parts.add(mapIntToString(month, FULL_MONTHS, 1));
+            }
+            break;
+          case 'i': // MySQL minute
+            parts.add(zeroPad(minute, 2)); break;
+          case 'D': // day with ordinal suffix
+            parts.add(buildOrdinal(day)); break;
+          case 'f': // microseconds (6 digits) - MOD to get only fractional part
+            parts.add(zeroPad(cast(call("MOD", extractPart(TimeUnit.MICROSECOND, ts), intLiteral(1000000)), typeSpec(SqlTypeName.INTEGER)), 6)); break;
+          case 'j': // day of year (3 digits)
+            parts.add(zeroPad(call("DAYOFYEAR", ts), 3)); break;
+          case 'W':
+            if (isStrftime) { // day of week number 0=Sun..6=Sat (but 'w' in strftime)
+              parts.add(mapIntToString(dow, FULL_DAYS, 1));
+            } else { // full weekday name (MySQL)
+              parts.add(mapIntToString(dow, FULL_DAYS, 1));
+            }
+            break;
+          case 'w':
+            if (isStrftime) { // 0=Sunday..6=Saturday
+              parts.add(cast(minus(dow, intLiteral(1)), typeSpec(SqlTypeName.VARCHAR)));
+            } else { // MySQL: 0=Sunday..6=Saturday
+              parts.add(cast(minus(dow, intLiteral(1)), typeSpec(SqlTypeName.VARCHAR)));
+            }
+            break;
+          case 'r': // 12h time hh:mm:ss AM/PM
+            parts.add(concatList(List.of(zeroPad(h12, 2), literal(":"), zeroPad(minute, 2), literal(":"), zeroPad(second, 2), literal(" "), amPm(hour, true))));
+            break;
+          case 'T': // 24h time HH:MM:SS
+            parts.add(concatList(List.of(zeroPad(hour, 2), literal(":"), zeroPad(minute, 2), literal(":"), zeroPad(second, 2))));
+            break;
+          case 'F': // %Y-%m-%d shorthand (strftime)
+            parts.add(concatList(List.of(cast(year, typeSpec(SqlTypeName.VARCHAR)), literal("-"), zeroPad(month, 2), literal("-"), zeroPad(day, 2))));
+            break;
+          case 'P':
+            if (isStrftime) { parts.add(amPm(hour, false)); }
+            else { parts.add(literal("P")); } // not valid MySQL specifier
+            break;
+          case 'n': parts.add(literal("\n")); break;
+          case 't': parts.add(literal("\t")); break;
+          case 'U': case 'V': // week of year (Sunday start)
+            parts.add(cast(call("WEEK", ts), typeSpec(SqlTypeName.VARCHAR))); break;
+          case 'u': case 'v': // week of year (ISO)
+            parts.add(cast(call("WEEK", ts), typeSpec(SqlTypeName.VARCHAR))); break;
+          case 'X': case 'x': // year for week
+            parts.add(cast(year, typeSpec(SqlTypeName.VARCHAR))); break;
+          default:
+            parts.add(literal("%" + spec)); break;
+        }
+        i += 2;
+      } else {
+        // Collect consecutive literal characters
+        StringBuilder sb = new StringBuilder();
+        while (i < fmt.length() && (fmt.charAt(i) != '%' || i + 1 >= fmt.length())) {
+          sb.append(fmt.charAt(i));
+          i++;
+          if (i < fmt.length() && fmt.charAt(i - 1) != '%') continue;
+          break;
+        }
+        parts.add(literal(sb.toString()));
+      }
+    }
+    if (parts.isEmpty()) return literal("");
+    return concatList(parts);
   }
 }
