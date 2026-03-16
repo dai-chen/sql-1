@@ -6,11 +6,13 @@
 package org.opensearch.sql.executor;
 
 import java.util.Collections;
+import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
+import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.executor.pagination.Cursor;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
@@ -50,9 +52,18 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
       // client.execute(AnalyticsQueryAction.INSTANCE, new AnalyticsQueryRequest(relNodeJson),
       //     ActionListener.wrap(response -> listener.onResponse(response), listener::onFailure));
 
-      // Stub: return empty result
-      Schema schema = new Schema(Collections.emptyList());
-      listener.onResponse(new QueryResponse(schema, Collections.emptyList(), Cursor.None));
+      // Stub: return empty result with schema derived from RelNode
+      List<Schema.Column> columns =
+          plan.getRowType().getFieldList().stream()
+              .map(
+                  f ->
+                      new Schema.Column(
+                          f.getName(),
+                          null,
+                          OpenSearchTypeFactory.convertRelDataTypeToExprType(f.getType())))
+              .toList();
+      listener.onResponse(
+          new QueryResponse(new Schema(columns), Collections.emptyList(), Cursor.None));
     } catch (Exception e) {
       listener.onFailure(e);
     }
