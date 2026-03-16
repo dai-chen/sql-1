@@ -95,7 +95,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
 
     // PoC: Route to unified query pipeline for Parquet-backed indices
     String pplQuery = transportPPLQueryRequest.toPPLQueryRequest().getRequest();
-    if (pplQuery != null && pplQuery.toLowerCase().contains("parquet_")) {
+    if (RestUnifiedQueryAction.isUnifiedQueryPath(pplQuery)) {
       boolean isExplain = request.path().endsWith("/_explain");
       return channel -> unifiedQueryHandler.execute(pplQuery, QueryType.PPL, channel, isExplain);
     }

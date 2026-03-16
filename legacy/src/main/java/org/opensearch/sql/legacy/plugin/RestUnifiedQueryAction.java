@@ -47,6 +47,15 @@ public class RestUnifiedQueryAction {
   }
 
   /**
+   * PoC: Check if the query should be routed to the unified query pipeline. Currently uses a
+   * hardcoded prefix convention ("parquet_" in table name). In production, this would check index
+   * settings to determine the storage engine.
+   */
+  public static boolean isUnifiedQueryPath(String query) {
+    return query != null && query.toLowerCase().contains("parquet_");
+  }
+
+  /**
    * Execute a query through the unified query pipeline.
    *
    * @param query the query string

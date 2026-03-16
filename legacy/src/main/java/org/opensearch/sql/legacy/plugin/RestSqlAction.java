@@ -150,7 +150,7 @@ public class RestSqlAction extends BaseRestHandler {
               sqlRequest.cursor());
 
       // PoC: Route to unified query pipeline for Parquet-backed indices
-      if (isParquetQuery(sqlRequest.getSql())) {
+      if (RestUnifiedQueryAction.isUnifiedQueryPath(sqlRequest.getSql())) {
         boolean isExplain = isExplainRequest(request);
         return channel ->
             unifiedQueryHandler.execute(
@@ -280,14 +280,6 @@ public class RestSqlAction extends BaseRestHandler {
 
   private static boolean isExplainRequest(final RestRequest request) {
     return request.path().endsWith("/_explain");
-  }
-
-  /**
-   * PoC: Check if the query targets a Parquet-backed index. Currently uses a hardcoded prefix
-   * convention ("parquet_" in table name). In production, this would check index settings.
-   */
-  private static boolean isParquetQuery(String sql) {
-    return sql != null && sql.toLowerCase().contains("parquet_");
   }
 
   private static boolean isClientError(Exception e) {
