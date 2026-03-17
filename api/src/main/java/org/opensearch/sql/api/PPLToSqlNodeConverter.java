@@ -1259,6 +1259,15 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       effectiveLeftAlias = leftAlias;
     } else {
       String genAlias = nextAlias();
+      // Map original table name to generated alias so ON-clause references get rewritten
+      String origTable = extractTableNameFromPipe(pipe);
+      if (origTable == null) {
+        Relation leftRel = extractRelation(node.getLeft());
+        if (leftRel != null) origTable = leftRel.getTableQualifiedName().toString();
+      }
+      if (origTable != null && !origTable.equals(genAlias)) {
+        aliasMapping.put(origTable, genAlias);
+      }
       leftSide = subquery(pipe, genAlias);
       effectiveLeftAlias = genAlias;
     }
