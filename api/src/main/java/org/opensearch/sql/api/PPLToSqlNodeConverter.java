@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.apache.calcite.avatica.util.TimeUnit;
 import org.apache.calcite.sql.SqlBasicCall;
+import org.apache.calcite.sql.SqlBasicFunction;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlCharStringLiteral;
 import org.apache.calcite.sql.SqlDataTypeSpec;
@@ -38,6 +39,9 @@ import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.fun.SqlLibraryOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.calcite.sql.type.OperandTypes;
+import org.apache.calcite.sql.type.ReturnTypes;
+import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.Node;
@@ -65,6 +69,7 @@ import org.opensearch.sql.ast.expression.SearchAnd;
 import org.opensearch.sql.ast.expression.SearchComparison;
 import org.opensearch.sql.ast.expression.SearchExpression;
 import org.opensearch.sql.ast.expression.SearchGroup;
+import org.opensearch.sql.ast.expression.SearchIn;
 import org.opensearch.sql.ast.expression.SearchLiteral;
 import org.opensearch.sql.ast.expression.SearchNot;
 import org.opensearch.sql.ast.expression.SearchOr;
@@ -435,25 +440,53 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SearchComparison cmp = (SearchComparison) expr;
       String fieldName = cmp.getField().getField().toString();
       SqlNode field = identifier(fieldName);
-      String rawValue = ((Literal) ((SearchLiteral) cmp.getValue()).getLiteral()).getValue().toString();
+      Literal lit = (Literal) ((SearchLiteral) cmp.getValue()).getLiteral();
+      Object rawObj = lit.getValue();
+      String rawValue = rawObj.toString();
       SqlNode valueLiteral;
       if ("@timestamp".equals(fieldName)) {
-        // Time modifier field — resolve date math to actual timestamp string
         String resolved = resolveDateMathToTimestamp(rawValue);
         valueLiteral = SqlLiteral.createCharString(resolved, POS);
       } else {
-        // Regular field comparison — use string literal
-        valueLiteral = SqlLiteral.createCharString(rawValue, POS);
+        valueLiteral = literal(rawObj);
       }
       switch (cmp.getOperator()) {
         case GREATER_OR_EQUAL: return gte(field, valueLiteral);
         case LESS_OR_EQUAL: return lte(field, valueLiteral);
         case GREATER_THAN: return gt(field, valueLiteral);
         case LESS_THAN: return lt(field, valueLiteral);
-        case EQUALS: return eq(field, valueLiteral);
+        case EQUALS:
+          if (hasUnescapedWildcard(rawValue)) {
+            String pattern = convertWildcardToLike(rawValue).toLowerCase(java.util.Locale.ROOT);
+            return new SqlBasicCall(SqlStdOperatorTable.LIKE,
+                new SqlNode[]{call("LOWER", field),
+                    SqlLiteral.createCharString(pattern, POS)}, POS);
+          }
+          return eq(field, valueLiteral);
         case NOT_EQUALS: return neq(field, valueLiteral);
         default: return null;
       }
+    } else if (expr instanceof SearchIn) {
+      SearchIn in = (SearchIn) expr;
+      String fieldName = in.getField().getField().toString();
+      SqlNode field = identifier(fieldName);
+      boolean isTimestamp = "@timestamp".equals(fieldName);
+      List<SqlNode> vals = new ArrayList<>();
+      for (SearchLiteral lit : in.getValues()) {
+        String raw = ((Literal) lit.getLiteral()).getValue().toString();
+        vals.add(SqlLiteral.createCharString(isTimestamp ? resolveTimestampValue(raw) : raw, POS));
+      }
+      return new SqlBasicCall(SqlStdOperatorTable.IN,
+          new SqlNode[]{field, new SqlNodeList(vals, POS)}, POS);
+    } else if (expr instanceof SearchLiteral) {
+      SearchLiteral lit = (SearchLiteral) expr;
+      String val = lit.toQueryString().replace("'", "''");
+      SqlBasicFunction matchPhraseFn = SqlBasicFunction.create(
+          "match_phrase", ReturnTypes.BOOLEAN,
+          OperandTypes.family(SqlTypeFamily.CHARACTER, SqlTypeFamily.CHARACTER));
+      return new SqlBasicCall(matchPhraseFn,
+          new SqlNode[]{SqlLiteral.createCharString("*", POS),
+              SqlLiteral.createCharString(val, POS)}, POS);
     } else if (expr instanceof SearchAnd) {
       SearchAnd and = (SearchAnd) expr;
       SqlNode left = convertSearchExpr(and.getLeft());
@@ -472,10 +505,40 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return convertSearchExpr(((SearchGroup) expr).getExpression());
     } else if (expr instanceof SearchNot) {
       SqlNode inner = convertSearchExpr(((SearchNot) expr).getExpression());
-      return inner != null ? not(inner) : null;
+      return inner != null ? new SqlBasicCall(SqlStdOperatorTable.IS_NOT_TRUE,
+          new SqlNode[]{inner}, POS) : null;
     }
-    // SearchLiteral, SearchIn — not supported in V4 yet
     return null;
+  }
+
+  /** Convert wildcard pattern (* → %, ? → _) for SQL LIKE. */
+  private static String convertWildcardToLike(String value) {
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (c == '\\' && i + 1 < value.length() && (value.charAt(i + 1) == '*' || value.charAt(i + 1) == '?')) {
+        sb.append(value.charAt(++i)); // literal * or ?
+      } else if (c == '*') {
+        sb.append('%');
+      } else if (c == '?') {
+        sb.append('_');
+      } else {
+        sb.append(c);
+      }
+    }
+    return sb.toString();
+  }
+
+  /** Resolve a timestamp value preserving nanosecond precision for absolute timestamps. */
+  private static String resolveTimestampValue(String raw) {
+    if (raw.contains("T") || raw.matches("^\\d{4}-\\d{2}-\\d{2}.*")) {
+      try {
+        java.time.ZonedDateTime zdt = java.time.ZonedDateTime.parse(raw,
+            java.time.format.DateTimeFormatter.ISO_DATE_TIME);
+        return zdt.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSSSSS"));
+      } catch (Exception ignored) {}
+    }
+    return resolveDateMathToTimestamp(raw);
   }
 
   private static final java.time.format.DateTimeFormatter TS_FMT =
@@ -3310,14 +3373,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return false;
   }
 
-  /** Check if a string contains unescaped wildcard characters (*). */
+  /** Check if a string contains unescaped wildcard characters (* or ?). */
   protected static boolean hasUnescapedWildcard(String str) {
     if (str == null) return false;
     boolean escaped = false;
     for (char c : str.toCharArray()) {
       if (escaped) { escaped = false; continue; }
       if (c == '\\') { escaped = true; continue; }
-      if (c == '*') return true;
+      if (c == '*' || c == '?') return true;
     }
     return false;
   }
