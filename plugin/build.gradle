@@ -55,9 +55,47 @@ opensearchplugin {
     name 'opensearch-sql'
     description 'OpenSearch SQL'
     classname 'org.opensearch.sql.plugin.SQLPlugin'
-    extendedPlugins = ['opensearch-job-scheduler']
+    extendedPlugins = ['opensearch-job-scheduler', 'analytics-engine']
     licenseFile rootProject.file("LICENSE.txt")
     noticeFile rootProject.file("NOTICE")
+}
+
+// Exclude jars provided by analytics-engine plugin (shared via extendedPlugins classloader)
+bundlePlugin {
+    exclude 'calcite-core-*.jar'
+    exclude 'calcite-linq4j-*.jar'
+    exclude 'avatica-core-*.jar'
+    exclude 'guava-*.jar'
+    exclude 'failureaccess-*.jar'
+    exclude 'slf4j-api-*.jar'
+    exclude 'commons-codec-*.jar'
+    exclude 'commons-compiler-*.jar'
+    exclude 'janino-*.jar'
+    exclude 'joou-java-6-*.jar'
+    exclude 'json-path-*.jar'
+    exclude 'json-smart-*.jar'
+    exclude 'accessors-smart-*.jar'
+    exclude 'asm-9*.jar'
+    exclude 'httpcore5-5*.jar'
+    exclude 'httpcore5-h2-*.jar'
+    exclude 'antlr4-runtime-4.13.2.jar'
+    exclude 'avatica-metrics-1.27.0.jar'
+    exclude 'commons-dbcp2-2.11.0.jar'
+    exclude 'commons-io-2.15.0.jar'
+    exclude 'commons-lang3-3.18.0.jar'
+    exclude 'commons-math3-3.6.1.jar'
+    exclude 'commons-pool2-2.12.0.jar'
+    exclude 'httpclient5-5.6.jar'
+    exclude 'httpcore5-reactive-5.4.jar'
+    exclude 'icu4j-72.1.jar'
+    exclude 'jackson-annotations-2.20.jar'
+    exclude 'jackson-databind-2.20.1.jar'
+    exclude 'memory-0.9.0.jar'
+    exclude 'proj4j-1.2.2.jar'
+    exclude 'sketches-core-0.9.0.jar'
+    exclude 'uzaygezen-core-0.2.jar'
+    exclude 'error_prone_annotations-*.jar'
+    exclude 'jts-io-common-*.jar'
 }
 
 publishing {
@@ -161,7 +199,7 @@ dependencies {
 
     api project(":ppl")
     api project(':api')
-    api project(':analytics-engine-stub')
+    compileOnly files("${rootDir}/libs/analytics-framework-3.6.0-SNAPSHOT.jar")
     api project(':legacy')
     api project(':opensearch')
     api project(':prometheus')

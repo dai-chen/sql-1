@@ -117,7 +117,8 @@ dependencies {
     implementation group: 'org.opensearch.plugin', name: 'geo', version: "${opensearch_version}"
     api project(':sql')
     api project(':api')
-    api project(':analytics-engine-stub')
+    compileOnly files("${rootDir}/libs/analytics-engine-3.6.0-SNAPSHOT.jar")
+    compileOnly files("${rootDir}/libs/analytics-framework-3.6.0-SNAPSHOT.jar")
     api project(':common')
     api project(':opensearch')
 

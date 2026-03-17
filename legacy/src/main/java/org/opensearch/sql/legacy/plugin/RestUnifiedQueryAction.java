@@ -14,10 +14,11 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.analytics.exec.QueryPlanExecutor;
+import org.opensearch.analytics.schema.OpenSearchSchemaBuilder;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestChannel;
-import org.opensearch.sql.analytics.schema.OpenSearchSchemaBuilder;
 import org.opensearch.sql.api.UnifiedQueryContext;
 import org.opensearch.sql.api.UnifiedQueryPlanner;
 import org.opensearch.sql.calcite.CalcitePlanContext;
@@ -39,11 +40,13 @@ public class RestUnifiedQueryAction {
   private static final Logger LOG = LogManager.getLogger(RestUnifiedQueryAction.class);
   private static final String SCHEMA_NAME = "opensearch";
 
-  private final AnalyticsExecutionEngine analyticsEngine = new AnalyticsExecutionEngine();
+  private final AnalyticsExecutionEngine analyticsEngine;
   private final ClusterService clusterService;
 
-  public RestUnifiedQueryAction(ClusterService clusterService) {
+  public RestUnifiedQueryAction(
+      ClusterService clusterService, QueryPlanExecutor<RelNode, Iterable<Object[]>> planExecutor) {
     this.clusterService = clusterService;
+    this.analyticsEngine = new AnalyticsExecutionEngine(planExecutor);
   }
 
   /**

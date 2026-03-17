@@ -21,11 +21,14 @@ import org.opensearch.sql.common.response.ResponseListener;
 
 class AnalyticsExecutionEngineTest {
 
-  private final AnalyticsExecutionEngine engine = new AnalyticsExecutionEngine();
+  private final AnalyticsExecutionEngine engine =
+      new AnalyticsExecutionEngine((plan, context) -> java.util.Collections.emptyList());
 
   @Test
   void executeRelNodeReturnsEmptyResult() {
     RelNode plan = mock(RelNode.class);
+    RelDataType rowType = new RelRecordType(java.util.List.of());
+    org.mockito.Mockito.when(plan.getRowType()).thenReturn(rowType);
     CalcitePlanContext context = mock(CalcitePlanContext.class);
     AtomicReference<ExecutionEngine.QueryResponse> result = new AtomicReference<>();
 

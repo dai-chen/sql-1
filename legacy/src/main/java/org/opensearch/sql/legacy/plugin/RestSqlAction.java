@@ -92,7 +92,9 @@ public class RestSqlAction extends BaseRestHandler {
     this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     this.newSqlQueryHandler = new RestSQLQueryAction(injector);
     this.unifiedQueryHandler =
-        new RestUnifiedQueryAction(injector.getInstance(ClusterService.class));
+        new RestUnifiedQueryAction(
+            injector.getInstance(ClusterService.class),
+            (plan, context) -> java.util.Collections.emptyList());
   }
 
   @Override

@@ -10,6 +10,7 @@ import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlExplainLevel;
+import org.opensearch.analytics.exec.QueryPlanExecutor;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
@@ -18,12 +19,17 @@ import org.opensearch.sql.executor.pagination.Cursor;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 
 /**
- * Execution engine that hands off RelNode plans to the Analytics engine via transport action. The
- * Analytics engine executes the plan (e.g., via DataFusion) and returns results.
- *
- * <p>Currently a stub: transport action submission is not yet wired. Returns empty results.
+ * Execution engine that hands off RelNode plans to the Analytics engine for execution. Uses {@link
+ * QueryPlanExecutor} to execute plans directly in-process (same JVM, shared classloader via plugin
+ * extension).
  */
 public class AnalyticsExecutionEngine implements ExecutionEngine {
+
+  private final QueryPlanExecutor<RelNode, Iterable<Object[]>> planExecutor;
+
+  public AnalyticsExecutionEngine(QueryPlanExecutor<RelNode, Iterable<Object[]>> planExecutor) {
+    this.planExecutor = planExecutor;
+  }
 
   @Override
   public void execute(PhysicalPlan plan, ResponseListener<QueryResponse> listener) {
@@ -48,12 +54,8 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
   public void execute(
       RelNode plan, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
     try {
-      // TODO: Serialize RelNode and submit to Analytics engine via transport action
-      // client.execute(AnalyticsQueryAction.INSTANCE, new AnalyticsQueryRequest(relNodeJson),
-      //     ActionListener.wrap(response -> listener.onResponse(response), listener::onFailure));
+      Iterable<Object[]> results = planExecutor.execute(plan, context);
 
-      // TODO: Worker thread
-      // Stub: return empty result with schema derived from RelNode
       List<Schema.Column> columns =
           plan.getRowType().getFieldList().stream()
               .map(
@@ -63,8 +65,8 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
                           null,
                           OpenSearchTypeFactory.convertRelDataTypeToExprType(f.getType())))
               .toList();
+      // TODO: convert Iterable<Object[]> results to List<ExprValue>
       listener.onResponse(
-              // TOOD: no dependency on ExprValue. Java object format response.
           new QueryResponse(new Schema(columns), Collections.emptyList(), Cursor.None));
     } catch (Exception e) {
       listener.onFailure(e);

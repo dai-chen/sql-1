@@ -50,7 +50,9 @@ public class RestPPLQueryAction extends BaseRestHandler {
   /** Constructor of RestPPLQueryAction. */
   public RestPPLQueryAction(ClusterService clusterService) {
     super();
-    this.unifiedQueryHandler = new RestUnifiedQueryAction(clusterService);
+    this.unifiedQueryHandler =
+        new RestUnifiedQueryAction(
+            clusterService, (plan, context) -> java.util.Collections.emptyList());
   }
 
   private static boolean isClientError(Exception e) {
