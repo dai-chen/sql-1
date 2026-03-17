@@ -1582,3 +1582,30 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - For complex week mode calculations (modes 1-7), computing in Java at transpile time is more reliable than generating SQL expressions. Calcite's Enumerable adapter can't implement EXTRACT(DOW/DOY) at runtime (NullPointerException: timeUnitRange).
   - `extractLiteralDateString()` traces through CAST(literal AS type) nodes to extract the underlying string literal for Java-side computation.
 ---
+
+## 2026-03-17T06:00 - V4-012 (Iteration 41): Bin command algorithm fixes
+- **What was fixed**: 5 new tests passing in CalciteBinCommandIT (32→37)
+  - **CountBin boundary check**: Added `FLOOR(max/width)*width == max` detection for when max value falls exactly on a bin boundary. When this happens, an extra bin is needed. If `actualBins > requestedBins`, escalates width to next power of 10 (`POWER(10, exponent+1)`). Uses FLOOR-based equality check instead of MOD to avoid DECIMAL overflow.
+  - **DOUBLE cast for all bin types**: Cast field to DOUBLE before arithmetic in CountBin, MinSpanBin, RangeBin, and DefaultBin. Prevents Calcite DECIMAL(19,15) overflow errors with large numeric values (e.g., account_number in bank index).
+  - **MinSpanBin algorithm fix**: Changed fallback width from raw `minspanVal` to `POWER(10, CEIL(LOG10(minspan)))` — rounds minspan up to next power of 10. Also uses `defaultWidth = POWER(10, FLOOR(LOG10(dataRange)))` and compares against DOUBLE-cast minspan for consistent type handling.
+  - **LOG10 zero-guard**: Added `CASE WHEN dataRange > 0 THEN dataRange ELSE 1.0` guard to ALL four bin types (CountBin, MinSpanBin, RangeBin, DefaultBin). Prevents LOG10(0) = -Infinity when all values in the column are identical.
+  - **Bin alias handling**: When bin has explicit alias different from field name (e.g., `bin age span=1 as cate`), only map the alias in `binReplacements`, keeping the original field intact. Previously `binReplacements.put(fieldName, ...)` caused downstream `fields` commands to resolve the original field to the bin expression (string type) instead of keeping the original column type.
+- **Pass rate change**: 78.5% (1770/2255 est) → 78.7% (1775/2255 est) = +0.2pp, +5 tests
+- **Per-class results** (before → after):
+  - CalciteBinCommandIT: 32→37 pass (70 total, 6 fail, 27 skip) — +5
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+- **Remaining 6 CalciteBinCommandIT failures**:
+  - testBinTimestampAligntimeEpoch, testBinTimestampAligntimeHour: aligntime feature not implemented
+  - testBinWithEvalCreatedDottedFieldName, testBinWithNestedFieldWithoutExplicitProjection: nested/dotted field expansion in bin context
+  - testBinWithNonExistentField: error message format mismatch
+  - testBinsOnTimeFieldWithPushdownDisabled_ShouldFail: error message format mismatch
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+70/-30)
+- **Learnings for future iterations:**
+  - CountBin boundary check: when max falls exactly on a bin boundary (e.g., max=100, width=10), CEIL(range/width) gives the correct bin count but the last bin is empty. Need to detect this and escalate width.
+  - FLOOR-based equality check (`FLOOR(max/width)*width == max`) is safer than MOD for boundary detection — MOD with DOUBLE/DECIMAL types can overflow in Calcite.
+  - All bin arithmetic should use DOUBLE to prevent DECIMAL(19,15) overflow. Calcite infers DECIMAL for integer arithmetic with POWER/LOG10.
+  - LOG10(0) = -Infinity in SQL, which propagates through FLOOR/POWER to produce NaN or errors. Always guard with CASE WHEN > 0.
+  - MinSpanBin fallback should use POWER(10, CEIL(LOG10(minspan))), not raw minspan. The raw value doesn't produce nice bin boundaries.
+---
