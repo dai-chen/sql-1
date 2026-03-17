@@ -47,6 +47,7 @@ import org.opensearch.sql.calcite.parser.SqlStarExceptReplace;
 import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.AddColTotals;
+import org.opensearch.sql.ast.tree.AppendCol;
 import org.opensearch.sql.ast.tree.AddTotals;
 import org.opensearch.sql.ast.tree.Dedupe;
 import org.opensearch.sql.ast.tree.Eval;
@@ -1552,6 +1553,104 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       }
     }
     return false;
+  }
+
+  @Override
+  public SqlNode visitAppendCol(org.opensearch.sql.ast.tree.AppendCol node, Void ctx) {
+    // Apply pending ORDER BY to preserve row ordering for ROW_NUMBER
+    if (pendingOrderBy != null || pendingFetch != null) {
+      pipe = applyPendingOrderBy(pipe);
+    }
+    String rnMain = "_row_number_main_";
+    String rnSub = "_row_number_subsearch_";
+
+    // Extract main columns and ORDER BY before wrapping
+    List<String> mainCols = extractColumnsFromSqlNode(pipe);
+    SqlNodeList mainOrderBy = SqlNodeList.EMPTY;
+    SqlNode mainInner = pipe;
+    if (pipe instanceof SqlOrderBy) {
+      SqlOrderBy ob = (SqlOrderBy) pipe;
+      mainOrderBy = ob.orderList;
+      mainInner = ob.query;
+    }
+
+    // Wrap main with ROW_NUMBER() OVER(ORDER BY ...) to preserve sort order
+    SqlNode mainRnCall = new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], SqlParserPos.ZERO);
+    SqlNode mainRn = as(window(mainRnCall, SqlNodeList.EMPTY, mainOrderBy), rnMain);
+    SqlNode mainWrapped = select(star(), mainRn)
+        .from(subquery(mainInner, "_main" + aliasCounter.incrementAndGet())).build();
+
+    // Convert subsearch independently — subsearch has no source, use main table
+    SqlNode tableScan = select(star()).from(identifier(tableName)).build();
+    SqlNode subResult = convertSubPipeline(node.getSubSearch(), tableScan);
+    List<String> subCols = extractColumnsFromSqlNode(subResult);
+
+    // Extract subsearch ORDER BY for its ROW_NUMBER
+    SqlNodeList subOrderBy = SqlNodeList.EMPTY;
+    SqlNode subInner = subResult;
+    if (subResult instanceof SqlOrderBy) {
+      SqlOrderBy ob = (SqlOrderBy) subResult;
+      subOrderBy = ob.orderList;
+      subInner = ob.query;
+    }
+
+    // Wrap subsearch with ROW_NUMBER() OVER(ORDER BY ...)
+    SqlNode subRnCall = new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], SqlParserPos.ZERO);
+    SqlNode subRn = as(window(subRnCall, SqlNodeList.EMPTY, subOrderBy), rnSub);
+    SqlNode subWrapped = select(star(), subRn)
+        .from(subquery(subInner, "_sub" + aliasCounter.incrementAndGet())).build();
+
+    // Wrap both as subqueries for the JOIN
+    String mainAlias = "_m" + aliasCounter.incrementAndGet();
+    String subAlias = "_s" + aliasCounter.incrementAndGet();
+
+    // Build FULL JOIN on row numbers
+    SqlNode joinCond = new SqlBasicCall(SqlStdOperatorTable.EQUALS,
+        new SqlNode[]{compoundId(mainAlias, rnMain), compoundId(subAlias, rnSub)}, SqlParserPos.ZERO);
+    SqlNode joinNode = join(subquery(mainWrapped, mainAlias), JoinType.FULL,
+        subquery(subWrapped, subAlias), joinCond);
+
+    // Determine duplicate columns
+    Set<String> subSet = new LinkedHashSet<>(subCols);
+    Set<String> duplicated = mainCols.stream().filter(subSet::contains)
+        .collect(Collectors.toCollection(LinkedHashSet::new));
+
+    // Build final projection
+    List<SqlNode> projections = new ArrayList<>();
+    if (!node.isOverride()) {
+      for (String col : mainCols) {
+        projections.add(as(compoundId(mainAlias, col), col));
+      }
+      for (String col : subCols) {
+        if (!duplicated.contains(col)) {
+          projections.add(as(compoundId(subAlias, col), col));
+        }
+      }
+    } else {
+      for (String col : mainCols) {
+        if (duplicated.contains(col)) {
+          SqlNode caseExpr = caseWhen(
+              List.of(joinCond),
+              List.of(compoundId(subAlias, col)),
+              compoundId(mainAlias, col));
+          projections.add(as(caseExpr, col));
+        } else {
+          projections.add(as(compoundId(mainAlias, col), col));
+        }
+      }
+      for (String col : subCols) {
+        if (!duplicated.contains(col)) {
+          projections.add(as(compoundId(subAlias, col), col));
+        }
+      }
+    }
+
+    pipe = select(projections.toArray(new SqlNode[0])).from(joinNode).build();
+    return pipe;
+  }
+
+  private SqlIdentifier compoundId(String qualifier, String name) {
+    return new SqlIdentifier(List.of(qualifier, name), SqlParserPos.ZERO);
   }
 
   @Override
