@@ -271,6 +271,35 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       pipe = select(expanded.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
       return pipe;
     }
+    // Check if any field is an alias field that resolves to a different name
+    boolean hasAliasField = false;
+    if (!aliasFieldMapping.isEmpty()) {
+      for (UnresolvedExpression expr : node.getProjectList()) {
+        if (expr instanceof Field) {
+          String name = ((Field) expr).getField().toString();
+          if (aliasFieldMapping.containsKey(name) && !aliasFieldMapping.get(name).equals(name)) {
+            hasAliasField = true;
+            break;
+          }
+        }
+      }
+    }
+    if (hasAliasField) {
+      List<SqlNode> colList = new ArrayList<>();
+      for (UnresolvedExpression expr : node.getProjectList()) {
+        SqlNode col = expr.accept(this, null);
+        if (expr instanceof Field) {
+          String name = ((Field) expr).getField().toString();
+          if (aliasFieldMapping.containsKey(name) && !aliasFieldMapping.get(name).equals(name)) {
+            colList.add(as(col, name));
+            continue;
+          }
+        }
+        colList.add(col);
+      }
+      pipe = select(colList.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+      return pipe;
+    }
     // Check if any field is a nested field access (e.g., skills.name) that needs ITEM aliasing
     boolean hasNestedAccess = false;
     for (UnresolvedExpression expr : node.getProjectList()) {
@@ -879,7 +908,13 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     if (hasCondition) {
       String leftTable = extractTableNameFromPlan(node.getLeft());
       String rightTable = extractTableNameFromPlan(node.getRight());
-      String leftAlias0 = node.getLeftAlias().orElse(leftTable);
+      // Predict the effective left alias: if no explicit alias and pipe is not a SqlJoin,
+      // the base visitJoin will wrap the left side with a generated alias (_t<N+1>).
+      String leftAlias0 = node.getLeftAlias().orElse(null);
+      if (leftAlias0 == null && !(pipe instanceof SqlJoin)) {
+        leftAlias0 = "_t" + (aliasCounter.get() + 1);
+      }
+      if (leftAlias0 == null) leftAlias0 = leftTable;
       String rightAlias0 = node.getRightAlias().orElse(rightTable);
       Map<String, String> fieldMap = new LinkedHashMap<>();
       for (String col : resolveColumns(leftTable)) fieldMap.put(col, leftAlias0);
@@ -2070,7 +2105,13 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       originalData = select(origItems.toArray(new SqlNode[0]))
           .from(subquery(pipe, "_t" + aliasCounter.incrementAndGet())).build();
     } else {
-      originalData = pipe;
+      // Explicitly select fullCols to ensure column count matches the totals row
+      List<SqlNode> origItems = new ArrayList<>();
+      for (String col : fullCols) {
+        origItems.add(identifier(col));
+      }
+      originalData = select(origItems.toArray(new SqlNode[0]))
+          .from(subquery(pipe, "_t" + aliasCounter.incrementAndGet())).build();
     }
 
     pipe = unionAll(originalData, totalsRow);

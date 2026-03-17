@@ -155,6 +155,12 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
 
   protected JSONObject executeQuery(String query) throws IOException {
     if (V4_ENABLED) {
+      String trimmed = query.trim().toLowerCase(Locale.ROOT);
+      if (trimmed.startsWith("describe ")) {
+        Response response = client().performRequest(buildRequest(query, QUERY_API_ENDPOINT));
+        Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+        return jsonify(getResponseBody(response, true));
+      }
       try {
         query = query.replace("\\\"", "\"");
         String sql = transpileV4(query);
@@ -177,8 +183,14 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
 
   protected String executeQueryToString(String query) throws IOException {
     if (V4_ENABLED) {
-      // For EXPLAIN queries, route through PPL explain endpoint (V4 transpiler can't replicate explain format)
+      // For DESCRIBE queries, route through PPL endpoint (V4 transpiler can't handle metadata commands)
       String trimmed = query.trim().toLowerCase(Locale.ROOT);
+      if (trimmed.startsWith("describe ")) {
+        Response response = client().performRequest(buildRequest(query, QUERY_API_ENDPOINT));
+        Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+        return getResponseBody(response, true);
+      }
+      // For EXPLAIN queries, route through PPL explain endpoint (V4 transpiler can't replicate explain format)
       if (trimmed.startsWith("explain ")) {
         String mode = "standard";
         if (trimmed.startsWith("explain simple ")) mode = "simple";
