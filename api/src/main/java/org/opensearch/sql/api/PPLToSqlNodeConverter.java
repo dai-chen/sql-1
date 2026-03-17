@@ -109,6 +109,7 @@ import org.opensearch.sql.ast.tree.Patterns;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.RangeBin;
 import org.opensearch.sql.ast.tree.RareTopN;
+import org.opensearch.sql.ast.tree.Regex;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Reverse;
@@ -677,6 +678,20 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (joinContext) {
       skipNextWrap = true;
     }
+    return pipe;
+  }
+
+  @Override
+  public SqlNode visitRegex(Regex node, Void ctx) {
+    node.getChild().get(0).accept(this, ctx);
+    pipe = wrapAsSubquery();
+    SqlNode field = node.getField().accept(this, null);
+    String pattern = ((Literal) node.getPattern()).getValue().toString();
+    SqlNode regexCall = call("REGEXP_CONTAINS", field, literal(pattern));
+    if (node.isNegated()) {
+      regexCall = not(regexCall);
+    }
+    pipe = select(star()).from(pipe).where(regexCall).build();
     return pipe;
   }
 
@@ -2120,41 +2135,83 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitParse(Parse node, Void ctx) {
-    if (node.getParseMethod() != ParseMethod.REGEX) {
+    if (node.getParseMethod() != ParseMethod.REGEX && node.getParseMethod() != ParseMethod.GROK) {
       throw new UnsupportedOperationException(
           "Unsupported PPL command: Parse (" + node.getParseMethod() + ")");
     }
     SqlNode sourceField = node.getSourceField().accept(this, null);
     String pattern = ((Literal) node.getPattern()).getValue().toString();
 
-    // Validate named group names (throws IllegalArgumentException for invalid names)
-    RegexCommonUtils.getNamedGroupCandidates(pattern);
+    String regexPattern;
+    List<String> groupNames;
 
-    // Extract named group names
-    java.util.regex.Pattern namedGroupPattern =
-        java.util.regex.Pattern.compile("\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>");
-    java.util.regex.Matcher matcher = namedGroupPattern.matcher(pattern);
-    List<String> groupNames = new ArrayList<>();
-    while (matcher.find()) groupNames.add(matcher.group(1));
+    if (node.getParseMethod() == ParseMethod.GROK) {
+      // Compile grok pattern to Java regex with named groups
+      org.opensearch.sql.common.grok.GrokCompiler grokCompiler =
+          org.opensearch.sql.common.grok.GrokCompiler.newInstance();
+      grokCompiler.registerDefaultPatterns();
+      org.opensearch.sql.common.grok.Grok grok = grokCompiler.compile(pattern);
+      regexPattern = grok.getNamedRegex();
+      // Extract user-facing group names (filter out internal "UNWANTED" groups)
+      groupNames = new ArrayList<>();
+      for (String id : grok.namedGroups) {
+        String name = grok.getNamedRegexCollectionById(id);
+        if (name != null && !name.equals("UNWANTED")) {
+          groupNames.add(name);
+        }
+      }
+    } else {
+      regexPattern = pattern;
+      // Validate named group names (throws IllegalArgumentException for invalid names)
+      RegexCommonUtils.getNamedGroupCandidates(pattern);
+      // Extract named group names
+      java.util.regex.Pattern namedGroupPattern =
+          java.util.regex.Pattern.compile("\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>");
+      java.util.regex.Matcher matcher = namedGroupPattern.matcher(pattern);
+      groupNames = new ArrayList<>();
+      while (matcher.find()) groupNames.add(matcher.group(1));
+    }
 
     pipe = wrapAsSubquery();
     List<SqlNode> selectItems = new ArrayList<>();
     selectItems.add(star());
-    for (int i = 0; i < groupNames.size(); i++) {
-      String singleGroupPattern = pattern;
-      String groupName = groupNames.get(i);
+    // For each named group, isolate it as the only capturing group and extract
+    // We need to find each named group in the regex and convert others to non-capturing
+    // First, extract all named groups from the regex pattern
+    java.util.regex.Pattern namedGroupFinder =
+        java.util.regex.Pattern.compile("\\(\\?<([a-zA-Z][a-zA-Z0-9]*)>");
+    java.util.regex.Matcher allGroupsMatcher = namedGroupFinder.matcher(regexPattern);
+    List<String> allRegexGroupNames = new ArrayList<>();
+    while (allGroupsMatcher.find()) allRegexGroupNames.add(allGroupsMatcher.group(1));
+
+    for (String groupName : groupNames) {
+      // Find the regex group name that maps to this user-facing name
+      // For REGEX parse, they're the same. For GROK, we need to find the internal ID.
+      String targetRegexGroupName = groupName;
+      if (node.getParseMethod() == ParseMethod.GROK) {
+        org.opensearch.sql.common.grok.GrokCompiler gc =
+            org.opensearch.sql.common.grok.GrokCompiler.newInstance();
+        gc.registerDefaultPatterns();
+        org.opensearch.sql.common.grok.Grok g = gc.compile(pattern);
+        for (String id : g.namedGroups) {
+          if (groupName.equals(g.getNamedRegexCollectionById(id))) {
+            targetRegexGroupName = id;
+            break;
+          }
+        }
+      }
+      String singleGroupPattern = regexPattern;
       // Convert other named groups to non-capturing
-      for (int j = 0; j < groupNames.size(); j++) {
-        String gn = groupNames.get(j);
-        if (j != i) {
-          singleGroupPattern = singleGroupPattern.replace("(?<" + gn + ">", "(?:");
+      for (String rgn : allRegexGroupNames) {
+        if (!rgn.equals(targetRegexGroupName)) {
+          singleGroupPattern = singleGroupPattern.replace("(?<" + rgn + ">", "(?:");
         }
       }
       // Convert remaining unnamed capturing groups to non-capturing
       singleGroupPattern =
           singleGroupPattern.replaceAll("(?<!\\\\)\\((?!\\?)", "(?:");
       // Convert target named group to unnamed capturing group
-      singleGroupPattern = singleGroupPattern.replace("(?<" + groupName + ">", "(");
+      singleGroupPattern = singleGroupPattern.replace("(?<" + targetRegexGroupName + ">", "(");
       SqlNode regexExpr = call("COALESCE",
           call("REGEXP_EXTRACT", sourceField, literal(singleGroupPattern), literal(1)),
           literal(""));

@@ -59,6 +59,9 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   public static final Integer DEFAULT_JOIN_SUBSEARCH_MAXOUT = 50000;
   static final boolean V4_ENABLED = Boolean.getBoolean("ppl.engine.v4");
 
+  /** Tracks the current query size limit for V4 path (null = default/unset). */
+  private Integer v4QuerySizeLimit;
+
   private static final Settings V4_SETTINGS =
       new Settings() {
         @SuppressWarnings("unchecked")
@@ -111,6 +114,14 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     // (SqlParserUtil.parseString) does NOT un-escape them. Un-double to match what
     // the string transpiler produces.
     sql = sql.replace("\\\\", "\\");
+    // Apply query size limit for V4 path if set and SQL doesn't already have FETCH/LIMIT
+    if (v4QuerySizeLimit != null) {
+      String upper = sql.toUpperCase();
+      if (!upper.contains("FETCH NEXT") && !upper.contains("FETCH FIRST")
+          && !upper.contains(" LIMIT ")) {
+        sql = sql + "\nFETCH NEXT " + v4QuerySizeLimit + " ROWS ONLY";
+      }
+    }
     return sql;
   }
 
@@ -151,6 +162,22 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     }
     updatePushdownSettings();
     disableCalcite(); // calcite is enabled by default from 3.3.0
+  }
+
+  @Override
+  protected void setQuerySizeLimit(Integer limit) throws IOException {
+    super.setQuerySizeLimit(limit);
+    if (V4_ENABLED) {
+      v4QuerySizeLimit = limit;
+    }
+  }
+
+  @Override
+  protected void resetQuerySizeLimit() throws IOException {
+    super.resetQuerySizeLimit();
+    if (V4_ENABLED) {
+      v4QuerySizeLimit = null;
+    }
   }
 
   protected JSONObject executeQuery(String query) throws IOException {
