@@ -1609,3 +1609,42 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - LOG10(0) = -Infinity in SQL, which propagates through FLOOR/POWER to produce NaN or errors. Always guard with CASE WHEN > 0.
   - MinSpanBin fallback should use POWER(10, CEIL(LOG10(minspan))), not raw minspan. The raw value doesn't produce nice bin boundaries.
 ---
+
+## 2026-03-17T07:01 - V4-012 (Iteration 42): Search command SearchIn/SearchLiteral/NOT/wildcard fixes
+- **What was fixed**: 4 new tests passing in CalciteSearchCommandIT (26→30)
+  - **SearchIn support**: Added SearchIn handling in convertSearchExpr(). Builds SqlStdOperatorTable.IN with SqlNodeList for `field IN (val1, val2, ...)` patterns. For @timestamp fields, resolves each value via resolveTimestampValue() with nanosecond precision preservation (ISO_DATE_TIME parser → 9-digit fractional seconds format). Fixed testSearchWithDoubleINOperator and testSearchWithEmptyINList.
+  - **SearchLiteral (free-text search)**: Added SearchLiteral handling that generates `match_phrase('*', value)` via SqlBasicFunction. Engine-blocked (match_phrase not pushdown-supported) but no longer returns null causing no-WHERE clause.
+  - **LIKE ESCAPE clause bug**: Removed 3rd operand (`ESCAPE '\'`) from LIKE calls in wildcard search comparisons. After toSqlString() doubled backslashes and transpileV4() un-doubled them, `ESCAPE '\'` broke the SQL parser because `\'` was interpreted as an escaped quote character, not end-of-string + closing-paren. Now uses 2-operand LIKE without ESCAPE clause.
+  - **Case-insensitive wildcard LIKE**: Changed wildcard LIKE from `field LIKE 'ERR%'` to `LOWER(field) LIKE 'err%'` for PPL search semantics (search is case-insensitive).
+  - **Numeric value handling**: Changed SearchComparison value creation from `SqlLiteral.createCharString(rawValue, POS)` to `literal(rawObj)` which creates type-appropriate SQL literals (numeric for Integer/Long, string for String). Fixes `attributes.http.status_code != 200` generating string comparison instead of numeric.
+  - **SearchNot IS_NOT_TRUE semantics**: Changed `NOT(inner)` to `IS_NOT_TRUE(inner)` for SearchNot expressions. SQL `NOT(field = value)` returns NULL (filtered out) when field is NULL/missing, but PPL's `NOT field=value` should include rows where field doesn't exist. IS_NOT_TRUE returns TRUE when inner is FALSE or NULL.
+  - **hasUnescapedWildcard**: Now checks for `?` in addition to `*`.
+  - **convertWildcardToLike**: Removed backslash escaping of literal `%` and `_` (unnecessary without ESCAPE clause).
+- **Pass rate change**: 78.7% (1775/2255 est) → 78.9% (1779/2255 est) = +0.2pp, +4 tests
+- **Per-class results** (before → after):
+  - CalciteSearchCommandIT: 26→30 pass (52 total, 21 fail, 1 skip) — +4
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLBasicIT: 37/42 (no regression) ✅
+  - CalcitePPLJoinIT: 32/39 (no regression) ✅
+  - CalcitePPLLookupIT: 16/17 (no regression) ✅
+  - CalciteWhereCommandIT: 30/37 (no regression) ✅
+  - CalcitePPLBuiltinFunctionsNullIT: 64/71 (no regression) ✅
+- **Remaining 21 CalciteSearchCommandIT failures**:
+  - 9 free-text search (engine-blocked): match_phrase('*', value) not pushdown-supported — testSearchWithFreeText, testSearchWithEmailInBody, testSearchWithLuceneSpecialCharacters, testSearchWithMultipleFreeTextTerms, testSearchWithPhraseSearch, testSearchWithSQLInjectionPattern, testSearchWithTraceId, testSearchWithSpanLength, testSearchWithNumericIdVsSpanLength
+  - 3 compile/plan failures (engine-blocked): testSearchWithTypeMismatch, testSearchWithInvalidFieldName, testSearchWithIPAddress
+  - 2 escaped quotes in IN (parser-level): testSearchWithSingleValueIN (2nd sub-test with escaped quotes), testSearchWithDateINOperator (escaped quotes in timestamp values)
+  - 2 wildcard (semantic gap): testWildcardPatternMatching (SQL LIKE does full-string matching vs PPL search does token-level matching on analyzed text fields), testWildcardEscaping (free-text wildcard + escaped wildcard)
+  - 2 date modifiers: testSearchTimeModifierWithSnappedWeek, testSearchWithQuarterlyModifiers
+  - 1 date format: testSearchWithDateFormats (nanosecond precision comparison)
+  - 1 nanosecond precision: testSearchWithDateRangeComparisons
+  - 1 parser error: testSearchWithJSONSpecialChars
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+72/-9)
+- **Learnings for future iterations:**
+  - LIKE ESCAPE clause with backslash is dangerous in the V4 path: toSqlString() doubles backslashes, transpileV4() un-doubles them, but `ESCAPE '\'` becomes ambiguous (backslash escapes the closing quote). Use 2-operand LIKE without ESCAPE.
+  - PPL search is case-insensitive — use LOWER(field) LIKE lower_pattern for wildcard matching.
+  - SQL LIKE does full-string matching, but PPL search does token-level matching on analyzed text fields. `severityText=ERR*` in PPL matches "ERROR" (token match), but `LIKE 'err%'` in SQL matches "error" (full-string match). For keyword fields this works, but for text fields it's a semantic gap.
+  - SearchNot should use IS_NOT_TRUE, not NOT. SQL NOT returns NULL when the inner expression is NULL (field missing), but PPL NOT should include those rows.
+  - SearchComparison values should use type-appropriate literals (numeric for numbers, string for strings). Using createCharString for all values causes type mismatch in comparisons.
+  - The PPL parser strips backticks from field names via StringUtils.unquoteIdentifier() — no special handling needed in the converter.
+---
