@@ -1814,10 +1814,66 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
               cast(end, varcharType));
         }
       } else {
-        return transpileSpanToSqlNode(lit.getValue().toString(), field);
+        long alignOffset = resolveAligntimeOffset(spanBin.getAligntime(), lit.getValue().toString());
+        return transpileSpanToSqlNode(lit.getValue().toString(), field, alignOffset);
       }
     }
     return cast(field, typeSpec(SqlTypeName.VARCHAR));
+  }
+
+  /**
+   * Resolve aligntime parameter to an offset in seconds.
+   * For epoch numeric: offset = epochSeconds % totalSpanSeconds
+   * For time modifier like @d+3h: offset = parsed seconds from modifier
+   * Returns 0 if no aligntime.
+   */
+  private long resolveAligntimeOffset(UnresolvedExpression aligntime, String spanStr) {
+    if (aligntime == null) return 0;
+    if (!(aligntime instanceof Literal)) return 0;
+    Literal alit = (Literal) aligntime;
+
+    // Parse span to get totalSeconds
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d+)(\\w+)$").matcher(spanStr);
+    if (!m.matches()) return 0;
+    int value = Integer.parseInt(m.group(1));
+    String unit = m.group(2);
+    String unitLower = unit.equals("M") ? "M" : unit.toLowerCase();
+    int secondsPerUnit = 0;
+    switch (unitLower) {
+      case "s": case "sec": case "secs": case "second": case "seconds": secondsPerUnit = 1; break;
+      case "m": case "min": case "mins": case "minute": case "minutes": secondsPerUnit = 60; break;
+      case "h": case "hr": case "hrs": case "hour": case "hours": secondsPerUnit = 3600; break;
+      default: return 0; // aligntime ignored for day/month/year spans
+    }
+    long totalSeconds = (long) value * secondsPerUnit;
+
+    if (alit.getType() == DataType.LONG || alit.getType() == DataType.INTEGER) {
+      long epochSeconds = ((Number) alit.getValue()).longValue();
+      return epochSeconds % totalSeconds;
+    } else if (alit.getType() == DataType.STRING) {
+      String mod = alit.getValue().toString();
+      return parseTimeModifierOffset(mod);
+    }
+    return 0;
+  }
+
+  /** Parse SPL time modifier like @d+3h to offset seconds. */
+  private long parseTimeModifierOffset(String modifier) {
+    if (modifier == null) return 0;
+    modifier = modifier.replace("'", "").replace("\"", "").trim();
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("@d([+-])(\\d+)(\\w+)").matcher(modifier);
+    if (!m.matches()) return 0;
+    String sign = m.group(1);
+    int val = Integer.parseInt(m.group(2));
+    String unit = m.group(3).toLowerCase();
+    long seconds;
+    switch (unit) {
+      case "h": seconds = val * 3600L; break;
+      case "m": seconds = val * 60L; break;
+      case "s": seconds = val; break;
+      default: seconds = val * 3600L; break;
+    }
+    return sign.equals("-") ? -seconds : seconds;
   }
 
   /** CountBin: nice-number width algorithm using inline SQL. */
@@ -1954,7 +2010,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
   }
 
-  private SqlNode transpileSpanToSqlNode(String spanStr, SqlNode field) {
+  private SqlNode transpileSpanToSqlNode(String spanStr, SqlNode field, long alignOffset) {
     // Log-based span
     java.util.regex.Matcher logMatcher =
         java.util.regex.Pattern.compile("^(\\d+\\.?\\d*)?log(\\d+)$").matcher(spanStr);
@@ -2035,14 +2091,19 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     if (secondsPerUnit > 0) {
       long totalSeconds = (long) value * secondsPerUnit;
+      SqlNode epochTs = cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP));
       SqlNode epoch = call("TIMESTAMPDIFF",
-          identifier("SECOND"),
-          cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP)),
-          field);
-      SqlNode floored = times(call("FLOOR",
-          divide(epoch, literal(totalSeconds))), literal(totalSeconds));
-      return call("TIMESTAMPADD",
-          identifier("SECOND"), cast(floored, typeSpec(SqlTypeName.INTEGER)),
+          identifier("SECOND"), epochTs, field);
+      SqlNode floored;
+      if (alignOffset != 0) {
+        SqlNode adjusted = minus(epoch, literal(alignOffset));
+        floored = plus(times(call("FLOOR",
+            divide(adjusted, literal(totalSeconds))), literal(totalSeconds)), literal(alignOffset));
+      } else {
+        floored = times(call("FLOOR",
+            divide(epoch, literal(totalSeconds))), literal(totalSeconds));
+      }
+      return tsAdd("SECOND", cast(floored, typeSpec(SqlTypeName.INTEGER)),
           cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP)));
     }
     // Fallback for sub-second or multi-month
