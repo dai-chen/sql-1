@@ -1589,8 +1589,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         if (p.getLeft() == Sort.SortOption.DEFAULT_DESC) col = desc(col);
         ordItems.add(col);
       }
-      SqlNodeList ordBy = ordItems.isEmpty() ? SqlNodeList.EMPTY
-          : new SqlNodeList(ordItems, POS);
+      // Default ORDER BY CAST("_id" AS INTEGER) for deterministic row-by-row accumulation
+      if (ordItems.isEmpty()) {
+        ordItems.add(cast(identifier("_id"), typeSpec(SqlTypeName.INTEGER)));
+      }
+      SqlNodeList ordBy = new SqlNodeList(ordItems, POS);
 
       SqlNode winExpr = windowWithFrame(aggSql, partBy, ordBy, isRows, lower, upper);
       if (nullCheck != null) {
