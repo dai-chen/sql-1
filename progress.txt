@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 79.4% (1790/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
+- Current rate: 79.9% (1804/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -130,6 +130,17 @@
 
 ### Engine Capabilities (do NOT modify engine)
 - OpenSearch date/time fields → standard SQL TIMESTAMP/DATE/TIME (no UDT)
+
+### UDF Wrapping Pattern
+- PPLBuiltinOperators UDFs have null operand metadata → wrap with SqlOperandMetadata (VARIADIC) for validator
+- Pattern: create SqlUserDefinedFunction preserving original's function impl + return type, adding VARIADIC_METADATA
+- Used by: MVAPPEND_WRAPPED, JSON UDFs (wrapJsonUdf), MVFIND
+
+### Subsearch Maxout Pattern
+- pendingSubsearchFetch: applied in visitRelation to limit base table scan rows
+- joinSubsearchMaxOut: applied to join right side via applyFetchToAliasedNode
+- convertSubPlanWithMaxout: creates sub-converter with pendingSubsearchFetch set
+- Settings propagation: PPLIntegTestCase tracks v4SubsearchMaxOut/v4JoinSubsearchMaxOut, passes to converter via setSubsearchMaxOut()
 
 ### Transpile-Time Computation Patterns
 - For literal numeric/string inputs, compute results in Java at transpile time (avoids SQL overflow, timezone, and precision issues)
@@ -1771,4 +1782,38 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - AppendCol subsearch in PPL AST has no source relation — the parser only captures pipe commands inside brackets. The source must be provided externally. CalciteRelNodeVisitor uses PlanUtils.getRelation() + transformPlanToAttachChild(). The V4 converter uses convertSubPipeline() with a fresh `SELECT * FROM tableName` as initial pipe.
   - ROW_NUMBER() OVER() without ORDER BY produces non-deterministic row numbering. For appendcol, the ORDER BY from the main pipe's sort command must be extracted from the SqlOrderBy wrapper and passed to the ROW_NUMBER window.
   - SqlOrderBy wraps SqlSelect — must unwrap to get the inner query for subquery wrapping, and separately extract the orderList for the ROW_NUMBER window.
+---
+
+## 2026-03-17T18:30 - V4-012 (Iteration 47): MVAppend UDF + MvExpand limit + subsearch maxout + legacy preference
+- **What was fixed**: 9 new tests passing across 5 test classes
+  - **MVAppend UDF** (3 tests): Replaced manual ARRAY()/ARRAY_CONCAT() construction with registered PPLBuiltinOperators.MVAPPEND UDF wrapped with variadic operand metadata (SqlOperandMetadata) for Calcite validator compatibility. The engine's MVAppendFunctionImpl supports heterogeneous arrays (returns SqlTypeName.ANY for mixed types) and filters nulls via MVAppendCore.collectElements. Also added VARCHAR cast in ensureArrayArg() for SqlCharStringLiteral to prevent CHAR(N) padding.
+  - **MvExpand per-document limit** (3 tests): Replaced global LIMIT N with per-document limit using ROW_NUMBER() OVER (PARTITION BY non-expanded-top-level-columns) followed by WHERE _rn <= limit. Partition columns exclude the expanded field and nested sub-fields (those with dots) to avoid Java code generation errors with dotted column names.
+  - **Subsearch maxout** (1 test): Propagated PPL_SUBSEARCH_MAXOUT and PPL_JOIN_SUBSEARCH_MAXOUT cluster settings from PPLIntegTestCase to V4 converter via setSubsearchMaxOut(). Applied FETCH NEXT N ROWS ONLY to subsearch base table scans (via pendingSubsearchFetch in visitRelation) and join right sides (via applyFetchToAliasedNode in visitJoin). Fixed testJoinSubsearchMaxOut.
+  - **Legacy preference override** (2 tests): Added ThreadLocal-based PPL_SYNTAX_LEGACY_PREFERRED passthrough from withSettings() to transpileV4() via V4_LEGACY_PREFERRED_OVERRIDE. The parse() method now accepts custom Settings. Fixed testTopCommandLegacyFalse and testRareCommandLegacyFalse.
+- **Pass rate change**: 79.6% (1795/2255 est) → 79.9% (1804/2255 est) = +0.3pp, +9 tests
+- **Per-class results** (before → after):
+  - CalciteMVAppendFunctionIT: 12→15 pass (15 total, 0 fail) ✅ ALL PASS — +3
+  - CalciteMvExpandCommandIT: 13→16 pass (16 total, 0 fail) ✅ ALL PASS — +3
+  - CalciteTopCommandIT: 5→6 pass (6 total, 0 fail) ✅ ALL PASS — +1
+  - CalciteRareCommandIT: 4→5 pass (5 total, 0 fail) ✅ ALL PASS — +1
+  - CalcitePPLJoinIT: 32→33 pass (39 total, 6 fail) — +1
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+  - CalcitePPLInSubqueryIT: 18/18 ALL PASS (no regression) ✅
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+- **Remaining failures in targeted classes**:
+  - JoinIT (6): testMultipleJoins, testMultipleJoinsWithoutTableAliases, testMultipleJoinsWithRelationSubquery (multi-join chains), testSimpleSortPushDownForSMJ, testComplexSortPushDownForSMJ (expression join conditions), testInnerJoinWithRelationSubquery (row ordering)
+  - ExistsSubqueryIT (3): testSubsearchMaxOut2, testSubsearchMaxOut4, testSubsearchMaxOutUncorrelated — subsearch maxout logic not working correctly for EXISTS (row count limiting)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+103: MVAPPEND_WRAPPED, setSubsearchMaxOut, parse with Settings, wrapWithFetch, applyFetchToAliasedNode, pendingSubsearchFetch, convertSubPlanWithMaxout, subsearch maxout in visitInSubquery/visitExistsSubquery/visitJoin/convertSubPlan)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+27: mvexpand per-document limit with ROW_NUMBER PARTITION BY)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (+1: MVAPPEND_WRAPPED registration)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (+48: v4SubsearchMaxOut, v4JoinSubsearchMaxOut, V4_LEGACY_PREFERRED_OVERRIDE ThreadLocal, parse with custom Settings, subsearch/join maxout propagation, legacy preference passthrough)
+- **Learnings for future iterations:**
+  - PPLBuiltinOperators UDFs have null operand metadata. Must wrap with custom SqlOperandMetadata (VARIADIC pattern) for Calcite validator compatibility. Same pattern as JSON UDFs (V4-017).
+  - MVAppendFunctionImpl handles heterogeneous arrays natively (returns ANY type) and filters nulls. Better than manual ARRAY()/ARRAY_CONCAT() which forces type coercion.
+  - MvExpand per-document limit requires ROW_NUMBER PARTITION BY on all non-expanded columns. Dotted column names (nested sub-fields) must be excluded from partition to avoid Java code generation errors.
+  - Subsearch maxout needs per-subquery handling: pendingSubsearchFetch applied in visitRelation for the first table scan. Join maxout applied to the right side via applyFetchToAliasedNode.
+  - PPL_SYNTAX_LEGACY_PREFERRED cluster setting affects top/rare useNull defaults. Must be passed through to the V4 parse() method via custom Settings.
+  - ThreadLocal is the correct pattern for passing settings from static withSettings() to instance transpileV4() in PPLIntegTestCase.
 ---
