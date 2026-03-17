@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 78.5% (1770/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
+- Current rate: 79.4% (1790/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -130,6 +130,14 @@
 
 ### Engine Capabilities (do NOT modify engine)
 - OpenSearch date/time fields → standard SQL TIMESTAMP/DATE/TIME (no UDT)
+
+### Transpile-Time Computation Patterns
+- For literal numeric/string inputs, compute results in Java at transpile time (avoids SQL overflow, timezone, and precision issues)
+- Pattern: check `args.get(0) instanceof SqlNumericLiteral` or `SqlCharStringLiteral`, compute in Java, emit as `CAST('result' AS TIMESTAMP)`
+- Used by: from_unixtime, str_to_date, computeMySQLWeek, resolveOsDateMath, now-like functions
+- TIMESTAMP(6) precision: `new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS)` for fractional seconds
+- TIMESTAMPADD(MICROSECOND, large_value) overflows — use SECOND for integer part, MICROSECOND only for fractional remainder
+- MySQL format specifiers → Java DateTimeFormatter: use mysqlFormatToJavaPattern() with case-insensitive English locale
 - Metadata fields excluded from schema — SELECT * returns only user data columns
 - SELECT * EXCEPT/REPLACE supported at SqlNode layer
 - Custom PPL UDFs: pplFirst, pplLast, matchPhrase, percentile_approx, take, listAgg, valuesAgg
@@ -1709,4 +1717,26 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - CAST('timestamp_with_fractional' AS TIMESTAMP) truncates fractional seconds. Use TIMESTAMP(6) precision: `new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS)`.
   - For transpile-time computation of literal inputs, Java's Instant.ofEpochSecond with ZoneOffset.UTC avoids all SQL timezone ambiguity.
   - MySQL str_to_date format specifiers need case-insensitive parsing with English locale for month/weekday names.
+---
+
+## 2026-03-17T14:42 - V4-012 (Iteration 45): Bin aligntime + tsAdd fix
+- **What was fixed**: 2 new tests passing in CalciteBinCommandIT (37→39)
+  - **Bin aligntime parameter**: Implemented `resolveAligntimeOffset()` that resolves the SpanBin's aligntime parameter to an offset in seconds. For epoch numeric values (e.g., 1500000000), computes `epochSeconds % totalSpanSeconds` (e.g., 1500000000 % 7200 = 2400 seconds = 40 minutes). For time modifiers (e.g., `@d+3h`), parses the modifier to get offset seconds (3*3600 = 10800). Aligntime is ignored for day/month/year spans (only applies to sub-day spans). Modified `transpileSpanToSqlNode` to accept `alignOffset` parameter and apply it to the epoch-based floor calculation: `FLOOR((epoch_seconds - offset) / totalSeconds) * totalSeconds + offset`.
+  - **tsAdd() helper for TIMESTAMPADD**: Replaced `call("TIMESTAMPADD", identifier("SECOND"), ...)` with `tsAdd("SECOND", ...)` which uses `SqlStdOperatorTable.TIMESTAMP_ADD.createCall()` with proper `SqlIntervalQualifier`. The old pattern created a UDF call with quoted `"SECOND"` identifier. This fix applies to ALL multi-unit time spans, not just aligntime ones.
+- **Pass rate change**: 79.4% (1790/2255 est) → 79.5% (1792/2255 est) = +0.1pp, +2 tests
+- **Per-class results** (before → after):
+  - CalciteBinCommandIT: 37→39 pass (70 total, 4 fail, 27 skip) — +2 (testBinTimestampAligntimeEpoch, testBinTimestampAligntimeHour)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+- **Remaining 4 CalciteBinCommandIT failures**:
+  - testBinWithNestedFieldWithoutExplicitProjection: row count mismatch (5 vs 10) — bin on dotted field doesn't replace original field in output
+  - testBinWithEvalCreatedDottedFieldName: row count mismatch (6 vs 11) — same dotted field issue
+  - testBinWithNonExistentField: error message format mismatch
+  - testBinsOnTimeFieldWithPushdownDisabled_ShouldFail: error message format mismatch
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+70/-9: resolveAligntimeOffset, parseTimeModifierOffset, transpileSpanToSqlNode alignOffset, tsAdd fix)
+- **Learnings for future iterations:**
+  - Aligntime semantics: for epoch-based, offset = epochSeconds % totalSpanSeconds. For @d+Nh modifier, offset = N * seconds_per_unit. The offset shifts bin boundaries from standard epoch alignment.
+  - Aligntime is ignored for day/month/year spans — only applies to sub-day time units (seconds, minutes, hours).
+  - The tsAdd() helper (using SqlStdOperatorTable.TIMESTAMP_ADD.createCall()) is the correct way to generate TIMESTAMPADD in all contexts. The old `call("TIMESTAMPADD", identifier("SECOND"), ...)` pattern created a UDF call with quoted identifier that could break SQL parsing.
 ---
