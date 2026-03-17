@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 79.9% (1804/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
+- Current rate: 80.0% (1805/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -1816,4 +1816,32 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Subsearch maxout needs per-subquery handling: pendingSubsearchFetch applied in visitRelation for the first table scan. Join maxout applied to the right side via applyFetchToAliasedNode.
   - PPL_SYNTAX_LEGACY_PREFERRED cluster setting affects top/rare useNull defaults. Must be passed through to the V4 parse() method via custom Settings.
   - ThreadLocal is the correct pattern for passing settings from static withSettings() to instance transpileV4() in PPLIntegTestCase.
+---
+
+## 2026-03-17T20:16 - V4-012 (Iteration 48): Join alias mapping for multi-join without explicit aliases
+- **What was fixed**: 1 new test passing in CalcitePPLJoinIT (33→34)
+  - **Join alias mapping for table names**: In `visitJoin()`, when wrapping the left side as a subquery with a generated alias (`_tN`) and no explicit left alias is provided, the original table name was not mapped to the generated alias. This caused ON-clause references like `state_country.name` to remain as-is instead of being rewritten to `_t1.name`. Fixed by extracting the original table name via `extractTableNameFromPipe(pipe)` (with `extractRelation(node.getLeft())` fallback) and adding `aliasMapping.put(origTable, genAlias)` before wrapping.
+- **Pass rate change**: 79.9% (1804/2255 est) → 80.0% (1805/2255 est) = +0.1pp, +1 test
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 33→34 pass (39 total, 5 fail) — +1 (testMultipleJoinsWithoutTableAliases)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLBasicIT: 37/42 (no regression) ✅
+  - CalcitePPLLookupIT: 16/17 (no regression) ✅
+  - CalcitePPLInSubqueryIT: 18/18 ALL PASS (no regression) ✅
+  - CalcitePPLScalarSubqueryIT: 13/14 (no regression) ✅
+- **Remaining 5 CalcitePPLJoinIT failures**:
+  - testMultipleJoins, testMultipleJoinsWithRelationSubquery: SELECT "b".* references out-of-scope alias after semi-join→EXISTS transformation. Architectural issue with how semi-joins are rendered.
+  - testSimpleSortPushDownForSMJ, testComplexSortPushDownForSMJ: Engine-level "Failed to plan query" — self-join column dedup wraps join in SELECT which hides aliases from downstream fields command. Server log shows "Table 'a' not found".
+  - testInnerJoinWithRelationSubquery: Row ordering — stats GROUP BY returns results in non-deterministic order, test uses verifyDataRowsInOrder. Not converter-fixable without adding implicit ORDER BY (semantic change).
+- **Triage of remaining converter-fixable failures across all classes**:
+  - ~18-21 converter-fixable failures remain across all classes (JoinIT 6, MultisearchIT 3-4, SearchCommandIT 4, ExistsSubqueryIT 2-3, WhereCommandIT 1, BasicIT 1, AppendCommandIT 1)
+  - ~72-75 engine-blocked failures (DateTimeFunctionIT 18, EventstatsIT 2, BuiltinFunctionsNullIT 7, BuiltinFunctionIT 8, CastFunctionIT 10, etc.)
+  - ~110 DEFERRED failures (V4-026/V4-027/V4-028 — search UDFs, graph lookup TVF, relevance functions)
+  - Reaching 85% (1917/2255) requires ~112 more tests. With only ~18-21 converter-fixable, the remaining ~91-94 gap requires engine-level fixes or DEFERRED story resolution.
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+9 lines)
+- **Learnings for future iterations:**
+  - When wrapping the left side of a join as a subquery with a generated alias, the original table name must be added to aliasMapping so ON-clause references get rewritten. Without this, table-qualified references in the ON condition use the original table name which is no longer in scope.
+  - extractTableNameFromPipe() extracts the table name from the pipe's FROM clause (handles SELECT * FROM "tableName" patterns). extractRelation() traverses the AST to find the base Relation node as fallback.
+  - The remaining JoinIT failures are split between architectural issues (semi-join rendering, self-join column dedup hiding aliases) and engine-level planning failures. These require deeper refactoring of the join visitor, not simple alias fixes.
 ---
