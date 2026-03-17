@@ -477,7 +477,7 @@ public class PPLBuiltinOperators extends ReflectiveSqlOperatorTable {
   public static final SqlAggFunction VALUES =
       createUserDefinedAggFunction(
           ValuesAggFunction.class,
-          "PPL_VALUES",
+          "VALUES",
           PPLReturnTypes.STRING_ARRAY,
           PPLOperandTypes.ANY_SCALAR_OPTIONAL_INTEGER);
 

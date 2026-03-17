@@ -32,6 +32,7 @@ import org.apache.calcite.sql.SqlJoin;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
+import org.apache.calcite.sql.SqlNumericLiteral;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSelectKeyword;
@@ -1948,6 +1949,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       case "MONTH": return TimeUnit.MONTH;
       case "QUARTER": return TimeUnit.QUARTER;
       case "YEAR": return TimeUnit.YEAR;
+      case "MICROSECOND": return TimeUnit.MICROSECOND;
       default: return TimeUnit.SECOND;
     }
   }
@@ -2816,10 +2818,35 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     // from_unixtime
     if ("from_unixtime".equals(name)) {
+      // Try to extract numeric literal for transpile-time computation (avoids overflow & TZ issues)
+      java.math.BigDecimal numVal = extractNumericLiteral(args.get(0));
+      if (numVal != null) {
+        long wholeSec = numVal.longValue();
+        long microsFrac = numVal.subtract(java.math.BigDecimal.valueOf(wholeSec))
+            .multiply(java.math.BigDecimal.valueOf(1_000_000)).longValue();
+        java.time.LocalDateTime ldt = java.time.LocalDateTime.ofInstant(
+            java.time.Instant.ofEpochSecond(wholeSec, microsFrac * 1000), ZoneOffset.UTC);
+        String tsStr = microsFrac > 0
+            ? ldt.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SS"))
+            : ldt.format(TS_FMT);
+        SqlDataTypeSpec tsType = microsFrac > 0
+            ? new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS), POS)
+            : typeSpec(SqlTypeName.TIMESTAMP);
+        if (args.size() >= 2 && args.get(1) instanceof SqlCharStringLiteral) {
+          String fmt = ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue();
+          return buildDateFormatExpr(cast(literal(tsStr), tsType), fmt, false, null);
+        }
+        return cast(literal(tsStr), tsType);
+      }
+      // Non-literal: two-step to avoid MICROSECOND overflow
       SqlNode epoch = cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP));
-      SqlNode result = call("TIMESTAMPADD", identifier("SECOND"), cast(args.get(0), typeSpec(SqlTypeName.INTEGER)), epoch);
-      if (args.size() >= 2) {
-        return cast(result, typeSpec(SqlTypeName.VARCHAR));
+      SqlNode floorArg = cast(call("FLOOR", args.get(0)), typeSpec(SqlTypeName.INTEGER));
+      SqlNode step1 = tsAdd("SECOND", floorArg, epoch);
+      SqlNode fracMicros = cast(times(minus(args.get(0), call("FLOOR", args.get(0))), literal(1000000)), typeSpec(SqlTypeName.INTEGER));
+      SqlNode result = tsAdd("MICROSECOND", fracMicros, step1);
+      if (args.size() >= 2 && args.get(1) instanceof SqlCharStringLiteral) {
+        String fmt = ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue();
+        return buildDateFormatExpr(result, fmt, false, null);
       }
       return cast(result, typeSpec(SqlTypeName.TIMESTAMP));
     }
@@ -2962,11 +2989,23 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           cast(args.get(0), typeSpec(SqlTypeName.VARCHAR)));
     }
     // str_to_date
-    if ("str_to_date".equals(name))
+    if ("str_to_date".equals(name)) {
+      if (args.get(0) instanceof SqlCharStringLiteral && args.get(1) instanceof SqlCharStringLiteral) {
+        String input = ((SqlCharStringLiteral) args.get(0)).getNlsString().getValue();
+        String fmt = ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue();
+        String javaPattern = mysqlFormatToJavaPattern(fmt);
+        java.time.format.DateTimeFormatter dtf = new java.time.format.DateTimeFormatterBuilder()
+            .parseCaseInsensitive().appendPattern(javaPattern).toFormatter(java.util.Locale.ENGLISH);
+        java.time.temporal.TemporalAccessor ta = dtf.parse(input);
+        java.time.LocalDateTime ldt = java.time.LocalDate.from(ta).atStartOfDay();
+        try { ldt = java.time.LocalDateTime.from(ta); } catch (java.time.DateTimeException ignored) {}
+        return cast(literal(ldt.format(TS_FMT)), typeSpec(SqlTypeName.TIMESTAMP));
+      }
       return caseWhen(
           List.of(isNull(args.get(0))),
           List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP))),
           cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP)));
+    }
     // period_add / period_diff
     if ("period_add".equals(name)) {
       SqlNode p = args.get(0);
@@ -3494,6 +3533,20 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return null;
   }
 
+  /** Extract a numeric literal value from a SqlNode (raw numeric literal or CAST(numeric AS type)). */
+  private static java.math.BigDecimal extractNumericLiteral(SqlNode node) {
+    if (node instanceof SqlNumericLiteral) {
+      return ((SqlNumericLiteral) node).getValueAs(java.math.BigDecimal.class);
+    }
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall c = (SqlBasicCall) node;
+      if (c.getOperator() == SqlStdOperatorTable.CAST && c.operand(0) instanceof SqlNumericLiteral) {
+        return ((SqlNumericLiteral) c.operand(0)).getValueAs(java.math.BigDecimal.class);
+      }
+    }
+    return null;
+  }
+
   /** Compute MySQL-compatible week number for a given date and mode. */
   private static int computeMySQLWeek(java.time.LocalDate d, int mode) {
     int doy = d.getDayOfYear();
@@ -3518,6 +3571,35 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return computeMySQLWeek(dec31, mode - 2);
     }
     return weekNum;
+  }
+
+  /** Convert MySQL date format specifiers to Java DateTimeFormatter pattern. */
+  private static String mysqlFormatToJavaPattern(String mysqlFmt) {
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < mysqlFmt.length(); i++) {
+      if (mysqlFmt.charAt(i) == '%' && i + 1 < mysqlFmt.length()) {
+        char c = mysqlFmt.charAt(++i);
+        switch (c) {
+          case 'Y': sb.append("yyyy"); break; case 'y': sb.append("yy"); break;
+          case 'm': sb.append("M"); break;    case 'c': sb.append("M"); break;
+          case 'd': sb.append("d"); break;    case 'e': sb.append("d"); break;
+          case 'H': sb.append("H"); break;    case 'k': sb.append("H"); break;
+          case 'h': sb.append("h"); break;    case 'l': sb.append("h"); break;
+          case 'i': sb.append("m"); break;
+          case 's': case 'S': sb.append("s"); break;
+          case 'p': sb.append("a"); break;    case 'f': sb.append("SSSSSS"); break;
+          case 'b': sb.append("MMM"); break;  case 'M': sb.append("MMMM"); break;
+          case 'a': sb.append("EEE"); break;  case 'W': sb.append("EEEE"); break;
+          case 'T': sb.append("H:m:s"); break;
+          case 'r': sb.append("h:m:s a"); break;
+          case '%': sb.append('%'); break;
+          default: sb.append(c);
+        }
+      } else {
+        sb.append(mysqlFmt.charAt(i));
+      }
+    }
+    return sb.toString();
   }
 
   /** Like ensureTimestamp but converts TIME to TIMESTAMP using today's date (for date arithmetic). */
