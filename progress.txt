@@ -1740,3 +1740,35 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Aligntime is ignored for day/month/year spans — only applies to sub-day time units (seconds, minutes, hours).
   - The tsAdd() helper (using SqlStdOperatorTable.TIMESTAMP_ADD.createCall()) is the correct way to generate TIMESTAMPADD in all contexts. The old `call("TIMESTAMPADD", identifier("SECOND"), ...)` pattern created a UDF call with quoted identifier that could break SQL parsing.
 ---
+
+## 2026-03-17T16:50 - V4-012 (Iteration 46): Implement appendcol command
+- **What was fixed**: 3 new tests passing across 2 test classes
+  - **visitAppendCol**: Implemented in DynamicPPLToSqlNodeConverter using ROW_NUMBER-based FULL JOIN pattern:
+    1. Extract ORDER BY from main pipe (SqlOrderBy) for ROW_NUMBER window ordering
+    2. Wrap main with `ROW_NUMBER() OVER(ORDER BY ...)` preserving sort order
+    3. Convert subsearch independently via `convertSubPipeline()` with fresh table scan (`SELECT * FROM tableName`) since subsearch AST has no source relation
+    4. Extract ORDER BY from subsearch result for its ROW_NUMBER window
+    5. Wrap subsearch with `ROW_NUMBER() OVER(ORDER BY ...)`
+    6. FULL JOIN on `_row_number_main_ = _row_number_subsearch_`
+    7. Override=false: project main columns + non-duplicate subsearch columns
+    8. Override=true: CASE WHEN for duplicate columns (subsearch value when join matches, else main value)
+  - **Key discoveries during implementation**:
+    - `call("ROW_NUMBER")` creates SqlBasicFunction with ReturnTypes.ARG0_NULLABLE which NPEs on 0-arg functions. Must use `SqlStdOperatorTable.ROW_NUMBER` directly.
+    - `SqlBasicCall(SqlStdOperatorTable.CASE, ...)` throws ClassCastException — must use `caseWhen()` from SqlNodeDSL which creates proper `SqlCase` node.
+    - AppendCol subsearch has no source relation in AST — CalciteRelNodeVisitor uses `getRelation(node)` + `transformPlanToAttachChild()` to attach it. V4 converter uses `convertSubPipeline()` with fresh table scan instead.
+    - ROW_NUMBER() OVER() without ORDER BY produces arbitrary row numbering. Must extract ORDER BY from the pipe's SqlOrderBy and pass it to the window function.
+- **Pass rate change**: 79.5% (1792/2255 est) → 79.6% (1795/2255 est) = +0.1pp, +3 tests
+- **Per-class results** (before → after):
+  - CalcitePPLAppendcolIT: 0→2 pass (2 total, 0 fail) ✅ ALL PASS
+  - CalciteNewAddedCommandsIT: 20→21 pass (22 total, 1 fail: testMvExpandCommandLimitBoundary)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLJoinIT: 32/39 (no regression, same 7 pre-existing failures) ✅
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+99 lines: visitAppendCol, compoundId helper)
+- **Learnings for future iterations:**
+  - `call("ROW_NUMBER")` in SqlNodeDSL creates SqlBasicFunction with ReturnTypes.ARG0_NULLABLE. For 0-arg functions, ARG0 is null, causing NPE during toSqlString(). Always use SqlStdOperatorTable.ROW_NUMBER directly with `new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], POS)`.
+  - Calcite's CASE operator requires SqlCase node, not SqlBasicCall. Use `caseWhen()` from SqlNodeDSL.
+  - AppendCol subsearch in PPL AST has no source relation — the parser only captures pipe commands inside brackets. The source must be provided externally. CalciteRelNodeVisitor uses PlanUtils.getRelation() + transformPlanToAttachChild(). The V4 converter uses convertSubPipeline() with a fresh `SELECT * FROM tableName` as initial pipe.
+  - ROW_NUMBER() OVER() without ORDER BY produces non-deterministic row numbering. For appendcol, the ORDER BY from the main pipe's sort command must be extracted from the SqlOrderBy wrapper and passed to the ROW_NUMBER window.
+  - SqlOrderBy wraps SqlSelect — must unwrap to get the inner query for subquery wrapping, and separately extract the orderList for the ROW_NUMBER window.
+---
