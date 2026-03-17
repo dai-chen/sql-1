@@ -1705,9 +1705,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     // All bin types: subquery approach — materialize bin expression as a named column
     String tmpAlias = "_bin_" + fieldName.replaceAll("[^a-zA-Z0-9]", "_");
     pipe = select(star(), as(binSql, tmpAlias)).from(wrapAsSubquery()).build();
-    binReplacements.put(fieldName, identifier(tmpAlias));
-    if (!alias.equals(fieldName)) {
+    // When there's an explicit alias, only map the alias — keep original field intact
+    if (node.getAlias() != null && !alias.equals(fieldName)) {
       binReplacements.put(alias, identifier(tmpAlias));
+    } else {
+      binReplacements.put(fieldName, identifier(tmpAlias));
     }
     return pipe;
   }
@@ -1742,14 +1744,36 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   /** CountBin: nice-number width algorithm using inline SQL. */
   private SqlNode visitCountBin(CountBin countBin, SqlNode field) {
     int bins = countBin.getBins() != null ? countBin.getBins() : 10;
-    // width = POWER(10, CEIL(LOG10((MAX(f) OVER() - MIN(f) OVER()) / bins)))
-    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
-    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode dblField = cast(field, typeSpec(SqlTypeName.DOUBLE));
+    SqlNode minOver = window(min(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
     SqlNode dataRange = minus(maxOver, minOver);
-    SqlNode targetWidth = divide(dataRange, literal(bins));
-    SqlNode exponent = call("CEIL", call("LOG10", targetWidth));
-    SqlNode width = call("POWER", literal(10.0), exponent);
-    SqlNode binStart = times(call("FLOOR", divide(field, width)), width);
+    // Guard: if range <= 0, use width=1
+    SqlNode safeRange = caseWhen(
+        List.of(gt(dataRange, literal(0))),
+        List.of(dataRange),
+        literal(1.0));
+    SqlNode targetWidth = divide(safeRange, literal(bins));
+    // Guard LOG10 argument: must be > 0
+    SqlNode safeTarget = caseWhen(
+        List.of(gt(targetWidth, literal(0))),
+        List.of(targetWidth),
+        literal(1.0));
+    SqlNode exponent = call("CEIL", call("LOG10", safeTarget));
+    SqlNode width1 = call("POWER", literal(10.0), exponent);
+    // Boundary check: if max falls on bin boundary, need extra bin
+    // Use FLOOR(max/width)*width == max instead of MOD to avoid DECIMAL overflow
+    SqlNode maxOnBoundary = caseWhen(
+        List.of(eq(times(call("FLOOR", divide(maxOver, width1)), width1), maxOver)),
+        List.of(literal(1.0)),
+        literal(0.0));
+    SqlNode actualBins = plus(call("CEIL", divide(safeRange, width1)), maxOnBoundary);
+    // If actualBins > requested bins, go to next magnitude
+    SqlNode width = caseWhen(
+        List.of(gt(actualBins, literal(bins))),
+        List.of(call("POWER", literal(10.0), plus(exponent, literal(1)))),
+        width1);
+    SqlNode binStart = times(call("FLOOR", divide(dblField, width)), width);
     SqlNode binEnd = plus(binStart, width);
     return formatBinRange(binStart, binEnd);
   }
@@ -1757,49 +1781,65 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   /** MinSpanBin: magnitude-based width with minimum span constraint. */
   private SqlNode visitMinSpanBin(MinSpanBin minSpanBin, SqlNode field) {
     SqlNode minspanVal = minSpanBin.getMinspan().accept(this, null);
-    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
-    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode dblField = cast(field, typeSpec(SqlTypeName.DOUBLE));
+    SqlNode minOver = window(min(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
     SqlNode dataRange = minus(maxOver, minOver);
-    // width = POWER(10, FLOOR(LOG10(dataRange)))
-    // then ensure width >= minspan using CASE WHEN
-    SqlNode magnitude = call("POWER", literal(10.0), call("FLOOR", call("LOG10", dataRange)));
+    SqlNode safeRange = caseWhen(
+        List.of(gt(dataRange, literal(0))),
+        List.of(dataRange),
+        literal(1.0));
+    SqlNode dblMinspan = cast(minspanVal, typeSpec(SqlTypeName.DOUBLE));
+    // minspanWidth = POWER(10, CEIL(LOG10(minspan)))
+    SqlNode minspanWidth = call("POWER", literal(10.0), call("CEIL", call("LOG10", dblMinspan)));
+    // defaultWidth = POWER(10, FLOOR(LOG10(dataRange)))
+    SqlNode defaultWidth = call("POWER", literal(10.0), call("FLOOR", call("LOG10", safeRange)));
+    // Use defaultWidth if >= minspan, else minspanWidth
     SqlNode width = caseWhen(
-        List.of(gte(magnitude, minspanVal)),
-        List.of(magnitude),
-        minspanVal);
-    SqlNode binStart = times(call("FLOOR", divide(field, width)), width);
+        List.of(gte(defaultWidth, dblMinspan)),
+        List.of(defaultWidth),
+        minspanWidth);
+    SqlNode binStart = times(call("FLOOR", divide(dblField, width)), width);
     SqlNode binEnd = plus(binStart, width);
     return formatBinRange(binStart, binEnd);
   }
 
   /** RangeBin: magnitude-based width with start/end range constraints. */
   private SqlNode visitRangeBin(RangeBin rangeBin, SqlNode field) {
-    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
-    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode dblField = cast(field, typeSpec(SqlTypeName.DOUBLE));
+    SqlNode minOver = window(min(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
     SqlNode effectiveMin = rangeBin.getStart() != null
-        ? rangeBin.getStart().accept(this, null) : minOver;
+        ? cast(rangeBin.getStart().accept(this, null), typeSpec(SqlTypeName.DOUBLE)) : minOver;
     SqlNode effectiveMax = rangeBin.getEnd() != null
-        ? rangeBin.getEnd().accept(this, null) : maxOver;
+        ? cast(rangeBin.getEnd().accept(this, null), typeSpec(SqlTypeName.DOUBLE)) : maxOver;
     SqlNode dataRange = minus(effectiveMax, effectiveMin);
-    SqlNode log10Range = call("LOG10", dataRange);
-    SqlNode magnitude = call("FLOOR", log10Range);
+    SqlNode safeRange = caseWhen(
+        List.of(gt(dataRange, literal(0))),
+        List.of(dataRange),
+        literal(1.0));
+    SqlNode magnitude = call("FLOOR", call("LOG10", safeRange));
     SqlNode width = call("POWER", literal(10.0), magnitude);
     SqlNode widthInt = call("FLOOR", width);
-    SqlNode binStart = times(call("FLOOR", divide(field, widthInt)), widthInt);
+    SqlNode binStart = times(call("FLOOR", divide(dblField, widthInt)), widthInt);
     SqlNode binEnd = plus(binStart, widthInt);
     return formatBinRange(binStart, binEnd);
   }
 
   /** DefaultBin: automatic magnitude-based binning. */
   private SqlNode visitDefaultBin(DefaultBin defaultBin, SqlNode field) {
-    SqlNode minOver = window(min(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
-    SqlNode maxOver = window(max(field), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode dblField = cast(field, typeSpec(SqlTypeName.DOUBLE));
+    SqlNode minOver = window(min(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
+    SqlNode maxOver = window(max(dblField), SqlNodeList.EMPTY, SqlNodeList.EMPTY);
     SqlNode dataRange = minus(maxOver, minOver);
-    SqlNode log10Range = call("LOG10", dataRange);
-    SqlNode magnitude = call("FLOOR", log10Range);
+    SqlNode safeRange = caseWhen(
+        List.of(gt(dataRange, literal(0))),
+        List.of(dataRange),
+        literal(1.0));
+    SqlNode magnitude = call("FLOOR", call("LOG10", safeRange));
     SqlNode width = call("POWER", literal(10.0), magnitude);
     SqlNode widthInt = call("FLOOR", width);
-    SqlNode binStart = times(call("FLOOR", divide(field, widthInt)), widthInt);
+    SqlNode binStart = times(call("FLOOR", divide(dblField, widthInt)), widthInt);
     SqlNode binEnd = plus(binStart, widthInt);
     return formatBinRange(binStart, binEnd);
   }
