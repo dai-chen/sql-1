@@ -1278,6 +1278,17 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
     DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter, knownAliases);
+    sub.subsearchMaxOut = this.subsearchMaxOut;
+    sub.joinSubsearchMaxOut = this.joinSubsearchMaxOut;
+    return sub.convert(plan);
+  }
+
+  @Override
+  protected SqlNode convertSubPlanWithMaxout(UnresolvedPlan plan, int maxout) {
+    DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter, knownAliases);
+    sub.subsearchMaxOut = this.subsearchMaxOut;
+    sub.joinSubsearchMaxOut = this.joinSubsearchMaxOut;
+    sub.pendingSubsearchFetch = maxout;
     return sub.convert(plan);
   }
 
@@ -1762,7 +1773,21 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     pipe = select(selectItems.toArray(new SqlNode[0])).from(joinNode).build();
 
     if (node.getLimit() != null) {
-      pipe = select(star()).from(wrapAsSubquery()).limit(intLiteral(node.getLimit())).build();
+      // Per-document limit: ROW_NUMBER() OVER (PARTITION BY non-expanded top-level cols)
+      List<SqlNode> partitionCols = new ArrayList<>();
+      for (String col : allCols) {
+        if (!col.equals(fieldName) && !col.contains(".")) {
+          partitionCols.add(identifier(col));
+        }
+      }
+      SqlNodeList partBy = partitionCols.isEmpty() ? SqlNodeList.EMPTY
+          : new SqlNodeList(partitionCols, SqlParserPos.ZERO);
+      SqlNode rn = as(
+          window(new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], SqlParserPos.ZERO),
+              partBy, SqlNodeList.EMPTY), "_rn");
+      pipe = select(star(), rn).from(wrapAsSubquery()).build();
+      pipe = select(star()).from(wrapAsSubquery())
+          .where(lte(identifier("_rn"), intLiteral(node.getLimit()))).build();
     }
     return pipe;
   }

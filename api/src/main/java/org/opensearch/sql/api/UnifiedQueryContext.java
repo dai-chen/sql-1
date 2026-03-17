@@ -302,6 +302,7 @@ public class UnifiedQueryContext implements AutoCloseable {
                   SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
                       pplFirst, pplLast, percentileApprox, percentileApproxUpper, take,
                       list, values, PPLBuiltinOperators.SHA2, PPLBuiltinOperators.MVFIND, PPLBuiltinOperators.MVFIND_UPPER,
+                      PPLToSqlNodeConverter.MVAPPEND_WRAPPED,
                       wrapJsonUdf(PPLBuiltinOperators.JSON),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_ARRAY_LENGTH),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_EXTRACT),

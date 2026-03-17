@@ -62,6 +62,15 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   /** Tracks the current query size limit for V4 path (null = default/unset). */
   private Integer v4QuerySizeLimit;
 
+  /** Tracks the current subsearch maxout for V4 path. */
+  private Integer v4SubsearchMaxOut;
+
+  /** Tracks the current join subsearch maxout for V4 path. */
+  private Integer v4JoinSubsearchMaxOut;
+
+  /** Thread-local for static withSettings to communicate legacy preference to instance transpileV4. */
+  private static final ThreadLocal<Boolean> V4_LEGACY_PREFERRED_OVERRIDE = new ThreadLocal<>();
+
   private static final Settings V4_SETTINGS =
       new Settings() {
         @SuppressWarnings("unchecked")
@@ -106,8 +115,27 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   }
 
   private String transpileV4(String ppl) {
-    UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl);
+    Boolean legacyOverride = V4_LEGACY_PREFERRED_OVERRIDE.get();
+    Settings parseSettings = null;
+    if (legacyOverride != null) {
+      parseSettings = new Settings() {
+        @SuppressWarnings("unchecked")
+        @Override
+        public <T> T getSettingValue(Key key) {
+          if (key == Key.PPL_SYNTAX_LEGACY_PREFERRED) return (T) legacyOverride;
+          return PPLToSqlNodeConverter.getDefaultSettings().getSettingValue(key);
+        }
+        @Override
+        public java.util.List<?> getSettings() { return java.util.Collections.emptyList(); }
+      };
+    }
+    UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl, parseSettings);
     DynamicPPLToSqlNodeConverter converter = new DynamicPPLToSqlNodeConverter(getV4Schema());
+    if (v4SubsearchMaxOut != null || v4JoinSubsearchMaxOut != null) {
+      converter.setSubsearchMaxOut(
+          v4SubsearchMaxOut != null ? v4SubsearchMaxOut : -1,
+          v4JoinSubsearchMaxOut != null ? v4JoinSubsearchMaxOut : -1);
+    }
     SqlNode sqlNode = converter.convert(plan);
     String sql = sqlNode.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
     // CalciteSqlDialect doubles backslashes in string literals, but the SQL parser
@@ -807,11 +835,17 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
       try {
         updateClusterSettings(
             new SQLIntegTestCase.ClusterSetting("transient", setting.getKeyValue(), value));
+        if (V4_ENABLED && setting == Key.PPL_SYNTAX_LEGACY_PREFERRED) {
+          V4_LEGACY_PREFERRED_OVERRIDE.set(Boolean.parseBoolean(value));
+        }
         LOG.info("Set {} to {} and run the test", setting.name(), value);
         f.run();
       } finally {
         updateClusterSettings(
             new SQLIntegTestCase.ClusterSetting("transient", setting.getKeyValue(), originalValue));
+        if (V4_ENABLED && setting == Key.PPL_SYNTAX_LEGACY_PREFERRED) {
+          V4_LEGACY_PREFERRED_OVERRIDE.remove();
+        }
         LOG.info("Reset {} back to {}", setting.name(), originalValue);
       }
     }
@@ -886,6 +920,9 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     updateClusterSettings(
         new SQLIntegTestCase.ClusterSetting(
             "transient", Key.PPL_SUBSEARCH_MAXOUT.getKeyValue(), limit.toString()));
+    if (V4_ENABLED) {
+      v4SubsearchMaxOut = limit;
+    }
   }
 
   protected void resetSubsearchMaxOut() throws IOException {
@@ -894,12 +931,18 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
             "transient",
             Settings.Key.PPL_SUBSEARCH_MAXOUT.getKeyValue(),
             DEFAULT_SUBSEARCH_MAXOUT.toString()));
+    if (V4_ENABLED) {
+      v4SubsearchMaxOut = null;
+    }
   }
 
   protected void setJoinSubsearchMaxOut(Integer limit) throws IOException {
     updateClusterSettings(
         new SQLIntegTestCase.ClusterSetting(
             "transient", Key.PPL_JOIN_SUBSEARCH_MAXOUT.getKeyValue(), limit.toString()));
+    if (V4_ENABLED) {
+      v4JoinSubsearchMaxOut = limit;
+    }
   }
 
   protected void resetJoinSubsearchMaxOut() throws IOException {
@@ -908,6 +951,9 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
             "transient",
             Settings.Key.PPL_JOIN_SUBSEARCH_MAXOUT.getKeyValue(),
             DEFAULT_JOIN_SUBSEARCH_MAXOUT.toString()));
+    if (V4_ENABLED) {
+      v4JoinSubsearchMaxOut = null;
+    }
   }
 
   /**

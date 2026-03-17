@@ -143,6 +143,27 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   private static final SqlParserPos POS = SqlParserPos.ZERO;
 
+  /** Wrapped MVAPPEND UDF with variadic operand metadata for validator compatibility. */
+  static final org.apache.calcite.sql.SqlOperator MVAPPEND_WRAPPED;
+  static {
+    org.apache.calcite.sql.validate.SqlUserDefinedFunction orig =
+        (org.apache.calcite.sql.validate.SqlUserDefinedFunction) PPLBuiltinOperators.MVAPPEND;
+    org.apache.calcite.sql.type.SqlOperandMetadata variadicMeta = new org.apache.calcite.sql.type.SqlOperandMetadata() {
+      @Override public java.util.List<org.apache.calcite.rel.type.RelDataType> paramTypes(org.apache.calcite.rel.type.RelDataTypeFactory f) { return java.util.Collections.emptyList(); }
+      @Override public java.util.List<String> paramNames() { return java.util.Collections.emptyList(); }
+      @Override public boolean checkOperandTypes(org.apache.calcite.sql.SqlCallBinding b, boolean t) { return true; }
+      @Override public org.apache.calcite.sql.SqlOperandCountRange getOperandCountRange() { return OperandTypes.VARIADIC.getOperandCountRange(); }
+      @Override public String getAllowedSignatures(org.apache.calcite.sql.SqlOperator op, String name) { return name + "(...)"; }
+    };
+    MVAPPEND_WRAPPED = new org.apache.calcite.sql.validate.SqlUserDefinedFunction(
+        new SqlIdentifier(java.util.Collections.singletonList(orig.getName()), POS),
+        org.apache.calcite.sql.SqlKind.OTHER_FUNCTION,
+        orig.getReturnTypeInference(),
+        org.apache.calcite.sql.type.InferTypes.ANY_NULLABLE,
+        variadicMeta,
+        orig.getFunction());
+  }
+
   private static final Map<String, String> FUNC_MAP = new HashMap<>();
 
   static {
@@ -236,6 +257,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   /** When true, the next wrapAsSubquery() call is skipped (used after JOIN to preserve aliases). */
   protected boolean skipNextWrap = false;
 
+  /** Subsearch maxout limit for EXISTS/IN subqueries. 0 or negative means unlimited. */
+  protected int subsearchMaxOut = -1;
+
+  /** Join subsearch maxout limit. 0 or negative means unlimited. */
+  protected int joinSubsearchMaxOut = -1;
+
   public PPLToSqlNodeConverter() {
     this.aliasCounter = new AtomicInteger(0);
   }
@@ -247,6 +274,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   protected PPLToSqlNodeConverter(AtomicInteger sharedCounter, Set<String> outerKnownAliases) {
     this.aliasCounter = sharedCounter;
     this.knownAliases.addAll(outerKnownAliases);
+  }
+
+  /** Set subsearch maxout limits. 0 or negative means unlimited. */
+  public void setSubsearchMaxOut(int subsearchMaxOut, int joinSubsearchMaxOut) {
+    this.subsearchMaxOut = subsearchMaxOut;
+    this.joinSubsearchMaxOut = joinSubsearchMaxOut;
+  }
+
+  /** Get the default settings used for parsing. */
+  public static Settings getDefaultSettings() {
+    return DEFAULT_SETTINGS;
   }
 
   private static final Settings DEFAULT_SETTINGS =
@@ -287,9 +325,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   /** Parse PPL string to AST. */
   public static UnresolvedPlan parse(String ppl) {
+    return parse(ppl, DEFAULT_SETTINGS);
+  }
+
+  /** Parse PPL string to AST with custom settings. */
+  public static UnresolvedPlan parse(String ppl, Settings settings) {
     PPLSyntaxParser parser = new PPLSyntaxParser();
     ParseTree cst = parser.parse(ppl);
-    AstBuilder astBuilder = new AstBuilder(ppl, DEFAULT_SETTINGS);
+    AstBuilder astBuilder = new AstBuilder(ppl, settings != null ? settings : DEFAULT_SETTINGS);
     AstStatementBuilder stmtBuilder =
         new AstStatementBuilder(
             astBuilder, AstStatementBuilder.StatementBuilderContext.builder().build());
@@ -337,6 +380,32 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return result;
   }
 
+  /** Wrap a SqlNode with FETCH NEXT n ROWS ONLY. */
+  protected static SqlNode wrapWithFetch(SqlNode node, int limit) {
+    return new SqlOrderBy(SqlParserPos.ZERO, node, SqlNodeList.EMPTY, null,
+        SqlLiteral.createExactNumeric(String.valueOf(limit), SqlParserPos.ZERO));
+  }
+
+  /** Apply FETCH to an aliased node: unwrap AS(inner, alias), wrap inner with FETCH, re-alias. */
+  protected SqlNode applyFetchToAliasedNode(SqlNode node, int limit) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) node;
+      if ("AS".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
+        SqlNode inner = call.operand(0);
+        SqlNode alias = call.operand(1);
+        return new SqlBasicCall(call.getOperator(),
+            new SqlNode[]{wrapWithFetch(inner, limit), alias}, SqlParserPos.ZERO);
+      }
+    }
+    // Bare table identifier: wrap in SELECT * FROM table FETCH NEXT N, then alias
+    if (node instanceof SqlIdentifier) {
+      String tableName = ((SqlIdentifier) node).getSimple();
+      SqlNode fetched = wrapWithFetch(select(star()).from(node).build(), limit);
+      return subquery(fetched, nextAlias());
+    }
+    return wrapWithFetch(node, limit);
+  }
+
   // -- Pipe state: the current SqlNode being built up --
   protected SqlNode pipe;
 
@@ -344,6 +413,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   protected List<SqlNode> pendingOrderBy;
   protected SqlNode pendingFetch;
   protected SqlNode pendingOffset;
+
+  /** When > 0, apply FETCH NEXT N ROWS ONLY after the first Relation (subsearch maxout). */
+  protected int pendingSubsearchFetch = 0;
 
   // -- Bin alias tracking: maps original field name to bin expression alias --
   protected final Map<String, SqlNode> binReplacements = new HashMap<>();
@@ -414,6 +486,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     String tableName = node.getTableQualifiedName().toString();
     knownAliases.add(tableName);
     pipe = select(star()).from(table(tableName)).build();
+    if (pendingSubsearchFetch > 0) {
+      pipe = wrapWithFetch(pipe, pendingSubsearchFetch);
+      pendingSubsearchFetch = 0;
+    }
     return pipe;
   }
 
@@ -1189,6 +1265,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
     String rightAlias = node.getRightAlias().orElse(null);
     SqlNode rightSide = resolveJoinRight(node.getRight(), rightAlias);
+    // Apply join subsearch maxout to the right side (limits total rows from right table)
+    if (joinSubsearchMaxOut > 0) {
+      rightSide = applyFetchToAliasedNode(rightSide, joinSubsearchMaxOut);
+    }
     String effectiveRightAlias = rightAlias != null ? rightAlias : extractAlias(rightSide);
 
     if (effectiveLeftAlias != null) knownAliases.add(effectiveLeftAlias);
@@ -3170,17 +3250,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SqlNode end = args.get(2);
       return new SqlBasicCall(SqlLibraryOperators.ARRAY_SLICE, new SqlNode[]{arr, cast(plus(idx, intLiteral(1)), typeSpec(SqlTypeName.INTEGER)), cast(plus(minus(end, idx), intLiteral(1)), typeSpec(SqlTypeName.INTEGER))}, POS);
     }
-    // mvappend: single arg → ARRAY(arg), multiple → ARRAY_CONCAT(ensureArray(args)...) or ARRAY(args...)
+    // mvappend: use registered mvappend UDF for mixed-type support and null filtering
     if ("mvappend".equals(name)) {
-      if (args.size() == 1) return new SqlBasicCall(SqlLibraryOperators.ARRAY, new SqlNode[]{args.get(0)}, POS);
-      // If any arg is already an array-producing expression, use ARRAY_CONCAT with scalar args wrapped
-      boolean hasArrayExpr = args.stream().anyMatch(PPLToSqlNodeConverter::isArrayExpression);
-      if (hasArrayExpr) {
-        SqlNode[] wrapped = args.stream().map(PPLToSqlNodeConverter::ensureArrayArg).toArray(SqlNode[]::new);
-        return new SqlBasicCall(SqlLibraryOperators.ARRAY_CONCAT, wrapped, POS);
-      }
-      // All args are scalars/identifiers — use ARRAY() to create array from all values
-      return new SqlBasicCall(SqlLibraryOperators.ARRAY, args.toArray(new SqlNode[0]), POS);
+      return new SqlBasicCall(MVAPPEND_WRAPPED, args.toArray(new SqlNode[0]), POS);
     }
     // mvzip: map to ARRAYS_ZIP
     if ("mvzip".equals(name)) {
@@ -3481,7 +3553,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   private static SqlNode ensureArrayArg(SqlNode node) {
     if (node instanceof SqlIdentifier) return node;
     if (isArrayExpression(node)) return node;
-    return new SqlBasicCall(SqlLibraryOperators.ARRAY, new SqlNode[]{node}, POS);
+    SqlNode arg = node instanceof SqlCharStringLiteral ? cast(node, typeSpec(SqlTypeName.VARCHAR)) : node;
+    return new SqlBasicCall(SqlLibraryOperators.ARRAY, new SqlNode[]{arg}, POS);
   }
 
   /** Check if a SqlNode is known to produce an array value. */
@@ -3490,7 +3563,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       String op = ((SqlBasicCall) node).getOperator().getName();
       return "ARRAY".equals(op) || "ARRAY_CONCAT".equals(op) || "ARRAY_COMPACT".equals(op)
           || "ARRAY_DISTINCT".equals(op) || "SORT_ARRAY".equals(op) || "SPLIT".equals(op)
-          || "ARRAYS_ZIP".equals(op) || "ARRAY_SLICE".equals(op);
+          || "ARRAYS_ZIP".equals(op) || "ARRAY_SLICE".equals(op)
+          || "mvappend".equalsIgnoreCase(op);
     }
     return false;
   }
@@ -3810,7 +3884,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitInSubquery(InSubquery node, Void ctx) {
-    SqlNode sub = convertSubPlan(node.getQuery());
+    SqlNode sub = subsearchMaxOut > 0
+        ? convertSubPlanWithMaxout(node.getQuery(), subsearchMaxOut)
+        : convertSubPlan(node.getQuery());
     List<UnresolvedExpression> values = node.getValue();
     // Validate column count match
     int subCols = countSelectColumns(sub);
@@ -3835,7 +3911,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitExistsSubquery(ExistsSubquery node, Void ctx) {
-    return exists(convertSubPlan(node.getQuery()));
+    SqlNode sub = subsearchMaxOut > 0
+        ? convertSubPlanWithMaxout(node.getQuery(), subsearchMaxOut)
+        : convertSubPlan(node.getQuery());
+    return exists(sub);
   }
 
   @Override
@@ -4286,6 +4365,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
     PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter(aliasCounter, knownAliases);
+    sub.subsearchMaxOut = this.subsearchMaxOut;
+    sub.joinSubsearchMaxOut = this.joinSubsearchMaxOut;
+    return sub.convert(plan);
+  }
+
+  /** Convert a sub-plan with a maxout limit applied to the base table scan. */
+  protected SqlNode convertSubPlanWithMaxout(UnresolvedPlan plan, int maxout) {
+    PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter(aliasCounter, knownAliases);
+    sub.subsearchMaxOut = this.subsearchMaxOut;
+    sub.joinSubsearchMaxOut = this.joinSubsearchMaxOut;
+    sub.pendingSubsearchFetch = maxout;
     return sub.convert(plan);
   }
 
