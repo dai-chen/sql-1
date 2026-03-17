@@ -5,16 +5,21 @@
 
 package org.opensearch.sql.executor;
 
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.opensearch.analytics.exec.QueryPlanExecutor;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.common.response.ResponseListener;
+import org.opensearch.sql.data.model.ExprTupleValue;
+import org.opensearch.sql.data.model.ExprValue;
+import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.executor.pagination.Cursor;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 
@@ -55,9 +60,10 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
       RelNode plan, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
     try {
       Iterable<Object[]> results = planExecutor.execute(plan, context);
+      List<RelDataTypeField> fields = plan.getRowType().getFieldList();
 
       List<Schema.Column> columns =
-          plan.getRowType().getFieldList().stream()
+          fields.stream()
               .map(
                   f ->
                       new Schema.Column(
@@ -65,9 +71,17 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
                           null,
                           OpenSearchTypeFactory.convertRelDataTypeToExprType(f.getType())))
               .toList();
-      // TODO: convert Iterable<Object[]> results to List<ExprValue>
-      listener.onResponse(
-          new QueryResponse(new Schema(columns), Collections.emptyList(), Cursor.None));
+
+      List<ExprValue> rows = new ArrayList<>();
+      for (Object[] row : results) {
+        LinkedHashMap<String, ExprValue> valueMap = new LinkedHashMap<>();
+        for (int i = 0; i < fields.size(); i++) {
+          valueMap.put(fields.get(i).getName(), ExprValueUtils.fromObjectValue(row[i]));
+        }
+        rows.add(ExprTupleValue.fromExprValueMap(valueMap));
+      }
+
+      listener.onResponse(new QueryResponse(new Schema(columns), rows, Cursor.None));
     } catch (Exception e) {
       listener.onFailure(e);
     }
