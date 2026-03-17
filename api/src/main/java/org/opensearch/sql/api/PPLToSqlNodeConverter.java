@@ -2115,23 +2115,58 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   /**
    * Build week number expression for given mode.
-   * Mode 0,2: Sunday-based (DAYOFWEEK: 1=Sun). Mode 1,3: Monday-based.
-   * Mode 0,1: range 0-53. Mode 2,3: range 1-53.
+   * Mode 0: Sunday-based, range 0-53, first week starts on first Sunday.
+   * Mode 1: Monday-based, range 0-53, first week has 4+ days in year.
+   * Mode 2: Sunday-based, range 1-53, first partial week = last week of prev year.
+   * Mode 3: Monday-based, range 1-53, first week has 4+ days (ISO week).
    */
   private SqlNode buildWeekExpr(SqlNode d, int mode) {
     SqlNode doy = cast(call("DAYOFYEAR", d), typeSpec(SqlTypeName.INTEGER));
     SqlNode dow = cast(call("DAYOFWEEK", d), typeSpec(SqlTypeName.INTEGER));
-    boolean sundayBased = (mode % 2 == 0); // modes 0,2,4,6 = Sunday; 1,3,5,7 = Monday
-    SqlNode adjDow;
-    if (sundayBased) {
-      adjDow = dow; // 1=Sunday..7=Saturday
-    } else {
-      // Convert to 1=Monday..7=Sunday: ((dow + 5) % 7) + 1
-      adjDow = plus(call("MOD", plus(dow, intLiteral(5)), intLiteral(7)), intLiteral(1));
+    boolean sundayBased = (mode % 2 == 0);
+    boolean fourDayRule = (mode == 1 || mode == 3 || mode == 5 || mode == 7);
+
+    if (!fourDayRule) {
+      // Modes 0, 2, 4, 6: simple formula FLOOR((doy - adjDow + 7) / 7)
+      SqlNode adjDow = sundayBased ? dow
+          : plus(mod(plus(dow, intLiteral(5)), intLiteral(7)), intLiteral(1));
+      SqlNode weekNum = cast(call("FLOOR", divide(
+          cast(plus(minus(doy, adjDow), intLiteral(7)), typeSpec(SqlTypeName.DOUBLE)),
+          intLiteral(7))), typeSpec(SqlTypeName.INTEGER));
+      if (mode == 2 || mode == 6) {
+        // Range 1-53: if week=0, compute last week of previous year
+        // Dec 31 of prev year = d - DAYOFYEAR(d) days
+        SqlNode dec31 = tsAdd("DAY", new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{doy}, POS), d);
+        SqlNode dec31Doy = cast(call("DAYOFYEAR", dec31), typeSpec(SqlTypeName.INTEGER));
+        SqlNode dec31Dow = cast(call("DAYOFWEEK", dec31), typeSpec(SqlTypeName.INTEGER));
+        SqlNode dec31AdjDow = sundayBased ? dec31Dow
+            : plus(mod(plus(dec31Dow, intLiteral(5)), intLiteral(7)), intLiteral(1));
+        SqlNode prevYearLastWeek = cast(call("FLOOR", divide(
+            cast(plus(minus(dec31Doy, dec31AdjDow), intLiteral(7)), typeSpec(SqlTypeName.DOUBLE)),
+            intLiteral(7))), typeSpec(SqlTypeName.INTEGER));
+        return caseWhen(
+            List.of(eq(weekNum, intLiteral(0))),
+            List.of(prevYearLastWeek),
+            weekNum);
+      }
+      return weekNum;
     }
-    return cast(call("FLOOR", divide(
-        cast(plus(minus(doy, adjDow), intLiteral(7)), typeSpec(SqlTypeName.DOUBLE)),
+
+    // Modes 1, 3, 5, 7: Monday-based, 4+ days rule
+    // Modes 1, 3, 5, 7: Monday-based, 4+ days rule
+    // Compute Monday-based mode 0 first: FLOOR((doy - adjDowMon + 7) / 7)
+    SqlNode adjDowMon = plus(mod(plus(dow, intLiteral(5)), intLiteral(7)), intLiteral(1));
+    SqlNode weekMode0Mon = cast(call("FLOOR", divide(
+        cast(plus(minus(doy, adjDowMon), intLiteral(7)), typeSpec(SqlTypeName.DOUBLE)),
         intLiteral(7))), typeSpec(SqlTypeName.INTEGER));
+    // jan1_dow_mon (Mon=0..Sun=6) = (adjDowMon - 1 - (doy - 1) % 7 + 7) % 7
+    SqlNode jan1DowMon = mod(plus(minus(minus(adjDowMon, intLiteral(1)), mod(minus(doy, intLiteral(1)), intLiteral(7))), intLiteral(7)), intLiteral(7));
+    // week_mode1 = weekMode0Mon + (jan1_dow_mon <= 3 ? 1 : 0)
+    SqlNode adjustment = caseWhen(
+        List.of(lte(jan1DowMon, intLiteral(3))),
+        List.of(intLiteral(1)),
+        intLiteral(0));
+    return cast(plus(weekMode0Mon, adjustment), typeSpec(SqlTypeName.INTEGER));
   }
 
   private static String getFieldName(UnresolvedExpression expr) {
@@ -2475,6 +2510,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (rawArgs.size() >= 2 && rawArgs.get(1) instanceof org.opensearch.sql.ast.expression.Literal) {
         mode = ((Number) ((org.opensearch.sql.ast.expression.Literal) rawArgs.get(1)).getValue()).intValue();
       }
+      // For complex modes (1-7), try to compute at Java compile time if input is a literal
+      if (mode != 0) {
+        String dateStr = extractLiteralDateString(args.get(0));
+        if (dateStr != null) {
+          try {
+            java.time.LocalDate ld = java.time.LocalDate.parse(dateStr.length() > 10 ? dateStr.substring(0, 10) : dateStr);
+            int weekNum = computeMySQLWeek(ld, mode);
+            return intLiteral(weekNum);
+          } catch (Exception e) { /* fall through to SQL expression */ }
+        }
+      }
       return buildWeekExpr(d, mode);
     }
     // yearweek: YEAR*100 + WEEK
@@ -2484,6 +2530,16 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       List<UnresolvedExpression> rawArgs = node.getFuncArgs();
       if (rawArgs.size() >= 2 && rawArgs.get(1) instanceof org.opensearch.sql.ast.expression.Literal) {
         mode = ((Number) ((org.opensearch.sql.ast.expression.Literal) rawArgs.get(1)).getValue()).intValue();
+      }
+      // For complex modes, try to compute at Java compile time if input is a literal
+      String dateStr = extractLiteralDateString(args.get(0));
+      if (dateStr != null) {
+        try {
+          java.time.LocalDate ld = java.time.LocalDate.parse(dateStr.length() > 10 ? dateStr.substring(0, 10) : dateStr);
+          int weekNum = computeMySQLWeek(ld, mode);
+          int yearWeek = ld.getYear() * 100 + weekNum;
+          return intLiteral(yearWeek);
+        } catch (Exception e) { /* fall through to SQL expression */ }
       }
       SqlNode year = cast(call("YEAR", d), typeSpec(SqlTypeName.INTEGER));
       SqlNode week = buildWeekExpr(d, mode);
@@ -2517,11 +2573,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (intervalArg instanceof SqlBasicCall && ((SqlBasicCall) intervalArg).getOperator().getName().startsWith("INTERVAL_")) {
         String unit = ((SqlBasicCall) intervalArg).getOperator().getName().substring(9);
         SqlNode value = ((SqlBasicCall) intervalArg).operand(0);
-        return cast(call("TIMESTAMPADD", identifier(unit), value, ensureTimestamp(args.get(0))), typeSpec(SqlTypeName.TIMESTAMP));
+        return cast(tsAdd(unit, value, ensureTimestampForDateArith(args.get(0))), typeSpec(SqlTypeName.TIMESTAMP));
       }
-      // Plain days → preserve input type, but cast TIME to TIMESTAMP
-      SqlNode dateArg = isAlreadyCastToTime(args.get(0)) ? ensureTimestamp(args.get(0)) : args.get(0);
-      return call("TIMESTAMPADD", identifier("DAY"), intervalArg, dateArg);
+      // Plain days → preserve DATE type, cast TIME to TIMESTAMP
+      SqlNode dateArg = isAlreadyCastToTime(args.get(0)) ? ensureTimestampForDateArith(args.get(0)) : args.get(0);
+      return tsAdd("DAY", intervalArg, dateArg);
     }
     // date_sub / subdate
     if ("date_sub".equals(name) || "subdate".equals(name)) {
@@ -2529,11 +2585,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (intervalArg instanceof SqlBasicCall && ((SqlBasicCall) intervalArg).getOperator().getName().startsWith("INTERVAL_")) {
         String unit = ((SqlBasicCall) intervalArg).getOperator().getName().substring(9);
         SqlNode value = ((SqlBasicCall) intervalArg).operand(0);
-        return cast(call("TIMESTAMPADD", identifier(unit), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{value}, POS), ensureTimestamp(args.get(0))), typeSpec(SqlTypeName.TIMESTAMP));
+        return cast(tsAdd(unit, new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{value}, POS), ensureTimestampForDateArith(args.get(0))), typeSpec(SqlTypeName.TIMESTAMP));
       }
-      // Plain days → preserve input type, but cast TIME to TIMESTAMP
-      SqlNode dateArg = isAlreadyCastToTime(args.get(0)) ? ensureTimestamp(args.get(0)) : args.get(0);
-      return call("TIMESTAMPADD", identifier("DAY"), new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{intervalArg}, POS), dateArg);
+      // Plain days → preserve DATE type, cast TIME to TIMESTAMP
+      SqlNode dateArg = isAlreadyCastToTime(args.get(0)) ? ensureTimestampForDateArith(args.get(0)) : args.get(0);
+      return tsAdd("DAY", new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{intervalArg}, POS), dateArg);
     }
     // datediff
     if ("datediff".equals(name))
@@ -3261,6 +3317,60 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   private SqlNode ensureTimestamp(SqlNode node) {
     if (isAlreadyCastToTime(node)) return node;
     return cast(node, typeSpec(SqlTypeName.TIMESTAMP));
+  }
+
+  /** Extract a literal date string from a CAST('...' AS DATE/TIMESTAMP) SqlNode. Returns null if not a literal. */
+  private static String extractLiteralDateString(SqlNode node) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall c = (SqlBasicCall) node;
+      if (c.getOperator() == SqlStdOperatorTable.CAST && c.operandCount() == 2) {
+        SqlNode inner = c.operand(0);
+        if (inner instanceof SqlLiteral) {
+          String val = ((SqlLiteral) inner).toValue();
+          if (val != null) return val;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Compute MySQL-compatible week number for a given date and mode. */
+  private static int computeMySQLWeek(java.time.LocalDate d, int mode) {
+    int doy = d.getDayOfYear();
+    int dow = d.getDayOfWeek().getValue() % 7 + 1; // 1=Sun..7=Sat (MySQL convention)
+    boolean sundayBased = (mode % 2 == 0);
+    boolean fourDayRule = (mode == 1 || mode == 3 || mode == 5 || mode == 7);
+    boolean range1to53 = (mode == 2 || mode == 3 || mode == 6 || mode == 7);
+
+    int adjDow = sundayBased ? dow : (dow + 5) % 7 + 1;
+    int weekNum = (doy - adjDow + 7) / 7;
+
+    if (fourDayRule) {
+      int adjDowMon = (dow + 5) % 7 + 1; // Mon=1..Sun=7
+      int weekMode0Mon = (doy - adjDowMon + 7) / 7;
+      int jan1DowMon = ((adjDowMon - 1) - (doy - 1) % 7 + 7) % 7; // Mon=0..Sun=6
+      weekNum = weekMode0Mon + (jan1DowMon <= 3 ? 1 : 0);
+    }
+
+    if (range1to53 && weekNum == 0) {
+      // Compute last week of previous year
+      java.time.LocalDate dec31 = d.minusDays(doy);
+      return computeMySQLWeek(dec31, mode - 2);
+    }
+    return weekNum;
+  }
+
+  /** Like ensureTimestamp but converts TIME to TIMESTAMP using today's date (for date arithmetic). */
+  private SqlNode ensureTimestampForDateArith(SqlNode node) {
+    if (isAlreadyCastToTime(node)) return promoteTimeToTimestamp(node);
+    return cast(node, typeSpec(SqlTypeName.TIMESTAMP));
+  }
+
+  /** Build TIMESTAMPADD(unit, amount, ts) using Calcite's built-in operator with SqlIntervalQualifier. */
+  private SqlNode tsAdd(String unit, SqlNode amount, SqlNode ts) {
+    TimeUnit tu = mapTruncUnit(unit);
+    SqlIntervalQualifier qualifier = new SqlIntervalQualifier(tu, null, POS);
+    return SqlStdOperatorTable.TIMESTAMP_ADD.createCall(POS, qualifier, amount, ts);
   }
 
   /** CAST(EXTRACT(unit FROM arg) AS INTEGER) */
