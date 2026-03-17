@@ -237,6 +237,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     this.aliasCounter = sharedCounter;
   }
 
+  protected PPLToSqlNodeConverter(AtomicInteger sharedCounter, Set<String> outerKnownAliases) {
+    this.aliasCounter = sharedCounter;
+    this.knownAliases.addAll(outerKnownAliases);
+  }
+
   private static final Settings DEFAULT_SETTINGS =
       new Settings() {
         @SuppressWarnings("unchecked")
@@ -345,6 +350,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   // -- Alias mapping: SubqueryAlias name → effective join alias (for rewriting references) --
   protected final Map<String, String> aliasMapping = new HashMap<>();
 
+  // -- Pending SubqueryAlias: deferred until wrapAsSubquery maps it to the generated alias --
+  protected String pendingSubqueryAlias = null;
+
   private String nextAlias() {
     String alias = "_t" + aliasCounter.incrementAndGet();
     knownAliases.add(alias);
@@ -373,7 +381,17 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (pipe instanceof SqlJoin) {
       pipe = select(star()).from(pipe).build();
     }
-    return subquery(pipe, nextAlias());
+    // Use the pending SubqueryAlias name as the wrapper alias if available,
+    // so that alias.column references resolve correctly.
+    String alias;
+    if (pendingSubqueryAlias != null) {
+      alias = pendingSubqueryAlias;
+      knownAliases.add(alias);
+      pendingSubqueryAlias = null;
+    } else {
+      alias = nextAlias();
+    }
+    return subquery(pipe, alias);
   }
 
   /** Consume the skipNextWrap flag and return pipe directly (used by visitProject after JOIN). */
@@ -395,6 +413,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitSubqueryAlias(SubqueryAlias node, Void ctx) {
     knownAliases.add(node.getAlias());
+    // Store the alias for use as the wrapper alias name in wrapAsSubquery.
+    pendingSubqueryAlias = node.getAlias();
     return pipe;
   }
 
@@ -576,7 +596,21 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     // the WHERE is added to the join's SELECT and the flag is re-set
     // so downstream commands (fields, sort) can still see join aliases.
     boolean joinContext = skipNextWrap;
-    pipe = select(star()).from(wrapAsSubquery()).where(condition).build();
+    // For correlated subqueries or qualified column references (table.column),
+    // avoid wrapping a simple SELECT * FROM table so that the table name
+    // remains visible for correlation resolution.
+    if (isSimpleTableScan(pipe) && hasQualifiedOrSubqueryRefs(node.getCondition())) {
+      SqlNode tableFrom = ((SqlSelect) pipe).getFrom();
+      // If there's a pending SubqueryAlias, alias the table so that
+      // alias.column references resolve within this SELECT.
+      // Keep pendingSubqueryAlias set so wrapAsSubquery also uses it.
+      if (pendingSubqueryAlias != null) {
+        tableFrom = as(tableFrom, pendingSubqueryAlias);
+      }
+      pipe = select(star()).from(tableFrom).where(condition).build();
+    } else {
+      pipe = select(star()).from(wrapAsSubquery()).where(condition).build();
+    }
     if (joinContext) {
       skipNextWrap = true;
     }
@@ -1095,6 +1129,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         aliasMapping.put(leftSubqueryAlias, effectiveLeftAlias);
       }
     }
+    // Clear pending SubqueryAlias — the JOIN handles aliasing directly.
+    pendingSubqueryAlias = null;
 
     SqlNode condition = null;
     if (node.getJoinCondition().isPresent()) {
@@ -2648,12 +2684,44 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SqlNode totalSec = cast(new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{plus(plus(times(h, intLiteral(3600)), times(m, intLiteral(60))), s)}, POS), typeSpec(SqlTypeName.INTEGER));
       return call("TIMESTAMPADD", identifier("SECOND"), totalSec, ts);
     }
-    // convert_tz (simplified — timezone conversion not fully supported, pass through)
-    if ("convert_tz".equals(name))
-      return caseWhen(
-          List.of(isNull(args.get(0))),
-          List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP))),
-          cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP)));
+    // convert_tz: convert timestamp from one timezone offset to another
+    if ("convert_tz".equals(name)) {
+      SqlNode nullTs = cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
+      // Both timezone args must be string literals for compile-time evaluation
+      if (args.size() < 3
+          || !(args.get(1) instanceof SqlCharStringLiteral)
+          || !(args.get(2) instanceof SqlCharStringLiteral)) {
+        return nullTs;
+      }
+      // Validate timestamp string literal at compile time (invalid dates like Feb 30 → NULL)
+      if (args.get(0) instanceof SqlCharStringLiteral) {
+        String tsStr = ((SqlCharStringLiteral) args.get(0)).getNlsString().getValue();
+        try {
+          java.time.LocalDateTime.parse(tsStr, DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss")
+              .withResolverStyle(java.time.format.ResolverStyle.STRICT));
+        } catch (Exception e) {
+          return nullTs;
+        }
+      }
+      String fromTz = ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue();
+      String toTz = ((SqlCharStringLiteral) args.get(2)).getNlsString().getValue();
+      java.util.regex.Pattern tzPat = java.util.regex.Pattern.compile("^([+-])(\\d{2}):(\\d{2})$");
+      java.util.regex.Matcher mFrom = tzPat.matcher(fromTz);
+      java.util.regex.Matcher mTo = tzPat.matcher(toTz);
+      if (!mFrom.matches() || !mTo.matches()) return nullTs;
+      int fromMin = (Integer.parseInt(mFrom.group(2)) * 60 + Integer.parseInt(mFrom.group(3)))
+          * (mFrom.group(1).equals("-") ? -1 : 1);
+      int toMin = (Integer.parseInt(mTo.group(2)) * 60 + Integer.parseInt(mTo.group(3)))
+          * (mTo.group(1).equals("-") ? -1 : 1);
+      // MySQL valid range is ±13:00 (±780 minutes)
+      if (Math.abs(fromMin) > 780 || Math.abs(toMin) > 780) return nullTs;
+      int delta = toMin - fromMin;
+      SqlNode ts = cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      SqlNode result = delta == 0 ? ts
+          : cast(call("TIMESTAMPADD", identifier("MINUTE"), intLiteral(delta), ts), typeSpec(SqlTypeName.TIMESTAMP));
+      return caseWhen(List.of(isNull(args.get(0))),
+          List.of(nullTs), result);
+    }
     // date_format / time_format
     if ("date_format".equals(name) || "time_format".equals(name)) {
       SqlDataTypeSpec ts6 = new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS), POS);
@@ -3328,6 +3396,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   public SqlNode visitInSubquery(InSubquery node, Void ctx) {
     SqlNode sub = convertSubPlan(node.getQuery());
     List<UnresolvedExpression> values = node.getValue();
+    // Validate column count match
+    int subCols = countSelectColumns(sub);
+    if (subCols > 0 && subCols != values.size()) {
+      throw new org.opensearch.sql.exception.SemanticCheckException(
+          "The number of columns in the left hand side of an IN subquery does not match the number"
+              + " of columns in the output of subquery");
+    }
     if (values.size() == 1) {
       return inSub(values.get(0).accept(this, null), sub);
     }
@@ -3794,8 +3869,27 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   }
 
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
-    PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter(aliasCounter);
+    PPLToSqlNodeConverter sub = new PPLToSqlNodeConverter(aliasCounter, knownAliases);
     return sub.convert(plan);
+  }
+
+  /** Count the number of output columns in a SqlSelect (or SqlOrderBy wrapping one). Returns -1 if unknown. */
+  private static int countSelectColumns(SqlNode node) {
+    SqlNode target = node;
+    if (target instanceof org.apache.calcite.sql.SqlOrderBy) {
+      target = ((org.apache.calcite.sql.SqlOrderBy) target).query;
+    }
+    if (target instanceof SqlSelect) {
+      SqlNodeList selectList = ((SqlSelect) target).getSelectList();
+      if (selectList != null && selectList.size() > 0) {
+        // Check if it's SELECT * (single star means unknown column count)
+        if (selectList.size() == 1 && selectList.get(0).toString().equals("*")) {
+          return -1;
+        }
+        return selectList.size();
+      }
+    }
+    return -1;
   }
 
   /** Convert strftime first arg: if numeric or numeric string, convert to timestamp via TIMESTAMPADD.
@@ -4089,5 +4183,43 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     if (parts.isEmpty()) return literal("");
     return concatList(parts);
+  }
+
+  /** Check if the pipe is a simple SELECT * FROM table (no WHERE, GROUP BY, etc.). */
+  private static boolean isSimpleTableScan(SqlNode node) {
+    if (!(node instanceof SqlSelect)) return false;
+    SqlSelect sel = (SqlSelect) node;
+    return sel.getFrom() instanceof SqlIdentifier
+        && sel.getWhere() == null
+        && sel.getGroup() == null
+        && sel.getHaving() == null;
+  }
+
+  /** Check if an expression tree contains a subquery or qualified name (table.column) referencing a known alias. */
+  private boolean hasQualifiedOrSubqueryRefs(UnresolvedExpression expr) {
+    if (expr instanceof org.opensearch.sql.ast.expression.subquery.SubqueryExpression) return true;
+    if (expr instanceof QualifiedName) {
+      List<String> parts = ((QualifiedName) expr).getParts();
+      return parts.size() > 1 && knownAliases.contains(parts.get(0));
+    }
+    if (expr instanceof org.opensearch.sql.ast.expression.Not) {
+      return hasQualifiedOrSubqueryRefs(((org.opensearch.sql.ast.expression.Not) expr).getExpression());
+    }
+    if (expr instanceof org.opensearch.sql.ast.expression.And) {
+      return hasQualifiedOrSubqueryRefs(((org.opensearch.sql.ast.expression.And) expr).getLeft())
+          || hasQualifiedOrSubqueryRefs(((org.opensearch.sql.ast.expression.And) expr).getRight());
+    }
+    if (expr instanceof org.opensearch.sql.ast.expression.Or) {
+      return hasQualifiedOrSubqueryRefs(((org.opensearch.sql.ast.expression.Or) expr).getLeft())
+          || hasQualifiedOrSubqueryRefs(((org.opensearch.sql.ast.expression.Or) expr).getRight());
+    }
+    if (expr instanceof org.opensearch.sql.ast.expression.Compare) {
+      return hasQualifiedOrSubqueryRefs(((org.opensearch.sql.ast.expression.Compare) expr).getLeft())
+          || hasQualifiedOrSubqueryRefs(((org.opensearch.sql.ast.expression.Compare) expr).getRight());
+    }
+    if (expr instanceof Field) {
+      return hasQualifiedOrSubqueryRefs(((Field) expr).getField());
+    }
+    return false;
   }
 }

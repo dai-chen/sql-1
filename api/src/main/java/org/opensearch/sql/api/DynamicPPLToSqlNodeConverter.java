@@ -96,6 +96,11 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     this.defaultSchema = defaultSchema;
   }
 
+  private DynamicPPLToSqlNodeConverter(SchemaPlus defaultSchema, java.util.concurrent.atomic.AtomicInteger sharedCounter, java.util.Set<String> outerKnownAliases) {
+    super(sharedCounter, outerKnownAliases);
+    this.defaultSchema = defaultSchema;
+  }
+
   private List<String> resolveColumns(String tableName) {
     if (tableName == null) return Collections.emptyList();
     Table table = defaultSchema.getTable(tableName);
@@ -1271,7 +1276,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
   @Override
   protected SqlNode convertSubPlan(UnresolvedPlan plan) {
-    DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter);
+    DynamicPPLToSqlNodeConverter sub = new DynamicPPLToSqlNodeConverter(defaultSchema, aliasCounter, knownAliases);
     return sub.convert(plan);
   }
 
