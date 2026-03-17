@@ -1490,3 +1490,31 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - SELECT * in UNION ALL can expand to more columns than resolveColumns() returns (sub-fields like gender.keyword). Use explicit column lists for both sides of UNION ALL.
   - When predicting subquery aliases for join ON clauses, use aliasCounter.get()+1 to match the alias that wrapAsSubquery() will generate.
 ---
+
+## 2026-03-17T01:19 - V4-012 (Iteration 38): convert_tz implementation + subquery alias fixes
+- **What was fixed**: 16 new tests passing across 3 test classes
+  - **convert_tz proper implementation** (12 tests): Replaced stub pass-through with full timezone conversion — parse ±HH:MM offsets, validate ±13:00 MySQL range, compute delta minutes, use TIMESTAMPADD(MINUTE,delta,ts). Strict date validation via LocalDateTime.parse with STRICT resolver rejects invalid dates (e.g., Feb 30 → NULL). CASE WHEN NULL guard for null timestamp input.
+  - **Subquery knownAliases propagation** (2 tests): convertSubPlan now passes outer query's knownAliases set to sub-converters, enabling correlated subqueries to resolve table-qualified column references (e.g., t.id in EXISTS subquery).
+  - **IN subquery column count validation** (1 test): Added countSelectColumns helper that inspects SqlSelect output columns. Throws SemanticCheckException when LHS column count doesn't match subquery output, matching expected error message.
+  - **pendingSubqueryAlias for table alias** (1 test): 'source=table as alias' now stores alias name via pendingSubqueryAlias and uses it in wrapAsSubquery instead of auto-generated _tN. visitFilter detects correlated/qualified refs via hasQualifiedOrSubqueryRefs and aliases the table directly (avoiding unnecessary subquery wrapping).
+- **Pass rate change**: 77.3% (1741/2255 est) → 77.9% (1757/2255 est)
+- **Per-class results** (before → after):
+  - CalciteConvertTZFunctionIT: 2→14 pass (14 total, 0 fail) ✅ ALL PASS
+  - CalcitePPLExistsSubqueryIT: 15→17 pass (19 total, 2 fail)
+  - CalcitePPLInSubqueryIT: 14→16 pass (18 total, 2 fail)
+  - CalcitePPLScalarSubqueryIT: 13→13 pass (14 total, 1 fail) — no spillover
+  - CalcitePPLJoinIT: 32→32 pass (39 total, 7 fail) — no spillover
+- **Remaining failures**:
+  - CalcitePPLExistsSubqueryIT (2): Likely engine-level or complex correlated subquery patterns not yet handled
+  - CalcitePPLInSubqueryIT (2): Likely multi-value IN with complex expressions or engine-level issues
+  - CalcitePPLScalarSubqueryIT (1): Complex scalar subquery pattern not yet supported
+  - CalcitePPLJoinIT (7): Various join edge cases (cross join, complex multi-join, etc.)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+137 lines): convert_tz implementation, pendingSubqueryAlias mechanism, knownAliases propagation in convertSubPlan, countSelectColumns helper, isSimpleTableScan helper, hasQualifiedOrSubqueryRefs helper, visitFilter correlated subquery optimization, IN subquery column count validation
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+7 lines): New constructor accepting outerKnownAliases, convertSubPlan passes knownAliases to sub-converter
+- **Learnings for future iterations:**
+  - convert_tz requires strict date validation — MySQL returns NULL for invalid dates like 2024-02-30, so we must validate at converter time using Java's STRICT resolver.
+  - Subquery converters need the outer query's knownAliases to resolve correlated references. Without this, table.column references in EXISTS/IN subqueries fail with "table not found".
+  - pendingSubqueryAlias must be cleared in visitJoin since joins handle aliasing directly — otherwise the pending alias leaks into the join's subquery wrapping.
+  - No spillover was observed in ScalarSubqueryIT (13/14) or JoinIT (32/39) from the knownAliases/subquery fixes. The remaining failures in those classes are likely different root causes.
+---
