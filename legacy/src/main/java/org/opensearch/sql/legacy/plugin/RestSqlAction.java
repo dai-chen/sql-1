@@ -94,6 +94,7 @@ public class RestSqlAction extends BaseRestHandler {
     this.unifiedQueryHandler =
         new RestUnifiedQueryAction(
             injector.getInstance(ClusterService.class),
+            injector.getInstance(org.opensearch.transport.client.node.NodeClient.class),
             (plan, context) -> java.util.Collections.emptyList());
   }
 

@@ -48,11 +48,11 @@ public class RestPPLQueryAction extends BaseRestHandler {
   private static final Logger LOG = LogManager.getLogger();
 
   /** Constructor of RestPPLQueryAction. */
-  public RestPPLQueryAction(ClusterService clusterService) {
+  public RestPPLQueryAction(ClusterService clusterService, NodeClient client) {
     super();
     this.unifiedQueryHandler =
         new RestUnifiedQueryAction(
-            clusterService, (plan, context) -> java.util.Collections.emptyList());
+            clusterService, client, (plan, context) -> java.util.Collections.emptyList());
   }
 
   private static boolean isClientError(Exception e) {

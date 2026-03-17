@@ -162,7 +162,7 @@ public class SQLPlugin extends Plugin
     Metrics.getInstance().registerDefaultMetrics();
 
     return Arrays.asList(
-        new RestPPLQueryAction(clusterService),
+        new RestPPLQueryAction(clusterService, this.client),
         new RestSqlAction(settings, injector),
         new RestSqlStatsAction(settings, restController),
         new RestPPLStatsAction(settings, restController),

@@ -38,6 +38,8 @@ Currently `UnifiedQueryPlanner.plan()` does NOT apply these rules. The fix is to
 4. **Handoff**: Pass the optimized logical `RelNode` to the Analytics engine's `QueryPlanExecutor.execute()`
 5. **Response formatting**: Convert `Iterable<Object[]>` results from the Analytics engine into JDBC/CSV/RAW response using existing `JdbcResponseFormatter`
 6. **Error handling**: Catch exceptions from the Analytics engine (unsupported operations, execution failures) and return appropriate error responses
+7. **Observability**: Log planning and execution time; increment request/failure metrics (`REQ_TOTAL`, `REQ_COUNT_TOTAL`, `FAILED_REQ_COUNT_SYS`)
+8. **Thread management**: Schedule execution on `sql-worker` thread pool to avoid blocking transport threads
 
 ### Analytics Engine Plugin
 
