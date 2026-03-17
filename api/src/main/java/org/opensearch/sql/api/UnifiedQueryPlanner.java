@@ -5,8 +5,11 @@
 
 package org.opensearch.sql.api;
 
+import java.util.List;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.apache.calcite.adapter.enumerable.EnumerableConvention;
 import org.apache.calcite.config.Lex;
+import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
@@ -18,6 +21,8 @@ import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Planner;
+import org.apache.calcite.tools.Program;
+import org.apache.calcite.tools.Programs;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
@@ -77,6 +82,25 @@ public class UnifiedQueryPlanner {
       throw e;
     } catch (Exception e) {
       throw new IllegalStateException("Failed to plan query", e);
+    }
+  }
+
+  /**
+   * Optimizes a logical plan using the VolcanoPlanner with rules registered by the schema's table
+   * scan nodes. Adapter-specific pushdown rules (filter, project, aggregate) are applied here.
+   *
+   * @param logical the logical plan from {@link #plan(String)}
+   * @return an optimized plan with adapter-specific physical operators
+   */
+  public RelNode optimize(RelNode logical) {
+    try {
+      RelTraitSet targetTraits = logical.getCluster().traitSetOf(EnumerableConvention.INSTANCE);
+      Program program = Programs.standard();
+      // Create a fresh VolcanoPlanner to avoid state conflicts with the HepPlanner from plan()
+      return program.run(
+          logical.getCluster().getPlanner(), logical, targetTraits, List.of(), List.of());
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to optimize plan", e);
     }
   }
 

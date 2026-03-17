@@ -140,15 +140,20 @@ public class UnifiedQueryPlannerPplTest extends UnifiedQueryTestBase {
     assertStandardType(plan, "ts", SqlTypeName.TIMESTAMP);
   }
 
-  /** Asserts the named field in the RelNode output has the expected standard SqlTypeName and is NOT
-   * a UDT. */
+  /**
+   * Asserts the named field in the RelNode output has the expected standard SqlTypeName and is NOT
+   * a UDT.
+   */
   private void assertStandardType(RelNode plan, String fieldName, SqlTypeName expectedType) {
     assertNotNull("Plan should not be null", plan);
     RelDataTypeField field = findField(plan.getRowType(), fieldName);
     assertNotNull("Field '" + fieldName + "' should exist in output", field);
     RelDataType type = field.getType();
     assertFalse(
-        "Field '" + fieldName + "' should NOT be a UDT (got " + type.getClass().getSimpleName()
+        "Field '"
+            + fieldName
+            + "' should NOT be a UDT (got "
+            + type.getClass().getSimpleName()
             + ")",
         type instanceof AbstractExprRelDataType<?>);
     assertEquals(
