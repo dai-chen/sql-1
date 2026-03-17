@@ -125,23 +125,26 @@ From `analytics-engine` plugin (for reference/mock):
 
 **Done when**: Schema can be registered in a Calcite `FrameworkConfig` and used to plan queries. Unit tests validate type mapping and EngineCapabilities. Phase 3 ITs updated to use real schema and still pass.
 
-### Phase 5: Direct Guice Integration with Analytics Engine (B-2, B-3)
+### Phase 5: Plugin Extension and RelNode Handoff (B-2, B-3)
 
 **Investigation findings** (replaces original Phase 5 and 6):
-- The Analytics engine plugin (`AnalyticsPlugin`) uses `ExtensiblePlugin` for SPI discovery of back-end engines, NOT for transport actions. It registers NO transport actions.
+- The Analytics engine plugin (`AnalyticsPlugin`) uses `ExtensiblePlugin` for SPI discovery of back-end engines. It registers NO transport actions.
 - `QueryPlanExecutor<RelNode, Iterable<Object[]>>` and `EngineContext` are bound via `createGuiceModules()` into the **node-level Guice injector**.
-- The SQL plugin creates its **own private Guice injector** in `createComponents()`, completely isolated from the node-level injector. Direct `@Inject` across plugins does not work.
-- **RelNode serialization is unnecessary** — both plugins run in the same JVM, so the `RelNode` object can be passed directly in-process.
-- Calcite's `RelJsonWriter`/`RelJsonReader` CAN round-trip standard RelNode trees (all bugs fixed in 1.41.0), but custom PPL operators need operator table configuration. This remains a fallback option if cross-node execution is needed in the future.
+- The SQL plugin creates its **own private Guice injector** in `createComponents()`, isolated from the node-level injector. Direct `@Inject` across plugins does not work without plugin extension.
+- **Classloader isolation**: Each OpenSearch plugin gets its own `URLClassLoader`. Even though both plugins bundle `calcite-core:1.41.0`, the `RelNode` class is different in each classloader → `ClassCastException` if passed directly between unrelated plugins.
+- **Plugin extension solves both problems**: If the SQL plugin declares `extendedPlugins = ['analytics-engine']`, the Analytics engine's classloader becomes a parent of the SQL plugin's classloader. Both then share the same Calcite classes → RelNode can be passed directly, no serialization needed. The Guice bindings also become accessible.
+- **Serialization as fallback**: Calcite's `RelJsonWriter`/`RelJsonReader` (1.41.0) can round-trip standard RelNode trees. Custom PPL operators need operator table configuration on the reader side. This is the fallback if plugin extension is not feasible.
 
-**Integration approach**: The Analytics engine's `createComponents()` returns `DefaultPlanExecutor` and `DefaultEngineContext`, which are bound by concrete class in the node-level injector. Since the SQL plugin's REST handlers and transport actions are created manually (not by the node injector), the `QueryPlanExecutor` must be passed through the component chain explicitly — similar to how `ClusterService` is passed today.
+**Recommended production integration**:
+1. SQL plugin declares `extendedPlugins = ['analytics-engine']` in `plugin-descriptor.properties`
+2. SQL plugin's classloader inherits Analytics engine's Calcite classes — no classloader conflict
+3. SQL plugin obtains `QueryPlanExecutor` and `EngineContext` via Guice (both in node-level injector)
+4. RelNode passed directly in-process — no serialization needed
 
-**Work**:
-- Modify `AnalyticsExecutionEngine` to accept a `QueryPlanExecutor<RelNode, Iterable<Object[]>>` and call `executor.execute(plan, context)` directly instead of transport action.
-- For the PoC (without the real Analytics engine plugin loaded), keep the stub `DefaultPlanExecutor` that returns empty results.
-- Document the Guice integration pattern for production: the SQL plugin would obtain `QueryPlanExecutor` from the node-level injector via a service locator or by refactoring to use `createGuiceModules()`.
-
-**Done when**: `AnalyticsExecutionEngine` uses `QueryPlanExecutor` interface directly. The stub returns empty results (same behavior as current). Integration pattern documented for when the real Analytics engine plugin is available.
+**PoC work** (real Analytics plugin not available as published artifact for test cluster):
+- Verify Calcite JSON serialization round-trips the RelNode trees from Phase 1/2 as fallback validation.
+- Keep the stub `AnalyticsExecutionEngine` with `QueryPlanExecutor` interface for the PoC.
+- Document the plugin extension integration pattern for production.
 
 ### Phase 6 (Optional): Cross-Cutting Concerns (TBD-1, TBD-2, TBD-3)
 
