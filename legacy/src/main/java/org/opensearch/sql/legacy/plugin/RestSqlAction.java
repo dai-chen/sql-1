@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchException;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Injector;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.rest.RestStatus;
@@ -83,10 +84,18 @@ public class RestSqlAction extends BaseRestHandler {
   /** New SQL query request handler. */
   private final RestSQLQueryAction newSqlQueryHandler;
 
+  /** Unified query handler for Parquet-backed indices (Analytics engine path). */
+  private final RestUnifiedQueryAction unifiedQueryHandler;
+
   public RestSqlAction(Settings settings, Injector injector) {
     super();
     this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     this.newSqlQueryHandler = new RestSQLQueryAction(injector);
+    this.unifiedQueryHandler =
+        new RestUnifiedQueryAction(
+            injector.getInstance(ClusterService.class),
+            injector.getInstance(org.opensearch.transport.client.node.NodeClient.class),
+            (plan, context) -> java.util.Collections.emptyList());
   }
 
   @Override
@@ -142,6 +151,15 @@ public class RestSqlAction extends BaseRestHandler {
               request.path(),
               request.params(),
               sqlRequest.cursor());
+
+      // PoC: Route to unified query pipeline for Parquet-backed indices
+      if (RestUnifiedQueryAction.isUnifiedQueryPath(sqlRequest.getSql())) {
+        boolean isExplain = isExplainRequest(request);
+        return channel ->
+            unifiedQueryHandler.execute(
+                sqlRequest.getSql(), org.opensearch.sql.executor.QueryType.SQL, channel, isExplain);
+      }
+
       return newSqlQueryHandler.prepareRequest(
           newSqlRequest,
           (restChannel, exception) -> {

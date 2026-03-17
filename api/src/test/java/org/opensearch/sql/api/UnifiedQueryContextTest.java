@@ -63,14 +63,14 @@ public class UnifiedQueryContextTest extends UnifiedQueryTestBase {
     UnifiedQueryContext.builder().catalog("opensearch", testSchema).build();
   }
 
-  @Test(expected = IllegalArgumentException.class)
-  public void testUnsupportedQueryType() {
+  @Test
+  public void testSqlQueryType() {
     UnifiedQueryContext context =
         UnifiedQueryContext.builder()
-            .language(QueryType.SQL) // only PPL is supported for now
+            .language(QueryType.SQL)
             .catalog("opensearch", testSchema)
             .build();
-    new UnifiedQueryPlanner(context);
+    assertNotNull("SQL planner should be created", new UnifiedQueryPlanner(context));
   }
 
   @Test(expected = IllegalArgumentException.class)
