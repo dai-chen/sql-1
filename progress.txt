@@ -1912,3 +1912,34 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - savedOrderBy must be saved BEFORE pendingFetch consumption (which clears it) and BEFORE window function ORDER BY consumption. Re-applied after window computation.
   - resolveBaseColumns() is needed to strip helper columns (__seq__, __bf__, __af__, __seg__) from the final output. Without schema access (base converter), falls back to SELECT * which includes helper columns.
 ---
+
+## 2026-03-18T19:47 - V4-012 (Iteration 51): Self-join qualification + pipe-aware join/lookup
+- **What was fixed**: 4+ new tests passing across 4 test classes
+  - **Self-join ambiguous column qualification** (2 tests): In `visitJoin`, changed joinFieldToAlias to keep left alias for ambiguous columns instead of removing them. For self-joins with conditions, persist joinFieldToAlias through to `visitProject` so unqualified field names get qualified with the left alias. Added self-join detection in visitProject that qualifies unqualified names and aliases qualified names (e.g., `b.name` → `"b"."name" AS "b.name"`). Restricted self-join column dedup to no-condition joins only.
+  - **Stats+Join wrong projection** (1 test): In `visitJoin`, save pre-join pipe columns via `extractPipeColumns()` before `super.visitJoin()`. Use saved columns for `leftCols` in the dedup section instead of `resolveColumns(tableName)` which returns original table schema. Extract right-side columns from the join's right SqlNode via new `unwrapSubquery()` helper.
+  - **Lookup after rename** (1 test): In `visitLookup`, use `extractPipeColumns()` for source columns to get post-rename names. When source is pipe-transformed, use explicit column enumeration instead of `SqlStarExceptReplace` (which validates against original table schema).
+- **Pass rate change**: 80.3% (1812/2255 est) → 80.5% (1816/2255 est) = +0.2pp, +4 tests
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 35→37 pass (39 total, 2 fail) — +2 (testSimpleSortPushDownForSMJ, testComplexSortPushDownForSMJ)
+  - CalciteStatsCommandIT: 62→63 pass (63 total, 0 fail) ✅ ALL PASS — +1 (testPaginatingStatsForJoinField)
+  - CalcitePPLLookupIT: 16→17 pass (17 total, 0 fail) ✅ ALL PASS — +1 (testIdWithRename)
+  - CalcitePPLRenameIT: 19→20 pass (22 total, 2 fail) — +1 bonus
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+  - CalcitePPLExistsSubqueryIT: 17/19 (no regression) ✅
+  - CalcitePPLScalarSubqueryIT: 13/14 (no regression) ✅
+  - CalcitePPLInSubqueryIT: 18/18 ALL PASS (no regression) ✅
+  - CalciteAddTotalsCommandIT: 11/11 (no regression) ✅
+  - CalciteFillNullCommandIT: 11/13 (no regression) ✅
+- **Remaining 2 CalcitePPLJoinIT failures**:
+  - testMultipleJoins, testMultipleJoinsWithRelationSubquery: complex 4-way join chain with semi-join, fails with "Failed to plan query"
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+104/-11)
+- **Learnings for future iterations:**
+  - For self-joins, ALL columns are ambiguous (present in both tables). Instead of removing them from joinFieldToAlias (leaving them unqualified), keep the left alias as default qualifier. Right-side references are already explicitly qualified (e.g., `b.name`).
+  - joinFieldToAlias must persist through visitProject for self-joins with conditions — the fields command needs it to qualify ambiguous names.
+  - Self-join column dedup (selecting from one side only) should only apply to no-condition joins (natural join semantics). Condition-based self-joins need both sides accessible.
+  - extractPipeColumns() reflects actual columns after stats/eval/rename transformations. resolveColumns(tableName) returns the original table schema. Always prefer extractPipeColumns() when the pipe has been transformed.
+  - For lookup after rename, SqlStarExceptReplace validates REPLACE columns against the original table schema. When source columns come from pipe transformations, use explicit column enumeration instead.
+  - unwrapSubquery() helper extracts the inner SqlNode from AS-aliased subqueries, useful for extracting column names from join right sides.
+---
