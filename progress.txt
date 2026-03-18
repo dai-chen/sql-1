@@ -1845,3 +1845,40 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - extractTableNameFromPipe() extracts the table name from the pipe's FROM clause (handles SELECT * FROM "tableName" patterns). extractRelation() traverses the AST to find the base Relation node as fallback.
   - The remaining JoinIT failures are split between architectural issues (semi-join rendering, self-join column dedup hiding aliases) and engine-level planning failures. These require deeper refactoring of the join visitor, not simple alias fixes.
 ---
+
+## 2026-03-18T17:00 - V4-012 (Iteration 49): Stats deterministic ordering + adddate TIME type + search IN quotes
+- **What was fixed**: 4 new tests passing across 3 test classes
+  - **Stats deterministic ordering** (2 tests): In `visitAggregation()`, after building GROUP BY, sets `pendingOrderBy = new ArrayList<>(groupByItems)` to provide deterministic result ordering by group-by keys. This uses the existing deferred ORDER BY mechanism so the ordering is applied at the end of the pipeline (or consumed by downstream commands). Added `pendingOrderBy = null` clears in `visitJoin()` and `visitLookup()` to prevent the stats ORDER BY from leaking into join/lookup context (which caused "Failed to plan query" errors). Also enhanced `visitStreamWindow()` to apply `pendingFetch` before window function and use `pendingOrderBy` from stats for window ORDER BY when no explicit sort exists. Fixed testInnerJoinWithRelationSubquery (JoinIT) and one CalciteStatsCommandIT test.
+  - **adddate/subdate TIME→TIMESTAMP type** (1 test): Added override in `DynamicPPLToSqlNodeConverter.visitFunction()` for adddate/subdate/date_add/date_sub with plain days (non-INTERVAL second arg). When the first argument is a TIME field (detected via `getFieldSqlType()`), wraps the TIMESTAMPADD result in `CAST(... AS TIMESTAMP)` to match PPL semantics. Fixed testAddSubDateNull (BuiltinFunctionsNullIT).
+  - **SearchIn quote stripping**: Strips surrounding double-quotes from SearchIn literal values (`raw.startsWith("\"") && raw.endsWith("\"")` → `raw.substring(1, raw.length()-1)`).
+  - **Variable nanos formatter**: `resolveTimestampValue()` now uses `appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)` for variable-length nanosecond precision instead of fixed `SSSSSSSSS` pattern.
+  - **Removed stale MaxoutDebugTest**: Deleted `api/src/test/java/org/opensearch/sql/api/MaxoutDebugTest.java` which always called `fail()`.
+- **Pass rate change**: 80.0% (1805/2255 est) → 80.2% (1809/2255 est) = +0.2pp, +4 tests
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 34→35 pass (39 total, 4 fail) — +1 (testInnerJoinWithRelationSubquery)
+  - CalcitePPLBuiltinFunctionsNullIT: 64→65 pass (71 total, 6 fail) — +1 (testAddSubDateNull)
+  - CalciteStatsCommandIT: 61→62 pass (63 total, 1 fail) — +1 (deterministic ordering)
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+  - CalcitePPLAggregationPaginatingIT: 99/100 (no regression) ✅
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLEventstatsIT: 25/27 (no regression) ✅
+  - CalciteStreamstatsCommandIT: 37/46 (no regression) ✅
+  - CalcitePPLLookupIT: 16/17 (no regression, testIdWithRename pre-existing) ✅
+- **Remaining V4-012 failures triage** (across all classes):
+  - Engine-blocked (Failed to plan/compile): ~70 tests — NOT converter-fixable
+  - Expected exception not thrown: ~15 tests — validation gaps, architecturally different error handling
+  - Type/schema mismatches: ~5 tests — UDT type mapping issues
+  - Subsearch maxout: 3 tests — requires condition partitioning (correlated vs non-correlated)
+  - DEFERRED (V4-026/V4-027/V4-028): ~110 tests — engine-level UDF/TVF registration
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+38/-9: stats pendingOrderBy, join/lookup clear, streamstats pendingFetch/ORDER BY, SearchIn quote strip, variable nanos formatter)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+20: adddate/subdate TIME→TIMESTAMP, extractFieldName helper)
+  - api/src/test/java/org/opensearch/sql/api/PPLToSqlNodeConverterTest.java (+9/-2: updated stats expected SQL with ORDER BY)
+- **Learnings for future iterations:**
+  - Stats GROUP BY should produce deterministic ordering by group-by keys. Without this, downstream commands that depend on ordering (like verifyDataRowsInOrder in tests) fail non-deterministically.
+  - pendingOrderBy from stats must be cleared in visitJoin and visitLookup — these commands reset the ordering context. Without clearing, the ORDER BY references columns that may not be in scope after join wrapping.
+  - adddate/subdate with TIME input returns TIME type by default (TIMESTAMPADD preserves input type). PPL semantics expect TIMESTAMP. Must explicitly CAST to TIMESTAMP.
+  - SearchIn literal values from the PPL parser may have surrounding double-quotes that need stripping before use as SQL string literals.
+  - The remaining converter-fixable failures are mostly in the "diminishing returns" category — each fix addresses 1-2 tests with increasing complexity.
+---
