@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 80.0% (1805/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
+- Current rate: 80.3% (1812/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -1881,4 +1881,34 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - adddate/subdate with TIME input returns TIME type by default (TIMESTAMPADD preserves input type). PPL semantics expect TIMESTAMP. Must explicitly CAST to TIMESTAMP.
   - SearchIn literal values from the PPL parser may have surrounding double-quotes that need stripping before use as SQL string literals.
   - The remaining converter-fixable failures are mostly in the "diminishing returns" category — each fix addresses 1-2 tests with increasing complexity.
+---
+
+## 2026-03-18T18:45 - V4-012 (Iteration 50): Streamstats reset_before/reset_after + sort ordering
+- **What was fixed**: 3 new tests passing in CalciteStreamstatsCommandIT (37→40)
+  - **Streamstats reset_before/reset_after**: Implemented self-join approach for reset-aware streamstats. When reset_before or reset_after is present:
+    1. Add helper columns via window functions: `__seq__` (ROW_NUMBER), `__bf__` (before flag: CASE WHEN condition THEN 1 ELSE 0), `__af__` (after flag), `__seg__` (segment ID: SUM(__bf__) OVER(..CURRENT) + COALESCE(SUM(__af__) OVER(..1 PRECEDING), 0))
+    2. For each aggregate, build a scalar subquery that filters matching rows by: frame filter (r.__seq__ BETWEEN l.__seq__-offset AND l.__seq__), segment equality (r.__seg__ = l.__seg__), and group equality with NULL handling (OR(eq, AND(isNull, isNull)))
+    3. Strip helper columns from output via resolveBaseColumns() (schema-aware in DynamicPPLToSqlNodeConverter)
+  - **Sort ordering preservation**: Added savedOrderBy mechanism in visitStreamWindow. Saves pendingOrderBy before it's consumed by the window function's ORDER BY, then re-applies it as final output ordering. Fixes `sort age | streamstats count() as cnt` pattern where results should be sorted by age.
+  - **resolveBaseColumns()**: New protected method in PPLToSqlNodeConverter (returns empty list by default). Overridden in DynamicPPLToSqlNodeConverter to delegate to resolveColumns(tableName) for schema-aware column stripping.
+- **Pass rate change**: 80.2% (1809/2255 est) → 80.3% (1812/2255 est) = +0.1pp, +3 tests
+- **Per-class results** (before → after):
+  - CalciteStreamstatsCommandIT: 37→40 pass (46 total, 6 fail) — +3 (testStreamstatsReset, testStreamstatsResetWithNull, testStreamstatsResetWithNullBucket)
+  - CalcitePPLEventstatsIT: 25/27 (no regression) ✅
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+  - CalcitePPLJoinIT: 35/39 (no regression) ✅
+- **Remaining 6 CalciteStreamstatsCommandIT failures**:
+  - 3 global+by partition: testStreamstatsGlobal, testStreamstatsGlobalWithNull, testStreamstatsGlobalWithNullBucket — need per-partition vs global row numbering for sliding window (complex correlate/self-join pattern)
+  - 1 join metadata leak: testLeftJoinWithStreamstats — internal shard metadata columns leaking into results after JOIN
+  - 1 error message mismatch: testUnsupportedWindowFunctions — gets 500 instead of expected error
+  - 1 engine-blocked: testStreamstatsDistinctCountFunction — COUNT(DISTINCT) in window context not supported by Calcite
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+207/-6: buildResetStreamWindow, buildResetFrameFilter, buildStreamWindowOrderBy, resolveBaseColumns, savedOrderBy mechanism)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+5: resolveBaseColumns override)
+- **Learnings for future iterations:**
+  - Streamstats reset requires segment ID computation: seg_id = SUM(before_flag) OVER(UNBOUNDED PRECEDING TO CURRENT ROW) + COALESCE(SUM(after_flag) OVER(UNBOUNDED PRECEDING TO 1 PRECEDING), 0). Adding seg_id to PARTITION BY doesn't work because SQL window frames count rows within the partition, not in global order. Must use scalar subqueries (self-join pattern) instead.
+  - The self-join approach for reset: each row's aggregate is computed by a scalar subquery that filters the same table for matching rows based on frame, segment, and group equality. This is equivalent to CalciteRelNodeVisitor's correlate LEFT JOIN pattern but expressed in SQL.
+  - Group equality with NULL handling requires OR(eq(a,b), AND(isNull(a), isNull(b))) — standard SQL equality returns NULL when either side is NULL, which would exclude NULL partition values.
+  - savedOrderBy must be saved BEFORE pendingFetch consumption (which clears it) and BEFORE window function ORDER BY consumption. Re-applied after window computation.
+  - resolveBaseColumns() is needed to strip helper columns (__seq__, __bf__, __af__, __seg__) from the final output. Without schema access (base converter), falls back to SELECT * which includes helper columns.
 ---
