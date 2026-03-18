@@ -1943,3 +1943,44 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - For lookup after rename, SqlStarExceptReplace validates REPLACE columns against the original table schema. When source columns come from pipe transformations, use explicit column enumeration instead.
   - unwrapSubquery() helper extracts the inner SqlNode from AS-aliased subqueries, useful for extracting column names from join right sides.
 ---
+
+## 2026-03-18T21:30 - V4-012 (Iteration 52): TIME extraction transpile-time fix + append/appendcol ORDER BY regression
+- **What was fixed**: 11 new tests passing across 2 test classes
+  - **TIME extraction transpile-time resolution** (9 tests): Added `tryExtractTimeOnlyLiteral(SqlNode)` helper that extracts `java.time.LocalTime` from bare string literals matching `HH:mm:ss` pattern or from `CAST(literal AS TIME)` expressions. When a time-only literal is detected, computes the result in Java at transpile time and emits an integer literal directly (e.g., `hour('17:30:00')` → `17`). This bypasses the engine-level `CAST('17:30:00' AS TIME)` runtime failure entirely. Applied to: `castExtract()` (hour, minute, second, hour_of_day, minute_of_hour, second_of_minute), `minute_of_day` handler, `time_to_sec` handler, and `extract()` explicit handler.
+  - **ensureTimestamp TIME promotion**: When argument is `CAST(x AS TIME)`, promotes to TIMESTAMP via `promoteTimeToTimestamp()` (prepends today's date). When argument is a bare time-only string literal (e.g., `'17:30:00'`), prepends `1970-01-01` to create a valid timestamp string. This ensures non-literal TIME expressions still work through the EXTRACT path.
+  - **Append/appendcol ORDER BY regression fix** (2 tests): Fixed `visitAppend` in DynamicPPLToSqlNodeConverter — clears `pendingOrderBy` at start to prevent raw GROUP BY expressions (e.g., `FLOOR("age"/10)*10`) from leaking into UNION ALL scope where only aliased columns are available. Added `isResolvableOrderByItem()` helper that checks if an ORDER BY item is a simple column identifier existing in the unified column set. Subsearch ORDER BY items are now filtered to only resolvable column references. Fixed `visitAppendCol` — when `pendingOrderBy` items are unresolvable against the pipe's SELECT list columns, falls back to column names from the SELECT list for ROW_NUMBER window ordering.
+- **Pass rate change**: 80.5% (1816/2255 est) → 81.0% (1827/2255 est) = +0.5pp, +11 tests
+- **Per-class results** (before → after):
+  - CalciteDateTimeFunctionIT: 45→54 pass (65 total, 9 fail, 2 skip) — +9 (testHour, testMinute, testSecond, testHour_of_day, testMinute_of_hour, testMinute_of_day, testSecond_of_minute, testTimeToSec, testExtract)
+  - CalciteNewAddedCommandsIT: 20→22 pass (22 total, 0 fail) ✅ ALL PASS — +2 (testAppend, testAppendcol regression fix)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+  - CalciteConvertTZFunctionIT: 14/14 (no regression) ✅
+  - CalciteNowLikeFunctionIT: 12/12 (no regression) ✅
+  - CalcitePPLAppendCommandIT: 5/8 (no regression, 3 pre-existing) ✅
+  - CalcitePPLAppendcolIT: 2/2 (no regression) ✅
+  - CalcitePPLAppendPipeCommandIT: 3/4 (no regression) ✅
+  - CalcitePPLBuiltinFunctionsNullIT: 65/71 (no regression) ✅
+  - CalciteDateTimeImplementationIT: 7/17 (no regression) ✅
+  - CalcitePPLJoinIT: 37/39 (no regression) ✅
+- **Remaining 9 CalciteDateTimeFunctionIT failures** (all engine-blocked or precision):
+  - testDateTime: returns null (timezone conversion not implemented)
+  - testUnixTimeStamp: ArithmeticException overflow
+  - testToSeconds: Failed to plan query
+  - testDateDiff: Failed to plan query
+  - testTimeDiff: Failed to plan query
+  - testMicrosecond: returns 0 (engine precision)
+  - testDateFormat: format specifier mismatch (%f microseconds)
+  - testStrftimeWithDateFields: nanosecond precision lost
+  - testMakeTime: calculation error + precision
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+71 lines: tryExtractTimeOnlyLiteral, castExtract transpile-time resolution, ensureTimestamp TIME promotion, minute_of_day/time_to_sec/extract handlers)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+83/-22 lines: visitAppend pendingOrderBy clear, isResolvableOrderByItem, visitAppendCol fallback ordering)
+- **Learnings for future iterations:**
+  - The engine-level CAST('17:30:00' AS TIME) failure was NOT fixed by the nanosecond timestamp parsing fix. The root cause is different: CalciteNoPushdownIndexScan.timestampStringToEpochMillis() tries to parse TIME strings as dates, which fails. The transpile-time resolution approach (computing in Java and emitting integer literals) completely bypasses this issue.
+  - tryExtractTimeOnlyLiteral() must handle both bare string literals ('17:30:00') and CAST(literal AS TIME) expressions. The PPL parser generates CAST for time('17:30:00') but bare strings for '17:30:00'.
+  - For non-literal TIME expressions (e.g., field references), the ensureTimestamp promotion approach works: prepend today's date to convert TIME to TIMESTAMP, then EXTRACT works normally.
+  - Append/appendcol ORDER BY must only use simple column references that exist in the output scope. Raw GROUP BY expressions (from stats) reference columns that don't exist after UNION ALL or subquery wrapping.
+  - isResolvableOrderByItem() strips DESC/NULLS FIRST/NULLS LAST wrappers to find the underlying column identifier, then checks if it exists in the target column set.
+---
