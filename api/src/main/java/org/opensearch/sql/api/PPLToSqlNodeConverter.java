@@ -7,9 +7,12 @@ package org.opensearch.sql.api;
 
 import static org.opensearch.sql.calcite.utils.SqlNodeDSL.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.ResolverStyle;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -45,6 +48,7 @@ import org.apache.calcite.sql.type.ReturnTypes;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
+import org.opensearch.sql.exception.ExpressionEvaluationException;
 import org.opensearch.sql.ast.Node;
 import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.Alias;
@@ -3009,10 +3013,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if ("like".equals(name)) return like(args.get(0), args.get(1));
     if ("not like".equals(name)) return notLike(args.get(0), args.get(1));
     // Type constructor functions → CAST
-    if ("date".equals(name) && args.size() == 1)
+    if ("date".equals(name) && args.size() == 1) {
+      validateDateLiteral(args.get(0));
       return cast(args.get(0), typeSpec(SqlTypeName.DATE));
-    if ("time".equals(name) && args.size() == 1)
+    }
+    if ("time".equals(name) && args.size() == 1) {
+      validateTimeLiteral(args.get(0));
       return cast(args.get(0), typeSpec(SqlTypeName.TIME));
+    }
     if ("timestamp".equals(name)) {
       if (args.size() == 1) return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
       // timestamp(date, time) → CAST(CONCAT(CAST(date AS VARCHAR), ' ', CAST(time AS VARCHAR)) AS TIMESTAMP)
@@ -3021,7 +3029,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           typeSpec(SqlTypeName.TIMESTAMP));
     }
     if ("datetime".equals(name)) {
-      if (args.size() == 1) return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      if (args.size() == 1) {
+        String val = extractStringLiteral(args.get(0));
+        if (val != null && !isValidDatetime(val))
+          return cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
+        return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      }
       return cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
     }
     // EXTRACT-based datetime functions → CAST(EXTRACT(unit FROM CAST(arg AS TIMESTAMP)) AS INTEGER)
@@ -3029,14 +3042,22 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return castExtract("YEAR", args.get(0));
     if ("month".equals(name) && args.size() == 1)
       return castExtract("MONTH", args.get(0));
-    if (("day".equals(name) || "dayofmonth".equals(name) || "day_of_month".equals(name)) && args.size() == 1)
+    if (("day".equals(name) || "dayofmonth".equals(name) || "day_of_month".equals(name)) && args.size() == 1) {
+      validateDateExtractLiteral(args.get(0));
       return castExtract("DAY", args.get(0));
-    if ("hour".equals(name) && args.size() == 1)
+    }
+    if ("hour".equals(name) && args.size() == 1) {
+      validateTimeExtractLiteral(args.get(0));
       return castExtract("HOUR", args.get(0));
-    if ("minute".equals(name) && args.size() == 1)
+    }
+    if ("minute".equals(name) && args.size() == 1) {
+      validateTimeExtractLiteral(args.get(0));
       return castExtract("MINUTE", args.get(0));
-    if ("second".equals(name) && args.size() == 1)
+    }
+    if ("second".equals(name) && args.size() == 1) {
+      validateTimeExtractLiteral(args.get(0));
       return castExtract("SECOND", args.get(0));
+    }
     if ("quarter".equals(name) && args.size() == 1)
       return castExtract("QUARTER", args.get(0));
     // week/weekofyear/week_of_year: PPL mode 0 (Sunday-based, range 0-53)
@@ -3381,13 +3402,19 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (args.get(0) instanceof SqlCharStringLiteral && args.get(1) instanceof SqlCharStringLiteral) {
         String input = ((SqlCharStringLiteral) args.get(0)).getNlsString().getValue();
         String fmt = ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue();
-        String javaPattern = mysqlFormatToJavaPattern(fmt);
-        java.time.format.DateTimeFormatter dtf = new java.time.format.DateTimeFormatterBuilder()
-            .parseCaseInsensitive().appendPattern(javaPattern).toFormatter(java.util.Locale.ENGLISH);
-        java.time.temporal.TemporalAccessor ta = dtf.parse(input);
-        java.time.LocalDateTime ldt = java.time.LocalDate.from(ta).atStartOfDay();
-        try { ldt = java.time.LocalDateTime.from(ta); } catch (java.time.DateTimeException ignored) {}
-        return cast(literal(ldt.format(TS_FMT)), typeSpec(SqlTypeName.TIMESTAMP));
+        try {
+          String javaPattern = mysqlFormatToJavaPattern(fmt);
+          java.time.format.DateTimeFormatter dtf = new java.time.format.DateTimeFormatterBuilder()
+              .parseCaseInsensitive().appendPattern(javaPattern).toFormatter(java.util.Locale.ENGLISH);
+          java.time.temporal.TemporalAccessor ta = dtf.parse(input);
+          java.time.LocalDateTime ldt = java.time.LocalDate.from(ta).atStartOfDay();
+          try { ldt = java.time.LocalDateTime.from(ta); } catch (java.time.DateTimeException ignored) {}
+          return cast(literal(ldt.format(TS_FMT)), typeSpec(SqlTypeName.TIMESTAMP));
+        } catch (Exception e) {
+          if (!fmt.contains("%"))
+            return cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
+          throw e;
+        }
       }
       return caseWhen(
           List.of(isNull(args.get(0))),
@@ -4088,6 +4115,84 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       } catch (Exception ignored) {}
     }
     return null;
+  }
+
+  /** Extract a string value from a SqlCharStringLiteral or CAST(literal AS type). */
+  private static String extractStringLiteral(SqlNode node) {
+    if (node instanceof SqlCharStringLiteral) {
+      return ((SqlCharStringLiteral) node).getNlsString().getValue();
+    }
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall c = (SqlBasicCall) node;
+      if (c.getOperator() == SqlStdOperatorTable.CAST && c.operandCount() >= 1
+          && c.operand(0) instanceof SqlCharStringLiteral) {
+        return ((SqlCharStringLiteral) c.operand(0)).getNlsString().getValue();
+      }
+    }
+    return null;
+  }
+
+  private static final DateTimeFormatter STRICT_DATE =
+      DateTimeFormatter.ofPattern("uuuu-MM-dd").withResolverStyle(ResolverStyle.STRICT);
+
+  /** Validate DATE literal at transpile time. */
+  private static void validateDateLiteral(SqlNode node) {
+    String val = extractStringLiteral(node);
+    if (val == null) return;
+    try { LocalDate.parse(val, STRICT_DATE); } catch (Exception e) {
+      throw new ExpressionEvaluationException(
+          "date:" + val + " in unsupported format, please use 'yyyy-MM-dd'");
+    }
+  }
+
+  /** Validate TIME literal at transpile time. */
+  private static void validateTimeLiteral(SqlNode node) {
+    String val = extractStringLiteral(node);
+    if (val == null) return;
+    try { LocalTime.parse(val); } catch (Exception e) {
+      throw new ExpressionEvaluationException(
+          "time:" + val + " in unsupported format, please use 'HH:mm:ss[.SSSSSSSSS]'");
+    }
+  }
+
+  /** Check if a string is a valid full datetime (yyyy-MM-dd HH:mm:ss). */
+  private static boolean isValidDatetime(String val) {
+    try {
+      DateTimeFormatter fmt = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss")
+          .withResolverStyle(ResolverStyle.STRICT);
+      LocalDateTime.parse(val, fmt);
+      return true;
+    } catch (Exception e) { return false; }
+  }
+
+  /** Validate literal arg for time-extract functions (HOUR, MINUTE, SECOND).
+   *  A date-only string is invalid (expects time input). */
+  private static void validateTimeExtractLiteral(SqlNode node) {
+    String val = extractStringLiteral(node);
+    if (val == null) return;
+    if (val.matches("\\d{4}-\\d{2}-\\d{2}") && !val.contains(":")) {
+      throw new ExpressionEvaluationException(
+          "time:" + val + " in unsupported format, please use 'HH:mm:ss[.SSSSSSSSS]'");
+    }
+  }
+
+  /** Validate literal arg for date-extract functions (DAY, DAYOFMONTH).
+   *  A time-only string is invalid (expects date input). Invalid dates also throw. */
+  private static void validateDateExtractLiteral(SqlNode node) {
+    String val = extractStringLiteral(node);
+    if (val == null) return;
+    // Time-only string passed to date function
+    if (val.matches("\\d{1,2}:\\d{2}:\\d{2}.*")) {
+      throw new ExpressionEvaluationException(
+          "date:" + val + " in unsupported format, please use 'yyyy-MM-dd'");
+    }
+    // Date-like string that doesn't parse as valid date
+    if (val.matches("\\d{4}-\\d{2}-\\d{2}.*")) {
+      try { LocalDate.parse(val.substring(0, 10), STRICT_DATE); } catch (Exception e) {
+        throw new ExpressionEvaluationException(
+            "date:" + val + " in unsupported format, please use 'yyyy-MM-dd'");
+      }
+    }
   }
 
   @Override
