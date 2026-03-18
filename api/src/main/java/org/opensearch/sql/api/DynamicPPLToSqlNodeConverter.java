@@ -222,6 +222,48 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
   @Override
   public SqlNode visitProject(Project node, Void ctx) {
+    // Handle self-join context: qualify unqualified ambiguous names
+    if (!joinFieldToAlias.isEmpty() && !node.isExcluded()) {
+      // Check if there are unqualified names that need qualification
+      boolean hasUnqualifiedAmbiguous = false;
+      for (UnresolvedExpression expr : node.getProjectList()) {
+        if (expr instanceof Field) {
+          String name = ((Field) expr).getField().toString();
+          if (!name.contains(".") && joinFieldToAlias.containsKey(name)) {
+            hasUnqualifiedAmbiguous = true;
+            break;
+          }
+        }
+      }
+      if (hasUnqualifiedAmbiguous) {
+        Map<String, String> savedMap = joinFieldToAlias;
+        joinFieldToAlias = Collections.emptyMap();
+        try {
+          List<SqlNode> colList = new ArrayList<>();
+          for (UnresolvedExpression expr : node.getProjectList()) {
+            if (expr instanceof Field) {
+              String name = ((Field) expr).getField().toString();
+              if (!name.contains(".") && savedMap.containsKey(name)) {
+                colList.add(as(identifier(savedMap.get(name), name), name));
+                continue;
+              }
+              if (name.contains(".")) {
+                // Qualified name like b.name: always alias with the dotted name
+                SqlNode col = expr.accept(this, null);
+                colList.add(as(col, name));
+                continue;
+              }
+            }
+            colList.add(expr.accept(this, null));
+          }
+          pipe = select(colList.toArray(new SqlNode[0])).from(wrapAsSubquery()).build();
+          return pipe;
+        } finally {
+          joinFieldToAlias = Collections.emptyMap();
+        }
+      }
+      joinFieldToAlias = Collections.emptyMap();
+    }
     if (node.isExcluded()) {
       List<String> excludePatterns = node.getProjectList().stream()
           .map(e -> ((Field) e).getField().toString())
@@ -915,6 +957,9 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     boolean hasCondition = node.getJoinCondition().isPresent();
     boolean isSelfJoin = isSelfJoinDetected(node);
 
+    // Save pre-join pipe columns (reflects stats/eval transformations)
+    List<String> preJoinPipeCols = extractPipeColumns();
+
     // Resolve unqualified field names in join condition to their table aliases
     if (hasCondition) {
       String leftTable = extractTableNameFromPlan(node.getLeft());
@@ -930,15 +975,18 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       Map<String, String> fieldMap = new LinkedHashMap<>();
       for (String col : resolveColumns(leftTable)) fieldMap.put(col, leftAlias0);
       for (String col : resolveColumns(rightTable)) {
-        if (fieldMap.containsKey(col)) fieldMap.remove(col); // ambiguous — leave unqualified
-        else fieldMap.put(col, rightAlias0);
+        if (!fieldMap.containsKey(col)) fieldMap.put(col, rightAlias0);
+        // If already mapped from left side, keep left alias as default qualifier
       }
       joinFieldToAlias = fieldMap;
     }
 
     // Delegate to base for the join construction
     super.visitJoin(node, ctx);
-    joinFieldToAlias = Collections.emptyMap();
+    // For self-joins with conditions, keep joinFieldToAlias alive so the next
+    // visitProject can qualify ambiguous column references. For all other joins,
+    // clear it immediately.
+    if (!(isSelfJoin && hasCondition && skipNextWrap)) joinFieldToAlias = Collections.emptyMap();
 
     // Fix 3: For no-field-list self-join, replace CROSS JOIN with natural join on all columns
     if (isSelfJoin && !hasFieldList && !hasCondition && pipe instanceof SqlJoin) {
@@ -975,7 +1023,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         if (rightAlias == null) rightAlias = extractAlias(sqlJoin.getRight());
       }
 
-      if (isSelfJoin && leftAlias != null && rightAlias != null) {
+      if (isSelfJoin && !hasCondition && leftAlias != null && rightAlias != null) {
         // Self-join: select from one side to avoid duplicate columns
         org.opensearch.sql.ast.expression.Literal overwriteLit = node.getArgumentMap().get("overwrite");
         boolean overwrite = overwriteLit == null || Boolean.TRUE.equals(overwriteLit.getValue());
@@ -1018,8 +1066,16 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
         String leftTable = extractTableNameFromPlan(node.getLeft());
         String rightTable = extractTableNameFromPlan(node.getRight());
-        List<String> leftCols = resolveColumns(leftTable);
-        List<String> rightCols = resolveColumns(rightTable);
+        List<String> leftCols = preJoinPipeCols.isEmpty() ? resolveColumns(leftTable) : preJoinPipeCols;
+        // Extract right-side columns from the join's right SqlNode (handles stats/eval)
+        List<String> rightCols;
+        if (pipe instanceof SqlJoin) {
+          SqlJoin sj = (SqlJoin) pipe;
+          rightCols = extractColumnsFromSqlNode(unwrapSubquery(sj.getRight()));
+        } else {
+          rightCols = Collections.emptyList();
+        }
+        if (rightCols.isEmpty()) rightCols = resolveColumns(rightTable);
 
         if (!leftCols.isEmpty() && !rightCols.isEmpty()) {
           // All columns shared between both tables (not just join keys)
@@ -1098,6 +1154,17 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     return leftTable != null && leftTable.equals(rightTable);
   }
 
+  /** Unwrap a subquery alias (e.g. (SELECT ...) AS alias) to get the inner SqlNode. */
+  private static SqlNode unwrapSubquery(SqlNode node) {
+    if (node instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) node;
+      if ("AS".equals(call.getOperator().getName()) && call.operandCount() >= 2) {
+        return call.operand(0);
+      }
+    }
+    return node;
+  }
+
   private static String extractTableNameFromPlan(org.opensearch.sql.ast.tree.UnresolvedPlan plan) {
     // Traverse through SubqueryAlias, Project, Eval, Filter etc. to find the base Relation
     while (plan != null) {
@@ -1127,7 +1194,16 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     String lookupTable = lookupRel != null
         ? lookupRel.getTableQualifiedName().toString()
         : node.getLookupRelation().toString();
-    Set<String> sourceCols = new HashSet<>(resolveColumns(tableName));
+    Set<String> sourceCols;
+    boolean sourceFromPipe;
+    List<String> sourcePipeCols;
+    {
+      sourcePipeCols = extractPipeColumns();
+      sourceFromPipe = !sourcePipeCols.isEmpty();
+      sourceCols = sourceFromPipe
+          ? new HashSet<>(sourcePipeCols)
+          : new HashSet<>(resolveColumns(tableName));
+    }
     List<String> lookupCols = resolveColumns(lookupTable);
     Set<String> mappingFields = new HashSet<>(node.getMappingAliasMap().keySet());
 
@@ -1151,8 +1227,6 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
     if (outputMap.isEmpty()) {
       // No output spec: REPLACE all non-mapping lookup columns into source
-      // Use _l.* REPLACE(_r.col AS col) for shared columns,
-      // plus _r.col AS col for new columns
       List<SqlNode> replaceClauses = new ArrayList<>();
       List<SqlNode> newCols = new ArrayList<>();
       for (String col : lookupCols) {
@@ -1167,7 +1241,26 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         }
       }
       List<SqlNode> selectItems = new ArrayList<>();
-      if (!replaceClauses.isEmpty()) {
+      if (sourceFromPipe) {
+        // Pipe has been transformed (rename/eval) — use explicit column enumeration
+        Set<String> replaced = new HashSet<>();
+        for (SqlNode rc : replaceClauses) {
+          String name = extractColumnName(rc);
+          if (name != null) replaced.add(name);
+        }
+        for (String col : sourcePipeCols) {
+          if (replaced.contains(col)) {
+            for (SqlNode rc : replaceClauses) {
+              if (col.equals(extractColumnName(rc))) {
+                selectItems.add(rc);
+                break;
+              }
+            }
+          } else {
+            selectItems.add(identifier(leftAlias, col));
+          }
+        }
+      } else if (!replaceClauses.isEmpty()) {
         SqlNode leftStar = new org.opensearch.sql.calcite.parser.SqlStarExceptReplace(
             SqlParserPos.ZERO,
             new org.apache.calcite.sql.SqlIdentifier(
@@ -1198,7 +1291,7 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         }
       }
 
-      if (hasPipeOnlyTarget && !pipeCols.isEmpty()) {
+      if ((hasPipeOnlyTarget || sourceFromPipe) && !pipeCols.isEmpty()) {
         // Use explicit column enumeration
         // For REPLACE: skip target columns in source list, add at end
         Map<String, SqlNode> overrides = new LinkedHashMap<>();
