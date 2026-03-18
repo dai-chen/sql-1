@@ -1410,6 +1410,11 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
   @Override
   public SqlNode visitAppend(org.opensearch.sql.ast.tree.Append node, Void ctx) {
     SqlNode mainSql = pipe;
+    // Clear pending ORDER BY from upstream commands (e.g. stats GROUP BY expressions)
+    // since those raw expressions may reference columns not available after UNION ALL.
+    pendingOrderBy = null;
+    pendingFetch = null;
+    pendingOffset = null;
     // Simplify subsearch AST: propagate empty source through joins/lookups
     UnresolvedPlan prunedSubSearch =
         node.getSubSearch().accept(new org.opensearch.sql.ast.EmptySourcePropagateVisitor(), null);
@@ -1450,12 +1455,16 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     subSql = addSourceOrderColumn(subSql, 1);
     String unionAlias = "_t" + aliasCounter.incrementAndGet();
     SqlNode union = unionAll(mainSql, subSql);
-    // Build ORDER BY: _source_order first, then subsearch sort columns
+    // Build ORDER BY: _source_order first, then resolvable subsearch sort columns.
+    // Filter out raw expressions (e.g. FLOOR("age"/10)*10 from stats GROUP BY) that
+    // reference columns not available in the UNION ALL result.
     List<SqlNode> orderItems = new ArrayList<>();
     orderItems.add(identifier("_source_order"));
     if (subOrderBy != null) {
       for (SqlNode item : subOrderBy) {
-        orderItems.add(item);
+        if (isResolvableOrderByItem(item, unified)) {
+          orderItems.add(item);
+        }
       }
     }
     // Keep _source_order visible in the pipe so ORDER BY can reference it.
@@ -1494,6 +1503,25 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       }
     }
     return null;
+  }
+
+  /** Check if an ORDER BY item references only columns in the given column set.
+   *  Simple identifiers and DESC/ASC/NULLS wrappers of simple identifiers are resolvable.
+   *  Complex expressions (e.g. FLOOR("age"/10)*10) are not. */
+  private static boolean isResolvableOrderByItem(SqlNode item, java.util.Set<String> columns) {
+    if (item instanceof SqlIdentifier) {
+      return columns.contains(((SqlIdentifier) item).getSimple());
+    }
+    if (item instanceof SqlBasicCall) {
+      SqlBasicCall call = (SqlBasicCall) item;
+      String op = call.getOperator().getName();
+      // DESC, NULLS FIRST, NULLS LAST wrap a single operand
+      if (("DESC".equals(op) || "NULLS FIRST".equals(op) || "NULLS LAST".equals(op))
+          && call.operandCount() == 1) {
+        return isResolvableOrderByItem(call.operand(0), columns);
+      }
+    }
+    return false;
   }
 
   /** Strip ORDER BY from a SqlNode, returning the inner query. */
@@ -1666,21 +1694,36 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
 
   @Override
   public SqlNode visitAppendCol(org.opensearch.sql.ast.tree.AppendCol node, Void ctx) {
-    // Apply pending ORDER BY to preserve row ordering for ROW_NUMBER
-    if (pendingOrderBy != null || pendingFetch != null) {
-      pipe = applyPendingOrderBy(pipe);
+    // Extract column names from the pipe's SELECT list
+    List<String> pipeCols = extractColumnsFromSqlNode(pipe);
+    Set<String> pipeColSet = new LinkedHashSet<>(pipeCols);
+
+    // Convert pendingOrderBy to column-name references if the raw expressions
+    // are not resolvable in the subquery scope (e.g. FLOOR("age"/10)*10 from stats).
+    SqlNodeList mainOrderBy;
+    if (pendingOrderBy != null && pendingOrderBy.stream().allMatch(
+        item -> isResolvableOrderByItem(item, pipeColSet))) {
+      mainOrderBy = new SqlNodeList(pendingOrderBy, SqlParserPos.ZERO);
+    } else {
+      // Fall back to column names from the SELECT list
+      List<SqlNode> colItems = new ArrayList<>();
+      for (String col : pipeCols) {
+        colItems.add(identifier(col));
+      }
+      mainOrderBy = colItems.isEmpty() ? SqlNodeList.EMPTY
+          : new SqlNodeList(colItems, SqlParserPos.ZERO);
     }
+    pendingOrderBy = null;
+    pendingFetch = null;
+    pendingOffset = null;
     String rnMain = "_row_number_main_";
     String rnSub = "_row_number_subsearch_";
 
-    // Extract main columns and ORDER BY before wrapping
-    List<String> mainCols = extractColumnsFromSqlNode(pipe);
-    SqlNodeList mainOrderBy = SqlNodeList.EMPTY;
+    // Extract main columns
+    List<String> mainCols = pipeCols;
     SqlNode mainInner = pipe;
     if (pipe instanceof SqlOrderBy) {
-      SqlOrderBy ob = (SqlOrderBy) pipe;
-      mainOrderBy = ob.orderList;
-      mainInner = ob.query;
+      mainInner = ((SqlOrderBy) pipe).query;
     }
 
     // Wrap main with ROW_NUMBER() OVER(ORDER BY ...) to preserve sort order
@@ -1694,16 +1737,22 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
     SqlNode subResult = convertSubPipeline(node.getSubSearch(), tableScan);
     List<String> subCols = extractColumnsFromSqlNode(subResult);
 
-    // Extract subsearch ORDER BY for its ROW_NUMBER
-    SqlNodeList subOrderBy = SqlNodeList.EMPTY;
+    // Extract subsearch inner query (strip ORDER BY since raw expressions
+    // may reference columns not available after wrapping as subquery)
     SqlNode subInner = subResult;
     if (subResult instanceof SqlOrderBy) {
-      SqlOrderBy ob = (SqlOrderBy) subResult;
-      subOrderBy = ob.orderList;
-      subInner = ob.query;
+      subInner = ((SqlOrderBy) subResult).query;
     }
 
-    // Wrap subsearch with ROW_NUMBER() OVER(ORDER BY ...)
+    // Build subsearch ORDER BY from column names (safe for subquery scope)
+    List<SqlNode> subOrderItems = new ArrayList<>();
+    for (String col : subCols) {
+      subOrderItems.add(identifier(col));
+    }
+    SqlNodeList subOrderBy = subOrderItems.isEmpty() ? SqlNodeList.EMPTY
+        : new SqlNodeList(subOrderItems, SqlParserPos.ZERO);
+
+    // Wrap subsearch with ROW_NUMBER() OVER(ORDER BY columns)
     SqlNode subRnCall = new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], SqlParserPos.ZERO);
     SqlNode subRn = as(window(subRnCall, SqlNodeList.EMPTY, subOrderBy), rnSub);
     SqlNode subWrapped = select(star(), subRn)

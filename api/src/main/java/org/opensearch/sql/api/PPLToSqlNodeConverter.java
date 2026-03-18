@@ -3097,7 +3097,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (("dayofyear".equals(name) || "day_of_year".equals(name)) && args.size() == 1)
       return cast(call("DAYOFYEAR", cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP))), typeSpec(SqlTypeName.INTEGER));
     if ("minute_of_day".equals(name) && args.size() == 1) {
-      SqlNode ts = cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+      // Try to resolve time-only literals at transpile time
+      java.time.LocalTime lt = tryExtractTimeOnlyLiteral(args.get(0));
+      if (lt != null) {
+        return intLiteral(lt.getHour() * 60 + lt.getMinute());
+      }
+      SqlNode ts = ensureTimestamp(args.get(0));
       SqlNode hours = new SqlBasicCall(SqlStdOperatorTable.EXTRACT,
           new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), ts}, POS);
       SqlNode minutes = new SqlBasicCall(SqlStdOperatorTable.EXTRACT,
@@ -3256,6 +3261,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return cast(call("LAST_DAY", ensureTimestamp(args.get(0))), typeSpec(SqlTypeName.DATE));
     // time_to_sec
     if ("time_to_sec".equals(name)) {
+      // Try to resolve time-only literals at transpile time
+      java.time.LocalTime lt = tryExtractTimeOnlyLiteral(args.get(0));
+      if (lt != null) {
+        long secs = lt.getHour() * 3600L + lt.getMinute() * 60L + lt.getSecond();
+        return cast(literal(secs), typeSpec(SqlTypeName.BIGINT));
+      }
       SqlNode ts = ensureTimestamp(args.get(0));
       SqlNode h = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.HOUR, null, POS), ts}, POS);
       SqlNode m = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), ts}, POS);
@@ -3418,7 +3429,19 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       } else {
         part = args.get(0).toString().replace("'", "").replace("`", "").toUpperCase();
       }
-      SqlNode ts = args.get(1);
+      // Try to resolve time-only literals at transpile time
+      java.time.LocalTime lt = tryExtractTimeOnlyLiteral(args.get(1));
+      if (lt != null) {
+        long val;
+        switch (part) {
+          case "HOUR": val = lt.getHour(); break;
+          case "MINUTE": val = lt.getMinute(); break;
+          case "SECOND": val = lt.getSecond(); break;
+          default: val = 0; break;
+        }
+        return cast(literal(val), typeSpec(SqlTypeName.BIGINT));
+      }
+      SqlNode ts = ensureTimestamp(args.get(1));
       TimeUnit tu;
       switch (part) {
         case "YEAR": tu = TimeUnit.YEAR; break;
@@ -3885,7 +3908,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   }
 
   private SqlNode ensureTimestamp(SqlNode node) {
-    if (isAlreadyCastToTime(node)) return node;
+    if (isAlreadyCastToTime(node)) return promoteTimeToTimestamp(node);
+    // Bare time-only string literal: prepend epoch date to make valid timestamp
+    java.time.LocalTime lt = tryExtractTimeOnlyLiteral(node);
+    if (lt != null) {
+      return cast(literal("1970-01-01 " + lt), typeSpec(SqlTypeName.TIMESTAMP));
+    }
     return cast(node, typeSpec(SqlTypeName.TIMESTAMP));
   }
 
@@ -4001,11 +4029,23 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       case "MICROSECOND": tu = TimeUnit.MICROSECOND; break;
       default: tu = TimeUnit.DAY; break;
     }
-    // If arg is already CAST to TIME, leave it (EXTRACT(HOUR FROM TIME) works).
+    // Try to resolve time-only literals at transpile time to avoid engine CAST failures
+    java.time.LocalTime lt = tryExtractTimeOnlyLiteral(arg);
+    if (lt != null) {
+      int val;
+      switch (unit) {
+        case "HOUR": val = lt.getHour(); break;
+        case "MINUTE": val = lt.getMinute(); break;
+        case "SECOND": val = lt.getSecond(); break;
+        default: val = 0; break;
+      }
+      return intLiteral(val);
+    }
+    // If arg is already CAST to TIME, promote to TIMESTAMP to avoid engine CAST(x AS TIME) failure.
     // Otherwise cast to TIMESTAMP (needed for raw string literals).
     SqlNode target;
     if (isAlreadyCastToTime(arg)) {
-      target = arg;
+      target = promoteTimeToTimestamp(arg);
     } else {
       target = cast(arg, typeSpec(SqlTypeName.TIMESTAMP));
     }
@@ -4027,6 +4067,27 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
     }
     return false;
+  }
+
+  /** Try to extract a time-only literal (HH:mm:ss) from a SqlNode.
+   *  Handles bare string literals and CAST(literal AS TIME). Returns null if not a time-only literal. */
+  private static java.time.LocalTime tryExtractTimeOnlyLiteral(SqlNode node) {
+    String val = null;
+    if (node instanceof SqlCharStringLiteral) {
+      val = ((SqlCharStringLiteral) node).getNlsString().getValue();
+    } else if (node instanceof SqlBasicCall) {
+      SqlBasicCall c = (SqlBasicCall) node;
+      if (c.getOperator() == SqlStdOperatorTable.CAST && c.operandCount() == 2
+          && c.operand(0) instanceof SqlCharStringLiteral) {
+        val = ((SqlCharStringLiteral) c.operand(0)).getNlsString().getValue();
+      }
+    }
+    if (val != null && val.matches("\\d{1,2}:\\d{2}:\\d{2}")) {
+      try {
+        return java.time.LocalTime.parse(val);
+      } catch (Exception ignored) {}
+    }
+    return null;
   }
 
   @Override
