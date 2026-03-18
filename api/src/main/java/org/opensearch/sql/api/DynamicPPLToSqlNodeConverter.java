@@ -133,6 +133,11 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         .collect(Collectors.toList());
   }
 
+  @Override
+  protected List<String> resolveBaseColumns() {
+    return resolveColumns(tableName);
+  }
+
   private boolean isArrayField(String fieldName) {
     if (tableName == null) return false;
     Table table = defaultSchema.getTable(tableName);

@@ -409,6 +409,14 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   // -- Pipe state: the current SqlNode being built up --
   protected SqlNode pipe;
 
+  /**
+   * Resolve base table column names for column stripping (e.g., after reset in streamstats).
+   * Returns empty list by default; overridden in DynamicPPLToSqlNodeConverter with schema access.
+   */
+  protected List<String> resolveBaseColumns() {
+    return List.of();
+  }
+
   // -- Deferred ORDER BY: stored here by visitSort, applied by visitHead or convert() --
   protected List<SqlNode> pendingOrderBy;
   protected SqlNode pendingFetch;
@@ -1730,25 +1738,35 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitStreamWindow(StreamWindow node, Void ctx) {
+    // Save pendingOrderBy so we can re-apply it as final output ordering
+    List<SqlNode> savedOrderBy = pendingOrderBy != null ? new ArrayList<>(pendingOrderBy) : null;
+
     // Apply pendingFetch before the window function (e.g. head N | streamstats)
     if (pendingFetch != null) {
       pipe = applyPendingOrderBy(pipe);
+      savedOrderBy = null; // already applied with fetch, don't re-apply
     }
     pipe = wrapAsSubquery();
 
-    // Build PARTITION BY
+    boolean hasReset = node.getResetBefore() != null || node.getResetAfter() != null;
+
+    // Build PARTITION BY column names (for group filter in self-join or window PARTITION BY)
     List<SqlNode> partCols = new ArrayList<>();
+    List<String> partColNames = new ArrayList<>();
     for (UnresolvedExpression expr : node.getGroupList()) {
+      SqlNode col;
       if (expr instanceof Alias && ((Alias) expr).getDelegated() instanceof Span) {
-        partCols.add(((Alias) expr).getDelegated().accept(this, null));
+        col = ((Alias) expr).getDelegated().accept(this, null);
       } else if (expr instanceof Alias) {
-        partCols.add(((Alias) expr).getDelegated().accept(this, null));
+        col = ((Alias) expr).getDelegated().accept(this, null);
       } else {
-        partCols.add(expr.accept(this, null));
+        col = expr.accept(this, null);
+      }
+      partCols.add(col);
+      if (col instanceof SqlIdentifier) {
+        partColNames.add(((SqlIdentifier) col).getSimple());
       }
     }
-    SqlNodeList partBy = partCols.isEmpty() ? SqlNodeList.EMPTY
-        : new SqlNodeList(partCols, POS);
 
     // Null check for bucketNullable=false
     SqlNode nullCheck = null;
@@ -1756,6 +1774,15 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       nullCheck = partCols.stream().map(c -> isNotNull(c))
           .reduce((a, b) -> and(a, b)).orElse(null);
     }
+
+    // --- Reset support: self-join approach ---
+    if (hasReset) {
+      return buildResetStreamWindow(node, savedOrderBy, partColNames, nullCheck);
+    }
+
+    // --- Non-reset path: standard window functions ---
+    SqlNodeList partBy = partCols.isEmpty() ? SqlNodeList.EMPTY
+        : new SqlNodeList(partCols, POS);
 
     List<SqlNode> windowExprs = new ArrayList<>();
     for (UnresolvedExpression item : node.getWindowFunctionList()) {
@@ -1799,7 +1826,182 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     selectItems.add(star());
     selectItems.addAll(windowExprs);
     pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
+
+    // Re-apply sort ordering if a prior sort command set pendingOrderBy
+    if (savedOrderBy != null && !savedOrderBy.isEmpty()) {
+      pendingOrderBy = savedOrderBy;
+    }
+
     return pipe;
+  }
+
+  /**
+   * Build reset-aware streamstats using a self-join approach.
+   * For each row, a scalar subquery computes the aggregate over matching rows
+   * (same segment, same group, within the window frame in global order).
+   */
+  private SqlNode buildResetStreamWindow(StreamWindow node, List<SqlNode> savedOrderBy,
+      List<String> partColNames, SqlNode nullCheck) {
+    // Determine ORDER BY for the global sequence
+    List<SqlNode> ordItems = buildStreamWindowOrderBy(node, savedOrderBy);
+
+    // Step 1: Add helper columns to the pipe
+    // ROW_NUMBER() OVER(ORDER BY ...) as __seq__
+    SqlNodeList seqOrdBy = new SqlNodeList(ordItems, POS);
+    SqlNode rowNum = window(
+        new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], POS),
+        SqlNodeList.EMPTY, seqOrdBy);
+
+    SqlNode beforeCond = node.getResetBefore() != null
+        ? node.getResetBefore().accept(this, null) : null;
+    SqlNode afterCond = node.getResetAfter() != null
+        ? node.getResetAfter().accept(this, null) : null;
+
+    SqlNode beforeFlag = beforeCond != null
+        ? caseWhen(List.of(beforeCond), List.of(literal(1)), literal(0))
+        : literal(0);
+    SqlNode afterFlag = afterCond != null
+        ? caseWhen(List.of(afterCond), List.of(literal(1)), literal(0))
+        : literal(0);
+
+    pipe = select(star(),
+        as(rowNum, "__seq__"),
+        as(beforeFlag, "__bf__"),
+        as(afterFlag, "__af__")
+    ).from(pipe).build();
+    pipe = subquery(pipe, nextAlias());
+
+    // Step 2: Compute __seg__ = SUM(__bf__) OVER(ORDER BY __seq__) + COALESCE(SUM(__af__) OVER(...1 PRECEDING), 0)
+    SqlNodeList segOrd = new SqlNodeList(List.of(identifier("__seq__")), POS);
+    SqlNode sumBf = windowWithFrame(sum(identifier("__bf__")), SqlNodeList.EMPTY, segOrd,
+        true, SqlWindow.createUnboundedPreceding(POS), SqlWindow.createCurrentRow(POS));
+    SqlNode sumAf = call("COALESCE",
+        windowWithFrame(sum(identifier("__af__")), SqlNodeList.EMPTY, segOrd,
+            true, SqlWindow.createUnboundedPreceding(POS),
+            SqlWindow.createPreceding(SqlLiteral.createExactNumeric("1", POS), POS)),
+        literal(0));
+
+    pipe = select(star(), as(plus(sumBf, sumAf), "__seg__")).from(pipe).build();
+
+    // Save this as the "left" side with helper columns
+    String leftAlias = nextAlias();
+    SqlNode leftPipe = subquery(pipe, leftAlias);
+
+    // Step 3: Build scalar subqueries for each window function
+    // We need to duplicate the pipe for the right side of the self-join
+    // The right side is the same query but with a different alias
+    List<SqlNode> aggExprs = new ArrayList<>();
+    for (UnresolvedExpression item : node.getWindowFunctionList()) {
+      Alias alias = (Alias) item;
+      WindowFunction wf = (WindowFunction) alias.getDelegated();
+
+      // Build the aggregate function call for the scalar subquery
+      SqlNode aggSql = buildWindowAggSql(wf.getFunction());
+
+      // Build frame filter based on window size
+      WindowFrame frame = wf.getWindowFrame();
+      SqlNode frameFilter = buildResetFrameFilter(frame, node.isCurrent(), leftAlias);
+
+      // Build segment filter: r.__seg__ = l.__seg__
+      SqlNode segFilter = eq(identifier("__seg__"),
+          identifier(leftAlias, "__seg__"));
+
+      // Build group filter with NULL handling
+      SqlNode groupFilter = null;
+      for (String colName : partColNames) {
+        SqlNode eqOrNull = or(
+            eq(identifier(colName), identifier(leftAlias, colName)),
+            and(isNull(identifier(colName)), isNull(identifier(leftAlias, colName)))
+        );
+        groupFilter = groupFilter == null ? eqOrNull : and(groupFilter, eqOrNull);
+      }
+
+      // Combine filters
+      SqlNode filter = and(frameFilter, segFilter);
+      if (groupFilter != null) {
+        filter = and(filter, groupFilter);
+      }
+
+      // Build the scalar subquery
+      String rightAlias = nextAlias();
+      SqlNode scalarSub = select(aggSql).from(subquery(pipe, rightAlias)).where(filter).build();
+
+      SqlNode aggExpr = scalarSub;
+      if (nullCheck != null) {
+        aggExpr = caseWhen(List.of(nullCheck), List.of(scalarSub), literal(null));
+      }
+      aggExprs.add(as(aggExpr, alias.getName()));
+    }
+
+    // Step 4: Build final SELECT with base columns + aggregate results
+    List<String> baseCols = resolveBaseColumns();
+    List<SqlNode> finalSelect = new ArrayList<>();
+    if (!baseCols.isEmpty()) {
+      for (String col : baseCols) {
+        finalSelect.add(identifier(col));
+      }
+    } else {
+      finalSelect.add(star());
+    }
+    finalSelect.addAll(aggExprs);
+
+    pipe = select(finalSelect.toArray(new SqlNode[0])).from(leftPipe).build();
+
+    // Re-apply sort ordering
+    if (savedOrderBy != null && !savedOrderBy.isEmpty()) {
+      pendingOrderBy = savedOrderBy;
+    }
+
+    return pipe;
+  }
+
+  /** Build frame filter for reset self-join: r.__seq__ BETWEEN l.__seq__ - (w-1) AND l.__seq__ */
+  private SqlNode buildResetFrameFilter(WindowFrame frame, boolean current, String leftAlias) {
+    SqlNode leftSeq = identifier(leftAlias, "__seq__");
+    SqlNode rightSeq = identifier("__seq__");
+
+    // Determine the window bounds from the frame
+    WindowBound lower = frame.getLower();
+    WindowBound upper = frame.getUpper();
+
+    // For ROWS BETWEEN N PRECEDING AND CURRENT ROW (typical streamstats window)
+    if (lower instanceof WindowBound.OffSetWindowBound && lower instanceof WindowBound.OffSetWindowBound) {
+      WindowBound.OffSetWindowBound offsetLower = (WindowBound.OffSetWindowBound) lower;
+      int offset = (int) offsetLower.getOffset();
+      // r.__seq__ BETWEEN l.__seq__ - offset AND l.__seq__
+      return between(rightSeq, minus(leftSeq, literal(offset)), leftSeq);
+    }
+    if (lower instanceof WindowBound.UnboundedWindowBound) {
+      // Unbounded preceding — just r.__seq__ <= l.__seq__
+      if (current) {
+        return lte(rightSeq, leftSeq);
+      } else {
+        return lt(rightSeq, leftSeq);
+      }
+    }
+    // Default: r.__seq__ <= l.__seq__
+    return lte(rightSeq, leftSeq);
+  }
+
+  /** Build ORDER BY items for streamstats window functions. */
+  private List<SqlNode> buildStreamWindowOrderBy(StreamWindow node, List<SqlNode> savedOrderBy) {
+    // Use the sort list from the first window function if present
+    if (!node.getWindowFunctionList().isEmpty()) {
+      Alias alias = (Alias) node.getWindowFunctionList().get(0);
+      WindowFunction wf = (WindowFunction) alias.getDelegated();
+      List<SqlNode> ordItems = new ArrayList<>();
+      for (org.apache.commons.lang3.tuple.Pair<Sort.SortOption, UnresolvedExpression> p
+          : wf.getSortList()) {
+        SqlNode col = p.getRight().accept(this, null);
+        if (p.getLeft() == Sort.SortOption.DEFAULT_DESC) col = desc(col);
+        ordItems.add(col);
+      }
+      if (!ordItems.isEmpty()) return ordItems;
+    }
+    if (savedOrderBy != null && !savedOrderBy.isEmpty()) {
+      return new ArrayList<>(savedOrderBy);
+    }
+    return List.of(cast(identifier("_id"), typeSpec(SqlTypeName.INTEGER)));
   }
 
   private SqlNode windowBoundToSqlNode(WindowBound bound) {
