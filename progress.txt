@@ -4,7 +4,7 @@
 # String transpiler archive: progress-archived-string-transpiler.txt (11 iterations, 58.5% peak)
 
 ## Current State
-- Current rate: 80.3% (1812/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
+- Current rate: 81.3% (1833/2255 est, 144 skipped, CalciteGeoPointFormatsIT excluded due to cluster crash)
 - Regressions vs string transpiler baseline: reduced from 414 (58.5% → 52.4%)
 - Converter: PPLToSqlNodeConverter (extends AbstractNodeVisitor<SqlNode, Void>)
 - Schema-aware subclass: DynamicPPLToSqlNodeConverter (uses SchemaPlus for column enumeration)
@@ -1983,4 +1983,32 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - For non-literal TIME expressions (e.g., field references), the ensureTimestamp promotion approach works: prepend today's date to convert TIME to TIMESTAMP, then EXTRACT works normally.
   - Append/appendcol ORDER BY must only use simple column references that exist in the output scope. Raw GROUP BY expressions (from stats) reference columns that don't exist after UNION ALL or subquery wrapping.
   - isResolvableOrderByItem() strips DESC/NULLS FIRST/NULLS LAST wrappers to find the underlying column identifier, then checks if it exists in the target column set.
+---
+
+## 2026-03-18T22:38 - V4-012 (Iteration 53): Datetime input validation
+- **What was fixed**: 6 new tests passing in CalcitePPLBuiltinFunctionsNullIT (65→71, ALL PASS)
+  - **validateDateLiteral**: For `DATE(literal)`, validates with `LocalDate.parse(val, STRICT_DATE)` (uuuu-MM-dd with STRICT resolver). Throws `ExpressionEvaluationException("date:VALUE in unsupported format, please use 'yyyy-MM-dd'")` for invalid dates like '2020-15-26' (month 15).
+  - **validateTimeLiteral**: For `TIME(literal)`, validates with `LocalTime.parse(val)`. Throws `ExpressionEvaluationException("time:VALUE in unsupported format, please use 'HH:mm:ss[.SSSSSSSSS]'")` for invalid times like '13:69:00' (minute 69).
+  - **validateTimeExtractLiteral**: For `HOUR/MINUTE/SECOND(literal)`, detects date-only strings (yyyy-MM-dd without ':') and throws with "time:VALUE in unsupported format". HOUR('2020-08-26') is invalid because HOUR expects time input, not date.
+  - **validateDateExtractLiteral**: For `DAY/DAYOFMONTH(literal)`, detects time-only strings (HH:mm:ss pattern) and throws with "date:VALUE in unsupported format". Also validates date-like strings with STRICT resolver. DAY('12:00:00') is invalid because DAY expects date input.
+  - **isValidDatetime**: For `DATETIME(literal)`, validates full datetime format (uuuu-MM-dd HH:mm:ss with STRICT resolver). Returns `CAST(NULL AS TIMESTAMP)` for invalid inputs. DATETIME('2025-12-02') returns NULL because it's date-only (not full datetime). DATETIME('2025-12-01 15:02:61') returns NULL because second 61 is invalid.
+  - **str_to_date error handling**: Wrapped transpile-time computation in try-catch. When format has no % specifiers (nonsensical format like '2025-13-02'), returns CAST(NULL AS TIMESTAMP) instead of throwing.
+  - **extractStringLiteral helper**: Extracts string value from SqlCharStringLiteral or CAST(literal AS type) nodes. Used by all validation methods.
+- **Pass rate change**: 81.0% (1827/2255 est) → 81.3% (1833/2255 est) = +0.3pp, +6 tests
+- **Per-class results** (before → after):
+  - CalcitePPLBuiltinFunctionsNullIT: 65→71 pass (71 total, 0 fail) ✅ ALL PASS — +6 (testDateInvalid, testHourInvalid, testDayInvalid, testTimeInvalid, testDatetimeInvalid, testStrTDateInvalid2)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteDateTimeFunctionIT: 54/65 (no regression) ✅
+  - CalciteConvertTZFunctionIT: 14/14 (no regression) ✅
+  - CalciteNowLikeFunctionIT: 12/12 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+119/-14: 6 validation methods, str_to_date error handling, extractStringLiteral helper)
+- **Learnings for future iterations:**
+  - PPL type constructor functions (DATE, TIME, TIMESTAMP, DATETIME) have different validation semantics: DATE/TIME throw for invalid inputs, DATETIME returns NULL.
+  - HOUR/MINUTE/SECOND expect time-like input — a date-only string like '2020-08-26' is invalid even though it's a valid date. The V2 engine validated input types strictly.
+  - DAY/DAYOFMONTH expect date-like input — a time-only string like '12:00:00' is invalid even though it's a valid time.
+  - Validation should only apply to string literal arguments (SqlCharStringLiteral). Field references pass through unchanged for runtime validation.
+  - ResolverStyle.STRICT is essential for date validation — without it, LocalDate.parse accepts invalid dates like Feb 30 by adjusting to Feb 28.
+  - The pattern `uuuu-MM-dd` (not `yyyy-MM-dd`) is required for STRICT resolver — `yyyy` is era-based and doesn't work with STRICT.
+  - CalcitePPLBuiltinDatetimeFunctionInvalidIT (45 tests) is excluded from the test suite in build.gradle because invalid date literals crash the Calcite code generator. These tests are NOT counted in the pass rate.
 ---
