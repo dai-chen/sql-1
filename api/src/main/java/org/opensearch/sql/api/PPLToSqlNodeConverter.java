@@ -523,7 +523,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       String rawValue = rawObj.toString();
       SqlNode valueLiteral;
       if ("@timestamp".equals(fieldName)) {
-        String resolved = resolveDateMathToTimestamp(rawValue);
+        String resolved = resolveTimestampValue(rawValue);
         valueLiteral = SqlLiteral.createCharString(resolved, POS);
       } else {
         valueLiteral = literal(rawObj);
@@ -552,6 +552,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       List<SqlNode> vals = new ArrayList<>();
       for (SearchLiteral lit : in.getValues()) {
         String raw = ((Literal) lit.getLiteral()).getValue().toString();
+        if (raw.startsWith("\"") && raw.endsWith("\"")) raw = raw.substring(1, raw.length() - 1);
         vals.add(SqlLiteral.createCharString(isTimestamp ? resolveTimestampValue(raw) : raw, POS));
       }
       return new SqlBasicCall(SqlStdOperatorTable.IN,
@@ -613,7 +614,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       try {
         java.time.ZonedDateTime zdt = java.time.ZonedDateTime.parse(raw,
             java.time.format.DateTimeFormatter.ISO_DATE_TIME);
-        return zdt.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSSSSS"));
+        return zdt.format(VARIABLE_NANOS_FMT);
       } catch (Exception ignored) {}
     }
     return resolveDateMathToTimestamp(raw);
@@ -621,6 +622,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   private static final java.time.format.DateTimeFormatter TS_FMT =
       java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+  private static final java.time.format.DateTimeFormatter VARIABLE_NANOS_FMT =
+      new java.time.format.DateTimeFormatterBuilder()
+          .appendPattern("yyyy-MM-dd HH:mm:ss")
+          .appendFraction(java.time.temporal.ChronoField.NANO_OF_SECOND, 0, 9, true)
+          .toFormatter(java.util.Locale.ROOT);
 
   private static final DateTimeFormatter EARLIEST_LATEST_FMT =
       DateTimeFormatter.ofPattern("MM/dd/yyyy:HH:mm:ss");
@@ -970,6 +977,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       builder = builder.where(isNotNull(spanGroupBy));
     }
 
+    // Deterministic ordering by group-by keys (PPL semantics)
+    if (!groupByItems.isEmpty()) {
+      pendingOrderBy = new ArrayList<>(groupByItems);
+    }
+
     pipe = builder.build();
     return pipe;
   }
@@ -1246,6 +1258,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitJoin(Join node, Void ctx) {
+    // Join resets ordering context — clear any pending ORDER BY from stats
+    pendingOrderBy = null;
     String leftAlias = node.getLeftAlias().orElse(null);
     String effectiveLeftAlias;
     SqlNode leftSide;
@@ -1483,6 +1497,8 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitLookup(Lookup node, Void ctx) {
+    // Lookup resets ordering context
+    pendingOrderBy = null;
     String leftAlias = "_l";
     String rightAlias = "_r";
     knownAliases.add(leftAlias);
@@ -1714,6 +1730,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitStreamWindow(StreamWindow node, Void ctx) {
+    // Apply pendingFetch before the window function (e.g. head N | streamstats)
+    if (pendingFetch != null) {
+      pipe = applyPendingOrderBy(pipe);
+    }
     pipe = wrapAsSubquery();
 
     // Build PARTITION BY
@@ -1759,7 +1779,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
       // Default ORDER BY CAST("_id" AS INTEGER) for deterministic row-by-row accumulation
       if (ordItems.isEmpty()) {
-        ordItems.add(cast(identifier("_id"), typeSpec(SqlTypeName.INTEGER)));
+        if (pendingOrderBy != null && !pendingOrderBy.isEmpty()) {
+          ordItems.addAll(pendingOrderBy);
+          pendingOrderBy = null;
+        } else {
+          ordItems.add(cast(identifier("_id"), typeSpec(SqlTypeName.INTEGER)));
+        }
       }
       SqlNodeList ordBy = new SqlNodeList(ordItems, POS);
 
@@ -3920,9 +3945,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitExistsSubquery(ExistsSubquery node, Void ctx) {
-    SqlNode sub = subsearchMaxOut > 0
-        ? convertSubPlanWithMaxout(node.getQuery(), subsearchMaxOut)
-        : convertSubPlan(node.getQuery());
+    SqlNode sub = convertSubPlan(node.getQuery());
+    if (subsearchMaxOut > 0) {
+      sub = wrapWithFetch(sub, subsearchMaxOut);
+    }
     return exists(sub);
   }
 

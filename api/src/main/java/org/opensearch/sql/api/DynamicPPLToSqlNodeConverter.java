@@ -2379,7 +2379,27 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
       }
       return call("COALESCE", args.toArray(new SqlNode[0]));
     }
+    // For adddate/subdate with plain days and TIME field, wrap arg in CAST to TIME
+    // so the parent's isAlreadyCastToTime check promotes it to TIMESTAMP.
+    if (("adddate".equals(name) || "subdate".equals(name) || "date_add".equals(name) || "date_sub".equals(name))
+        && node.getFuncArgs().size() == 2
+        && !(node.getFuncArgs().get(1) instanceof org.opensearch.sql.ast.expression.Interval)) {
+      String fieldName = extractFieldName(node.getFuncArgs().get(0));
+      if (fieldName != null && getFieldSqlType(fieldName) == SqlTypeName.TIME) {
+        SqlNode result = super.visitFunction(node, ctx);
+        // The parent produced TIMESTAMPADD(DAY, ..., "time") with TIME type;
+        // wrap in CAST to TIMESTAMP to match PPL semantics.
+        return cast(result, new SqlDataTypeSpec(
+            new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, SqlParserPos.ZERO), SqlParserPos.ZERO));
+      }
+    }
     return super.visitFunction(node, ctx);
+  }
+
+  private static String extractFieldName(UnresolvedExpression expr) {
+    if (expr instanceof Field) return ((Field) expr).getField().toString();
+    if (expr instanceof QualifiedName) return ((QualifiedName) expr).toString();
+    return null;
   }
 
   // -- Fix 3: Span type preservation for TIME/DATE fields --

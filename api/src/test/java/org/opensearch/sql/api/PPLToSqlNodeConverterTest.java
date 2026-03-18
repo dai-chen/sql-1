@@ -224,7 +224,8 @@ public class PPLToSqlNodeConverterTest {
         SELECT CAST(AVG(CAST("a" AS DOUBLE)) AS DOUBLE) AS "avg_a", "b" AS "b"
         FROM (SELECT *
         FROM "t") AS "_t1"
-        GROUP BY "b\"""");
+        GROUP BY "b"
+        ORDER BY "b\"""");
   }
 
   @Test
@@ -233,7 +234,8 @@ public class PPLToSqlNodeConverterTest {
         SELECT COUNT(*) AS "cnt", SUM("a") AS "total", "b" AS "b"
         FROM (SELECT *
         FROM "t") AS "_t1"
-        GROUP BY "b\"""");
+        GROUP BY "b"
+        ORDER BY "b\"""");
   }
 
   @Test
@@ -243,7 +245,8 @@ public class PPLToSqlNodeConverterTest {
         SELECT COUNT(*) AS "cnt", FLOOR("a" / 10) * 10 AS "span(a,10)"
         FROM (SELECT *
         FROM "t") AS "_t1"
-        GROUP BY FLOOR("a" / 10) * 10""");
+        GROUP BY FLOOR("a" / 10) * 10
+        ORDER BY FLOOR("a" / 10) * 10""");
   }
 
   // ===== Eval (US-006) =====
