@@ -3057,11 +3057,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     // latest(timeStr, field) → field <= resolved_time (field is at or before the latest boundary)
     if ("earliest".equals(name) && args.size() == 2) {
       String timeStr = resolveFilterTimeArg(args.get(0));
-      return gte(args.get(1), cast(literal(timeStr), typeSpec(SqlTypeName.TIMESTAMP)));
+      return gt(args.get(1), cast(literal(timeStr), typeSpec(SqlTypeName.TIMESTAMP)));
     }
     if ("latest".equals(name) && args.size() == 2) {
       String timeStr = resolveFilterTimeArg(args.get(0));
-      return lte(args.get(1), cast(literal(timeStr), typeSpec(SqlTypeName.TIMESTAMP)));
+      return lt(args.get(1), cast(literal(timeStr), typeSpec(SqlTypeName.TIMESTAMP)));
     }
     if ("if".equals(name))
       return caseWhen(List.of(args.get(0)), List.of(castVarcharIfStringLiteral(args.get(1))), castVarcharIfStringLiteral(args.get(2)));
@@ -3293,8 +3293,16 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return tsAdd("DAY", new SqlBasicCall(SqlStdOperatorTable.UNARY_MINUS, new SqlNode[]{intervalArg}, POS), dateArg);
     }
     // datediff
-    if ("datediff".equals(name))
-      return cast(call("TIMESTAMPDIFF", identifier("DAY"), cast(args.get(1), typeSpec(SqlTypeName.DATE)), cast(args.get(0), typeSpec(SqlTypeName.DATE))), typeSpec(SqlTypeName.BIGINT));
+    if ("datediff".equals(name)) {
+      // For literal TIME inputs, datediff is always 0 (same day)
+      boolean arg0Time = isTimeLiteral(args.get(0));
+      boolean arg1Time = isTimeLiteral(args.get(1));
+      if (arg0Time && arg1Time) return cast(literal(0), typeSpec(SqlTypeName.BIGINT));
+      // Cast to TIMESTAMP (not DATE) to handle TIME inputs that can't be cast to DATE directly
+      SqlNode a = arg0Time ? cast(literal(LocalDate.now() + " " + extractStringLiteral(args.get(0))), typeSpec(SqlTypeName.TIMESTAMP)) : ensureTimestamp(args.get(0));
+      SqlNode b = arg1Time ? cast(literal(LocalDate.now() + " " + extractStringLiteral(args.get(1))), typeSpec(SqlTypeName.TIMESTAMP)) : ensureTimestamp(args.get(1));
+      return cast(call("TIMESTAMPDIFF", identifier("DAY"), cast(b, typeSpec(SqlTypeName.DATE)), cast(a, typeSpec(SqlTypeName.DATE))), typeSpec(SqlTypeName.BIGINT));
+    }
     // timestampdiff
     if ("timestampdiff".equals(name)) {
       SqlNode unit = args.get(0);
@@ -3427,11 +3435,36 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     // to_seconds
     if ("to_seconds".equals(name)) {
+      // Try transpile-time computation for literal inputs
+      String litStr = extractStringLiteral(args.get(0));
+      if (litStr != null) {
+        try {
+          java.time.LocalDateTime ldt;
+          if (litStr.contains(" ") || litStr.contains("T")) {
+            ldt = java.time.LocalDateTime.parse(litStr.replace(" ", "T"));
+          } else {
+            ldt = java.time.LocalDate.parse(litStr).atStartOfDay();
+          }
+          // Days from year 0 to date (MySQL convention: year 0 = 1 BC, day 1 = 0000-01-01)
+          // to_days('0001-01-01') = 366, so to_seconds = to_days * 86400 + time_of_day_seconds
+          long daysSinceEpoch = java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.of(1, 1, 1), ldt.toLocalDate());
+          long toDays = daysSinceEpoch + 366;
+          long timeOfDay = ldt.getHour() * 3600L + ldt.getMinute() * 60L + ldt.getSecond();
+          long totalSeconds = toDays * 86400L + timeOfDay;
+          return cast(SqlLiteral.createExactNumeric(Long.toString(totalSeconds), POS), typeSpec(SqlTypeName.BIGINT));
+        } catch (Exception e) { /* fall through */ }
+      }
       SqlNode origin = cast(literal("0001-01-01"), typeSpec(SqlTypeName.DATE));
+      SqlNode ts = ensureTimestamp(args.get(0));
+      SqlNode dayPart = cast(times(plus(call("TIMESTAMPDIFF", identifier("DAY"), origin, cast(args.get(0), typeSpec(SqlTypeName.DATE))), intLiteral(366)), intLiteral(86400)), typeSpec(SqlTypeName.BIGINT));
+      SqlNode timePart = cast(plus(plus(
+          times(extractPart(TimeUnit.HOUR, ts), intLiteral(3600)),
+          times(extractPart(TimeUnit.MINUTE, ts), intLiteral(60))),
+          extractPart(TimeUnit.SECOND, ts)), typeSpec(SqlTypeName.BIGINT));
       return caseWhen(
           List.of(isNull(args.get(0))),
           List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.BIGINT))),
-          cast(times(plus(call("TIMESTAMPDIFF", identifier("DAY"), origin, cast(args.get(0), typeSpec(SqlTypeName.DATE))), intLiteral(366)), intLiteral(86400)), typeSpec(SqlTypeName.BIGINT)));
+          plus(dayPart, timePart));
     }
     // last_day
     if ("last_day".equals(name))
@@ -3457,8 +3490,18 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     // timediff
     if ("timediff".equals(name)) {
+      // Try transpile-time computation for literal time inputs
+      java.time.LocalTime lt0 = tryExtractTimeOnlyLiteral(args.get(0));
+      java.time.LocalTime lt1 = tryExtractTimeOnlyLiteral(args.get(1));
+      if (lt0 != null && lt1 != null) {
+        long diffSec = lt0.toSecondOfDay() - lt1.toSecondOfDay();
+        long absDiff = Math.abs(diffSec);
+        String sign = diffSec < 0 ? "-" : "";
+        String timeStr = String.format(java.util.Locale.ROOT, "%s%02d:%02d:%02d", sign, absDiff / 3600, (absDiff % 3600) / 60, absDiff % 60);
+        return cast(literal(timeStr), typeSpec(SqlTypeName.TIME));
+      }
       SqlNode epoch = cast(literal("00:00:00"), typeSpec(SqlTypeName.TIME));
-      SqlNode diff = call("TIMESTAMPDIFF", identifier("SECOND"), cast(args.get(1), typeSpec(SqlTypeName.TIMESTAMP)), cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP)));
+      SqlNode diff = call("TIMESTAMPDIFF", identifier("SECOND"), ensureTimestamp(args.get(1)), ensureTimestamp(args.get(0)));
       return caseWhen(
           List.of(or(isNull(args.get(0)), isNull(args.get(1)))),
           List.of(cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIME))),
@@ -4169,6 +4212,25 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return null;
   }
 
+  /** Compute week number using java.util.Calendar, matching CalendarLookup behavior in core. */
+  private static int computeWeekWithCalendar(int mode, java.time.LocalDate date) {
+    int day = (mode % 2 == 0) ? java.util.Calendar.SUNDAY : java.util.Calendar.MONDAY;
+    int minDays;
+    if (mode == 1 || mode == 3) minDays = 5;
+    else if (mode == 4 || mode == 6) minDays = 4;
+    else minDays = 7;
+    java.util.Calendar cal = java.util.Calendar.getInstance();
+    cal.setFirstDayOfWeek(day);
+    cal.setMinimalDaysInFirstWeek(minDays);
+    cal.set(date.getYear(), date.getMonthValue() - 1, date.getDayOfMonth());
+    int weekNumber = cal.get(java.util.Calendar.WEEK_OF_YEAR);
+    if (weekNumber > 51 && cal.get(java.util.Calendar.DAY_OF_MONTH) < 7
+        && (mode == 0 || mode == 1 || mode == 4 || mode == 5)) {
+      weekNumber = 0;
+    }
+    return weekNumber;
+  }
+
   /** Compute MySQL-compatible week number for a given date and mode. */
   private static int computeMySQLWeek(java.time.LocalDate d, int mode) {
     int doy = d.getDayOfYear();
@@ -4290,6 +4352,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
     }
     return false;
+  }
+
+  /** Check if a SqlNode is a time-only literal: CAST('HH:mm:ss' AS TIME) or bare time string. */
+  private static boolean isTimeLiteral(SqlNode node) {
+    if (isAlreadyCastToTime(node)) return true;
+    String val = extractStringLiteral(node);
+    return val != null && val.matches("\\d{1,2}:\\d{2}(:\\d{2})?");
   }
 
   /** Try to extract a time-only literal (HH:mm:ss) from a SqlNode.
@@ -5275,10 +5344,23 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
             break;
           case 'n': parts.add(literal("\n")); break;
           case 't': parts.add(literal("\t")); break;
-          case 'U': case 'V': // week of year (Sunday start)
-            parts.add(cast(call("WEEK", ts), typeSpec(SqlTypeName.VARCHAR))); break;
-          case 'u': case 'v': // week of year (ISO)
-            parts.add(cast(call("WEEK", ts), typeSpec(SqlTypeName.VARCHAR))); break;
+          case 'U': case 'V': case 'u': case 'v': {
+            int weekMode = (spec == 'U') ? 0 : (spec == 'u') ? 1 : (spec == 'V') ? 2 : 3;
+            String wkDateStr = extractLiteralDateString(ts);
+            if (wkDateStr == null) wkDateStr = extractStringLiteral(ts);
+            if (wkDateStr != null) {
+              try {
+                java.time.LocalDate ld = java.time.LocalDate.parse(
+                    wkDateStr.length() > 10 ? wkDateStr.substring(0, 10) : wkDateStr);
+                parts.add(literal(String.valueOf(computeWeekWithCalendar(weekMode, ld))));
+              } catch (Exception e) {
+                parts.add(cast(buildWeekExpr(ts, weekMode), typeSpec(SqlTypeName.VARCHAR)));
+              }
+            } else {
+              parts.add(cast(buildWeekExpr(ts, weekMode), typeSpec(SqlTypeName.VARCHAR)));
+            }
+            break;
+          }
           case 'X': case 'x': // year for week
             parts.add(cast(year, typeSpec(SqlTypeName.VARCHAR))); break;
           default:

@@ -71,9 +71,32 @@ public class UnifiedQueryPlanner {
       return preserveCollation(analyze(parse(query)));
     } catch (SyntaxCheckException e) {
       throw e;
+    } catch (IllegalArgumentException e) {
+      throw e;
     } catch (Exception e) {
+      // Check for column-not-found validation errors from Calcite
+      String msg = extractColumnNotFound(e);
+      if (msg != null) {
+        throw new IllegalArgumentException(msg, e);
+      }
       throw new IllegalStateException("Failed to plan query", e);
     }
+  }
+
+  /** Extract a "Field [X] not found" message from a Calcite validation exception chain. */
+  private static String extractColumnNotFound(Throwable t) {
+    for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+      String m = cur.getMessage();
+      if (m != null && m.contains("not found in any table")) {
+        // Calcite message: "Column 'X' not found in any table"
+        int start = m.indexOf('\'');
+        int end = m.indexOf('\'', start + 1);
+        if (start >= 0 && end > start) {
+          return "Field [" + m.substring(start + 1, end) + "] not found.";
+        }
+      }
+    }
+    return null;
   }
 
   private Parser buildQueryParser(QueryType queryType) {

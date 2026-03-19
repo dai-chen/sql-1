@@ -413,6 +413,10 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
         String sourcePattern = fieldName(mapping.getOrigin());
         String targetPattern = fieldName(mapping.getTarget());
         if (WildcardRenameUtils.isWildcardPattern(sourcePattern)) {
+          if (!WildcardRenameUtils.validatePatternCompatibility(sourcePattern, targetPattern)) {
+            throw new IllegalArgumentException(
+                "Source and target patterns have different wildcard counts");
+          }
           List<String> matchingFields = WildcardRenameUtils.matchFieldNames(sourcePattern, expandCols);
           for (String fld : matchingFields) {
             String newName = WildcardRenameUtils.applyWildcardTransformation(
