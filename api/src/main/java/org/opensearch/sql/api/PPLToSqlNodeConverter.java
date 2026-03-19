@@ -10,6 +10,7 @@ import static org.opensearch.sql.calcite.utils.SqlNodeDSL.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.ResolverStyle;
@@ -3029,13 +3030,62 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           typeSpec(SqlTypeName.TIMESTAMP));
     }
     if ("datetime".equals(name)) {
+      SqlNode nullTs = cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
+      java.util.regex.Pattern dtTzPat = java.util.regex.Pattern.compile(
+          "^(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})([+-]\\d{2}:\\d{2})?$");
+      java.util.regex.Pattern offsetPat = java.util.regex.Pattern.compile("^([+-])(\\d{2}):(\\d{2})$");
       if (args.size() == 1) {
         String val = extractStringLiteral(args.get(0));
-        if (val != null && !isValidDatetime(val))
-          return cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
-        return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+        if (val == null) return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
+        java.util.regex.Matcher m = dtTzPat.matcher(val);
+        if (!m.matches()) return nullTs;
+        String baseDt = m.group(1);
+        if (!isValidDatetime(baseDt)) return nullTs;
+        if (m.group(2) != null) {
+          // Has embedded offset — validate range and strip it
+          java.util.regex.Matcher om = offsetPat.matcher(m.group(2));
+          if (!om.matches()) return nullTs;
+          int mins = (Integer.parseInt(om.group(2)) * 60 + Integer.parseInt(om.group(3)))
+              * (om.group(1).equals("-") ? -1 : 1);
+          if (mins < -840 || mins > 840) return nullTs;
+        }
+        return cast(literal(baseDt), typeSpec(SqlTypeName.TIMESTAMP));
       }
-      return cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
+      if (args.size() == 2) {
+        String val = extractStringLiteral(args.get(0));
+        String tzArg = extractStringLiteral(args.get(1));
+        if (val == null || tzArg == null) return nullTs;
+        java.util.regex.Matcher m = dtTzPat.matcher(val);
+        if (!m.matches() || m.group(2) == null) return nullTs;
+        String baseDt = m.group(1);
+        if (!isValidDatetime(baseDt)) return nullTs;
+        // Parse embedded offset
+        java.util.regex.Matcher srcM = offsetPat.matcher(m.group(2));
+        if (!srcM.matches()) return nullTs;
+        int srcMin = (Integer.parseInt(srcM.group(2)) * 60 + Integer.parseInt(srcM.group(3)))
+            * (srcM.group(1).equals("-") ? -1 : 1);
+        if (srcMin < -840 || srcMin > 840) return nullTs;
+        // Parse target offset
+        int tgtMin;
+        java.util.regex.Matcher tgtM = offsetPat.matcher(tzArg);
+        if (tgtM.matches()) {
+          tgtMin = (Integer.parseInt(tgtM.group(2)) * 60 + Integer.parseInt(tgtM.group(3)))
+              * (tgtM.group(1).equals("-") ? -1 : 1);
+        } else {
+          try {
+            LocalDateTime ldt = LocalDateTime.parse(baseDt, DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss"));
+            ZoneOffset embeddedOff = ZoneOffset.ofTotalSeconds(srcMin * 60);
+            java.time.ZonedDateTime zdt = ldt.atOffset(embeddedOff).toZonedDateTime();
+            tgtMin = ZoneId.of(tzArg).getRules().getOffset(zdt.toInstant()).getTotalSeconds() / 60;
+          } catch (Exception e) { return nullTs; }
+        }
+        if (tgtMin <= -840 || tgtMin > 840) return nullTs;
+        int delta = tgtMin - srcMin;
+        if (delta == 0) return cast(literal(baseDt), typeSpec(SqlTypeName.TIMESTAMP));
+        return cast(call("TIMESTAMPADD", identifier("MINUTE"), intLiteral(delta),
+            cast(literal(baseDt), typeSpec(SqlTypeName.TIMESTAMP))), typeSpec(SqlTypeName.TIMESTAMP));
+      }
+      return nullTs;
     }
     // EXTRACT-based datetime functions → CAST(EXTRACT(unit FROM CAST(arg AS TIMESTAMP)) AS INTEGER)
     if ("year".equals(name) && args.size() == 1)
