@@ -445,6 +445,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   // -- Pending SubqueryAlias: deferred until wrapAsSubquery maps it to the generated alias --
   protected String pendingSubqueryAlias = null;
 
+  // -- Legacy mode: when true, Like function calls are case-insensitive (like ilike) --
+  protected boolean legacyPreferred = false;
+
+  public void setLegacyPreferred(boolean legacyPreferred) {
+    this.legacyPreferred = legacyPreferred;
+  }
+
   private String nextAlias() {
     String alias = "_t" + aliasCounter.incrementAndGet();
     knownAliases.add(alias);
@@ -2930,6 +2937,13 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (parts.size() == 1 && binReplacements.containsKey(parts.get(0))) {
       return binReplacements.get(parts.get(0));
     }
+    // Check full dotted name against binReplacements (for dotted/nested field bins)
+    if (parts.size() > 1) {
+      String fullName = String.join(".", parts);
+      if (binReplacements.containsKey(fullName)) {
+        return binReplacements.get(fullName);
+      }
+    }
     // Rewrite SubqueryAlias references to effective join aliases
     if (parts.size() > 1 && aliasMapping.containsKey(parts.get(0))) {
       List<String> rewritten = new ArrayList<>(parts);
@@ -3183,7 +3197,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     if ("log2".equals(name)) return divide(call("LN", args.get(0)), call("LN", literal(2)));
     if ("conv".equals(name) && args.size() == 3) return buildConv(args);
-    if ("like".equals(name)) return buildLike(args, false);
+    if ("like".equals(name)) return (legacyPreferred && args.size() == 2) ? buildIlike(args) : buildLike(args, false);
     if ("ilike".equals(name)) return buildIlike(args);
     if ("not like".equals(name)) return buildLike(args, true);
     // Type constructor functions → CAST

@@ -131,6 +131,9 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     }
     UnresolvedPlan plan = PPLToSqlNodeConverter.parse(ppl, parseSettings);
     DynamicPPLToSqlNodeConverter converter = new DynamicPPLToSqlNodeConverter(getV4Schema());
+    if (legacyOverride != null && legacyOverride) {
+      converter.setLegacyPreferred(true);
+    }
     if (v4SubsearchMaxOut != null || v4JoinSubsearchMaxOut != null) {
       converter.setSubsearchMaxOut(
           v4SubsearchMaxOut != null ? v4SubsearchMaxOut : -1,
@@ -830,7 +833,19 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
 
   public static void withSettings(Key setting, String value, Runnable f) throws IOException {
     String originalValue = getClusterSetting(setting.getKeyValue(), "transient");
-    if (originalValue.equals(value)) f.run();
+    if (originalValue.equals(value)) {
+      // Even when value matches, set ThreadLocal for V4 path
+      if (V4_ENABLED && setting == Key.PPL_SYNTAX_LEGACY_PREFERRED) {
+        V4_LEGACY_PREFERRED_OVERRIDE.set(Boolean.parseBoolean(value));
+      }
+      try {
+        f.run();
+      } finally {
+        if (V4_ENABLED && setting == Key.PPL_SYNTAX_LEGACY_PREFERRED) {
+          V4_LEGACY_PREFERRED_OVERRIDE.remove();
+        }
+      }
+    }
     else {
       try {
         updateClusterSettings(
