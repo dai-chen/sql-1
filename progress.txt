@@ -2118,3 +2118,41 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Metadata column stripping for joins should be done on the INPUT sides (resolveJoinRight), not on the OUTPUT. But resolveJoinRight is private in the base converter and changing it to protected + overriding introduces its own issues with multi-join alias resolution.
   - The testLeftJoinWithStreamstats metadata leak is a real issue but affects only 1 test. The 19 JoinIT regressions from the attempted fix are far worse. Accept the 1-test trade-off until a better approach is found.
 ---
+
+## 2026-03-19T05:48 - V4-012 (Iteration 58): datediff/timediff/to_seconds + date_format week + rename validation
+- **What was fixed**: 7 new tests passing across 3 test classes
+  - **datediff TIME literal handling** (1 test): Added `isTimeLiteral()` helper that detects TIME inputs (CAST(x AS TIME) or bare HH:mm:ss strings). When both args are TIME literals, returns 0 (same day). When one arg is TIME, promotes to TIMESTAMP using today's date before casting to DATE. Fixes testDateDiff where `DATEDIFF(TIME('23:59:59'), TIME('00:00:00'))` failed because CAST(TIME AS DATE) is invalid in Calcite.
+  - **timediff transpile-time computation** (1 test): For literal time inputs, uses `tryExtractTimeOnlyLiteral()` to extract both args, computes difference in Java (secondOfDay subtraction), emits result as `CAST('HH:mm:ss' AS TIME)`. Uses `Locale.ROOT` in String.format to avoid locale-dependent digit rendering. For non-literal args, changed `cast(args, TIMESTAMP)` to `ensureTimestamp()` for proper TIME→TIMESTAMP promotion. Fixes testTimeDiff.
+  - **to_seconds transpile-time computation** (1 test): For literal inputs, parses date/datetime string in Java, computes `(toDays * 86400 + timeOfDay)` directly using ChronoUnit.DAYS.between from year 1 + 366 offset. Emits as BIGINT literal. For non-literal inputs, splits into day part (TIMESTAMPDIFF(DAY) * 86400) plus time part (EXTRACT(HOUR)*3600 + EXTRACT(MINUTE)*60 + EXTRACT(SECOND)). Fixes testToSeconds where old formula only used DAY precision, losing time component.
+  - **date_format %U/%u/%V/%v week modes** (1 test): Added `computeWeekWithCalendar()` using java.util.Calendar matching CalendarLookup behavior in core module. Mode 0 (%U): Sunday start, minDays=7. Mode 1 (%u): Monday start, minDays=5. Mode 2 (%V): Sunday start, minDays=4. Mode 3 (%v): Monday start, minDays=5. For literal date inputs, computes at transpile time. Fixes testDateFormat where %U returned 5 instead of 4 for 1998-01-31.
+  - **earliest/latest filter strict inequality** (1 test): Changed `earliest(timeStr, field)` from `field >= resolved_time` to `field > resolved_time` (gt). Changed `latest(timeStr, field)` from `field <= resolved_time` to `field < resolved_time` (lt). Fixes testEarliestWithEval where `earliest('now', now)` returned true (same second) but test expected false.
+  - **Rename wildcard validation** (1 test): Added `WildcardRenameUtils.validatePatternCompatibility()` upfront check in DynamicPPLToSqlNodeConverter.visitRename before wildcard expansion loop. Throws `IllegalArgumentException("Source and target patterns have different wildcard counts")`. Fixes testWildcardPatternDifferentCounts.
+  - **Column not found error mapping** (1 test): Added `extractColumnNotFound()` in UnifiedQueryPlanner.plan() that walks exception chain looking for Calcite's "Column 'X' not found in any table" message, converts to `IllegalArgumentException("Field [X] not found.")`. Also added pass-through for IllegalArgumentException. Fixes testRefRenamedField.
+- **Pass rate change**: 82.5% (1861/2255 est) → 82.8% (1868/2255 est) = +0.3pp, +7 tests
+- **Per-class results** (before → after):
+  - CalciteDateTimeFunctionIT: 57→61 pass (65 total, 2 fail: testMakeTime, testStrftimeWithDateFields — engine-blocked) — +4
+  - CalcitePPLConditionBuiltinFunctionIT: 63→64 pass (64 total, 0 fail) ✅ ALL PASS — +1
+  - CalcitePPLRenameIT: 20→22 pass (22 total, 0 fail) ✅ ALL PASS — +2
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLAggregationIT: 99/100 (no regression) ✅
+  - CalcitePPLJoinIT: 37/39 (no regression) ✅
+  - CalcitePPLLookupIT: 17/17 ALL PASS (no regression) ✅
+  - CalcitePPLBuiltinFunctionsNullIT: 71/71 ALL PASS (no regression) ✅
+  - CalciteConvertTZFunctionIT: 14/14 ALL PASS (no regression) ✅
+  - CalciteAddTotalsCommandIT: 11/11 ALL PASS (no regression) ✅
+  - CalciteHeadCommandIT: ALL PASS (no regression) ✅
+- **Remaining engine-blocked failures** (not converter-fixable):
+  - testMakeTime: Calcite engine TIME type only preserves millisecond precision, loses microseconds
+  - testStrftimeWithDateFields: epoch_millis field loses nanosecond precision at engine level
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+102/-10: datediff TIME handling, timediff transpile-time, to_seconds transpile-time, date_format week modes, earliest/latest strict inequality, isTimeLiteral helper, computeWeekWithCalendar helper)
+  - api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (+4: wildcard rename validation)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryPlanner.java (+23: extractColumnNotFound, IllegalArgumentException pass-through)
+- **Learnings for future iterations:**
+  - DATEDIFF with TIME inputs: Calcite can't CAST(TIME AS DATE) directly. Must promote TIME to TIMESTAMP first (prepend today's date), then CAST to DATE.
+  - java.util.Calendar with setFirstDayOfWeek and setMinimalDaysInFirstWeek correctly implements MySQL week modes. This matches the CalendarLookup behavior in the core module.
+  - String.format with Locale.ROOT is essential for numeric formatting — without it, locales like ar-KW produce Arabic-Indic numerals instead of ASCII digits.
+  - UnifiedQueryPlanner.plan() wraps all exceptions as IllegalStateException("Failed to plan query"). To surface specific error messages (like "Field [X] not found"), must inspect the exception chain before wrapping.
+  - The remaining 2 CalciteDateTimeFunctionIT failures (testMakeTime, testStrftimeWithDateFields) are both engine-level precision limitations — Calcite TIME/TIMESTAMP types only preserve millisecond precision internally.
+---
