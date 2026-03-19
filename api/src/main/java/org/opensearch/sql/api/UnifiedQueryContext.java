@@ -311,7 +311,8 @@ public class UnifiedQueryContext implements AutoCloseable {
                       wrapJsonUdf(PPLBuiltinOperators.JSON_SET),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_DELETE),
                       wrapJsonUdf(PPLBuiltinOperators.JSON_APPEND),
-                      wrapJsonUdf(PPLBuiltinOperators.JSON_EXTEND))))
+                      wrapJsonUdf(PPLBuiltinOperators.JSON_EXTEND),
+                      PPLToSqlNodeConverter.CONV_FUNC)))
           .traitDefs((List<RelTraitDef>) null)
           .programs(Programs.standard(DefaultRelMetadataProvider.INSTANCE))
           .sqlValidatorConfig(SqlValidator.Config.DEFAULT

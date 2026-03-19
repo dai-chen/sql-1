@@ -621,6 +621,77 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     return sb.toString();
   }
 
+  /**
+   * Build a LIKE or NOT LIKE expression from PPL Like/NotLike function args.
+   * Handles: 2-arg Like(field, pattern), 3-arg Like(field, pattern, caseSensitive).
+   * PPL patterns use \% and \_ for literal % and _ — adds ESCAPE '\' when needed.
+   */
+  protected SqlNode buildLike(List<SqlNode> args, boolean negate) {
+    SqlNode field = args.get(0);
+    SqlNode pattern = args.get(1);
+    // 3-arg form: Like(field, pattern, caseSensitive)
+    boolean caseInsensitive = false;
+    if (args.size() >= 3) {
+      SqlNode csArg = args.get(2);
+      // Boolean literal FALSE or string "false" → case-insensitive
+      if (csArg instanceof SqlLiteral) {
+        Object val = ((SqlLiteral) csArg).getValue();
+        if (Boolean.FALSE.equals(val) || "false".equalsIgnoreCase(String.valueOf(val))) {
+          caseInsensitive = true;
+        }
+      }
+    }
+    if (caseInsensitive) {
+      field = call("LOWER", field);
+      pattern = call("LOWER", pattern);
+    }
+    // Check if pattern contains escape sequences (\% or \_)
+    String patStr = extractStringLiteral(args.get(1));
+    boolean needsEscape = patStr != null && (patStr.contains("\\%") || patStr.contains("\\_"));
+    if (needsEscape) {
+      SqlNode escapeChar = SqlLiteral.createCharString("\\", POS);
+      return new SqlBasicCall(
+          negate ? SqlStdOperatorTable.NOT_LIKE : SqlStdOperatorTable.LIKE,
+          new SqlNode[]{field, pattern, escapeChar}, POS);
+    }
+    return new SqlBasicCall(
+        negate ? SqlStdOperatorTable.NOT_LIKE : SqlStdOperatorTable.LIKE,
+        new SqlNode[]{field, pattern}, POS);
+  }
+
+  /** Build ILike (case-insensitive LIKE) — wraps field and pattern in LOWER(). */
+  private SqlNode buildIlike(List<SqlNode> args) {
+    SqlNode field = call("LOWER", args.get(0));
+    SqlNode pattern = call("LOWER", args.get(1));
+    String patStr = extractStringLiteral(args.get(1));
+    boolean needsEscape = patStr != null && (patStr.contains("\\%") || patStr.contains("\\_"));
+    if (needsEscape) {
+      return new SqlBasicCall(SqlStdOperatorTable.LIKE,
+          new SqlNode[]{field, pattern, SqlLiteral.createCharString("\\", POS)}, POS);
+    }
+    return like(field, pattern);
+  }
+
+  /** Build conv(value, fromBase, toBase) — base conversion function. */
+  private SqlNode buildConv(List<SqlNode> args) {
+    return new SqlBasicCall(CONV_FUNC, new SqlNode[]{args.get(0), args.get(1), args.get(2)}, POS);
+  }
+
+  /** CONV UDF with non-keyword name to avoid CONVERT keyword conflict in SQL parser. */
+  static final org.apache.calcite.sql.SqlOperator CONV_FUNC;
+  static {
+    // Create a copy of PPLBuiltinOperators.CONV with name "CONV" instead of "CONVERT"
+    org.apache.calcite.sql.validate.SqlUserDefinedFunction orig =
+        (org.apache.calcite.sql.validate.SqlUserDefinedFunction) PPLBuiltinOperators.CONV;
+    CONV_FUNC = new org.apache.calcite.sql.validate.SqlUserDefinedFunction(
+        new org.apache.calcite.sql.SqlIdentifier("CONV", POS),
+        orig.getReturnTypeInference(),
+        orig.getOperandTypeInference(),
+        orig.getOperandTypeChecker(),
+        orig.getParamTypes(),
+        orig.getFunction());
+  }
+
   /** Resolve a timestamp value preserving nanosecond precision for absolute timestamps. */
   private static String resolveTimestampValue(String raw) {
     if (raw.contains("T") || raw.matches("^\\d{4}-\\d{2}-\\d{2}.*")) {
@@ -2977,8 +3048,36 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       case "REGEXP":
       case "regexp":
         return call("REGEXP_CONTAINS", left, right);
-      case "ilike":
-        return like(call("LOWER", left), call("LOWER", right));
+      case "ilike": {
+        // ilike is always case-insensitive
+        SqlNode lowerLeft = call("LOWER", left);
+        SqlNode lowerRight = call("LOWER", right);
+        String patStr = extractStringLiteral(right);
+        boolean needsEscape = patStr != null && (patStr.contains("\\%") || patStr.contains("\\_"));
+        if (needsEscape) {
+          return new SqlBasicCall(SqlStdOperatorTable.LIKE,
+              new SqlNode[]{lowerLeft, lowerRight, SqlLiteral.createCharString("\\", POS)}, POS);
+        }
+        return like(lowerLeft, lowerRight);
+      }
+      case "like": {
+        String patStr = extractStringLiteral(right);
+        boolean needsEscape = patStr != null && (patStr.contains("\\%") || patStr.contains("\\_"));
+        if (needsEscape) {
+          return new SqlBasicCall(SqlStdOperatorTable.LIKE,
+              new SqlNode[]{left, right, SqlLiteral.createCharString("\\", POS)}, POS);
+        }
+        return like(left, right);
+      }
+      case "not like": {
+        String patStr = extractStringLiteral(right);
+        boolean needsEscape = patStr != null && (patStr.contains("\\%") || patStr.contains("\\_"));
+        if (needsEscape) {
+          return new SqlBasicCall(SqlStdOperatorTable.NOT_LIKE,
+              new SqlNode[]{left, right, SqlLiteral.createCharString("\\", POS)}, POS);
+        }
+        return notLike(left, right);
+      }
       default:
         throw new UnsupportedOperationException("Unsupported operator: " + node.getOperator());
     }
@@ -3083,8 +3182,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return call("LN", args.get(0));
     }
     if ("log2".equals(name)) return divide(call("LN", args.get(0)), call("LN", literal(2)));
-    if ("like".equals(name)) return like(args.get(0), args.get(1));
-    if ("not like".equals(name)) return notLike(args.get(0), args.get(1));
+    if ("conv".equals(name) && args.size() == 3) return buildConv(args);
+    if ("like".equals(name)) return buildLike(args, false);
+    if ("ilike".equals(name)) return buildIlike(args);
+    if ("not like".equals(name)) return buildLike(args, true);
     // Type constructor functions → CAST
     if ("date".equals(name) && args.size() == 1) {
       validateDateLiteral(args.get(0));
