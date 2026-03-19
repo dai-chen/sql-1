@@ -2217,3 +2217,32 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - CONV function name conflicts with SQL CONVERT keyword. Must use a custom UDF name.
   - Most remaining failures (235) are split: ~140 engine-blocked, ~110 DEFERRED, ~30 converter-fixable. Reaching 85% requires either engine fixes or excluding DEFERRED tests from the denominator.
 ---
+
+## 2026-03-19T10:40 - V4-012 (Iteration 60): Like legacy mode + binReplacements dotted field
+- **What was fixed**: 1 new test passing in CalciteLikeQueryIT (9→10)
+  - **Like legacy mode**: Added `legacyPreferred` field and `setLegacyPreferred()` setter to PPLToSqlNodeConverter. In `visitFunction`, when `like` function is called with exactly 2 args and `legacyPreferred=true`, delegates to `buildIlike()` (case-insensitive LIKE via LOWER wrapping) instead of `buildLike()`. This matches PPL semantics where `Like(field, pattern)` function call form should be case-insensitive in legacy mode, same as the comparison operator form `field Like pattern` which the parser already converts to `ilike`.
+  - **withSettings ThreadLocal fix**: Fixed `PPLIntegTestCase.withSettings()` to set `V4_LEGACY_PREFERRED_OVERRIDE` ThreadLocal even when the cluster setting already matches the requested value. Previously, the fast path (`originalValue.equals(value)`) skipped the ThreadLocal set, so `transpileV4()` never saw the legacy preference. Added try/finally block to ensure cleanup.
+  - **binReplacements dotted field lookup**: Added multi-part name check in `visitQualifiedName()` — when `parts.size() > 1`, joins all parts with "." and checks against `binReplacements`. Previously only checked `parts.size() == 1`, so dotted field names like `resource.attributes.telemetry.sdk.version` never matched their bin replacement. This is a prerequisite for the bin dotted field fix (not yet complete — the bin subquery still adds an extra column instead of replacing the original).
+- **Pass rate change**: 83.5% (1884/2255) → 83.6% (1885/2255) = +0.1pp, +1 test
+- **Per-class results** (before → after):
+  - CalciteLikeQueryIT: 9→10 pass (11 total, 0 fail, 1 skip) — +1 (test_the_default_3rd_option)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLJoinIT: 37/39 (no regression) ✅
+  - CalcitePPLAggregationIT: 100/100 (no regression) ✅
+  - CalcitePPLRenameIT: 22/22 ALL PASS (no regression) ✅
+  - CalcitePPLBuiltinFunctionsNullIT: 71/71 ALL PASS (no regression) ✅
+  - CalciteBinCommandIT: 39/70 (no regression, 4 pre-existing failures) ✅
+- **Remaining CalciteLikeQueryIT failure (1)**:
+  - test_like_with_pushdown (SKIP): pushdown-only test, skipped when pushdown disabled
+- **Attempted but deferred**:
+  - Bin dotted field REPLACE: Attempted to override visitBin in DynamicPPLToSqlNodeConverter to use `SELECT * EXCEPT(_bin_field) REPLACE(_bin_field AS "dotted.field")` for dotted field bins. The SQL generation was correct but the StarExceptReplaceRewriter had issues resolving the dotted field name in the REPLACE clause. Needs deeper investigation — the REPLACE column name must match the original table column name exactly, but dotted fields are stored as single-part quoted identifiers in the schema.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+12: legacyPreferred field, setter, Like legacy mode in visitFunction, binReplacements dotted field lookup in visitQualifiedName)
+  - integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java (+19/-2: withSettings ThreadLocal fix, legacyPreferred passthrough to converter)
+- **Learnings for future iterations:**
+  - `withSettings()` has a fast path when `originalValue.equals(value)` that skips the ThreadLocal set. This means the V4 converter never sees the setting. Must set ThreadLocal in both paths.
+  - Like function call form `Like(field, pattern)` is NOT converted by the PPL parser in legacy mode — only the comparison operator form `field Like pattern` is converted to `ilike`. The converter must handle the function call form separately.
+  - binReplacements lookup in visitQualifiedName must check the full dotted name for multi-part qualified names, not just single-part names.
+  - Bin dotted field REPLACE is complex because the StarExceptReplaceRewriter validates REPLACE column names against the table schema, and dotted field names are stored as single-part quoted identifiers. The EXCEPT/REPLACE mechanism may need enhancement to handle dotted field names.
+---
