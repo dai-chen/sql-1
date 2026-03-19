@@ -1143,46 +1143,6 @@ public class DynamicPPLToSqlNodeConverter extends PPLToSqlNodeConverter {
           skipNextWrap = true;
         }
       }
-    } else if (hasCondition && pipe instanceof SqlJoin) {
-      // Criteria join without max/field-list: strip metadata columns from right side subsearch
-      SqlJoin sqlJoin = (SqlJoin) pipe;
-      String leftAlias = node.getLeftAlias().orElse(extractAlias(sqlJoin.getLeft()));
-      String rightAlias = node.getRightAlias().orElse(extractAlias(sqlJoin.getRight()));
-      if (leftAlias != null && rightAlias != null) {
-        String leftTable = extractTableNameFromPlan(node.getLeft());
-        String rightTable = extractTableNameFromPlan(node.getRight());
-        List<String> leftCols = preJoinPipeCols.isEmpty() ? resolveColumns(leftTable) : preJoinPipeCols;
-        List<String> rightSchemaCols = resolveColumns(rightTable);
-        if (!leftCols.isEmpty() && !rightSchemaCols.isEmpty()) {
-          // Collect extra computed columns from right side (e.g. avg_age from streamstats)
-          List<String> rightExtraCols = new ArrayList<>();
-          SqlNode rightInner = unwrapSubquery(sqlJoin.getRight());
-          if (rightInner instanceof SqlSelect) {
-            SqlNodeList selList = ((SqlSelect) rightInner).getSelectList();
-            if (selList != null) {
-              Set<String> schemaSet = new HashSet<>(rightSchemaCols);
-              for (SqlNode item : selList) {
-                String name = extractColumnName(item);
-                if (name != null && !schemaSet.contains(name) && !name.startsWith("_")) {
-                  rightExtraCols.add(name);
-                }
-              }
-            }
-          }
-          List<SqlNode> selectItems = new ArrayList<>();
-          for (String col : leftCols) {
-            selectItems.add(as(identifier(leftAlias, col), col));
-          }
-          for (String col : rightSchemaCols) {
-            selectItems.add(as(identifier(rightAlias, col), col));
-          }
-          for (String col : rightExtraCols) {
-            selectItems.add(as(identifier(rightAlias, col), col));
-          }
-          pipe = select(selectItems.toArray(new SqlNode[0])).from(pipe).build();
-          skipNextWrap = true;
-        }
-      }
     }
     return pipe;
   }

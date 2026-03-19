@@ -2097,3 +2097,24 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Join metadata column leak: SELECT * after LEFT JOIN includes metadata columns from both sides. Must build explicit column list excluding metadata when the join result feeds into downstream commands.
   - CalciteGeoPointFormatsIT StackOverflowError crashes the entire test cluster, causing all subsequent test classes to fail with "Connection refused". This class should be excluded from the test suite in build.gradle.
 ---
+
+## 2026-03-19T02:55 - V4-012 (Iteration 57): Fix JoinIT regression from iteration 56
+- **What was fixed**: +18 net tests (19 JoinIT restored - 1 StreamstatsIT lost)
+  - **Removed criteria join metadata stripping block**: The `else if (hasCondition && pipe instanceof SqlJoin)` block in DynamicPPLToSqlNodeConverter.visitJoin() was introduced in iteration 56 to fix testLeftJoinWithStreamstats (metadata columns leaking from right side subsearch). However, it wrapped ALL criteria joins in `SELECT explicit_cols FROM SqlJoin`, destroying the raw SqlJoin that downstream commands need for alias visibility via the `skipNextWrap` mechanism. This caused 19 CalcitePPLJoinIT regressions that went undetected because iteration 56 only verified StreamstatsCommandIT, not JoinIT.
+  - **Root cause**: When `pipe` is a raw SqlJoin, downstream visitors (eval, filter, sort, fields) use `skipNextWrap` to access join aliases directly. Wrapping the join in `SELECT ... FROM SqlJoin` creates a subquery that hides the join aliases, causing "Table 'a' not found", "Column 'name' is ambiguous", and "Column 'occupation' not found" errors in downstream commands.
+  - **Trade-off**: testLeftJoinWithStreamstats (1 test) reverts to failing — metadata columns (_id, _index, _score, etc.) leak from the right side subsearch's `SELECT *`. A proper fix requires stripping metadata from the right side BEFORE the join (e.g., overriding resolveJoinRight to use explicit column lists), but this approach also breaks multi-join alias resolution. Deferred to a future iteration.
+- **Pass rate change**: 81.7% (1843/2255) → 82.5% (1861/2255 est) = +0.8pp, +18 tests
+- **Per-class results** (before → after):
+  - CalcitePPLJoinIT: 18→37 pass (39 total, 2 fail: testMultipleJoins, testMultipleJoinsWithRelationSubquery — pre-existing) — +19
+  - CalciteStreamstatsCommandIT: 44→43 pass (46 total, 3 fail: testLeftJoinWithStreamstats, testUnsupportedWindowFunctions, testStreamstatsDistinctCountFunction) — -1
+  - CalcitePPLLookupIT: 17/17 ALL PASS (no regression) ✅
+  - CalcitePPLInSubqueryIT: 18/18 ALL PASS (no regression) ✅
+  - CalcitePPLExistsSubqueryIT: 17/19 (no regression) ✅
+  - CalcitePPLScalarSubqueryIT: 13/14 (no regression) ✅
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/DynamicPPLToSqlNodeConverter.java (-40 lines)
+- **Learnings for future iterations:**
+  - ALWAYS verify ALL related test classes after making changes, not just the class being targeted. Iteration 56 only verified StreamstatsCommandIT and missed the 19 JoinIT regressions.
+  - The raw SqlJoin pipe + skipNextWrap mechanism is CRITICAL for join alias visibility. ANY code that wraps the join in SELECT (even with explicit columns) breaks downstream alias resolution. The only safe way to modify join output is via the final convert() method or by modifying the join inputs (left/right sides) before the join is constructed.
+  - Metadata column stripping for joins should be done on the INPUT sides (resolveJoinRight), not on the OUTPUT. But resolveJoinRight is private in the base converter and changing it to protected + overriding introduces its own issues with multi-join alias resolution.
+  - The testLeftJoinWithStreamstats metadata leak is a real issue but affects only 1 test. The 19 JoinIT regressions from the attempted fix are far worse. Accept the 1-test trade-off until a better approach is found.
+---
