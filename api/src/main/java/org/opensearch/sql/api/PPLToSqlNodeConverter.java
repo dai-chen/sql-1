@@ -1785,6 +1785,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return buildResetStreamWindow(node, savedOrderBy, partColNames, nullCheck);
     }
 
+    // --- Global + window + by: self-join approach (no segment columns) ---
+    boolean hasWindow = node.getWindow() > 0;
+    if (node.isGlobal() && hasWindow && !partColNames.isEmpty()) {
+      return buildGlobalByStreamWindow(node, savedOrderBy, partColNames, nullCheck);
+    }
+
     // --- Non-reset path: standard window functions ---
     SqlNodeList partBy = partCols.isEmpty() ? SqlNodeList.EMPTY
         : new SqlNodeList(partCols, POS);
@@ -1837,6 +1843,72 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       pendingOrderBy = savedOrderBy;
     }
 
+    return pipe;
+  }
+
+  /**
+   * Build global+by streamstats using a self-join approach.
+   * Window slides over global row order but only aggregates rows matching the same partition group.
+   */
+  private SqlNode buildGlobalByStreamWindow(StreamWindow node, List<SqlNode> savedOrderBy,
+      List<String> partColNames, SqlNode nullCheck) {
+    List<SqlNode> ordItems = buildStreamWindowOrderBy(node, savedOrderBy);
+
+    // Step 1: Add __seq__ = ROW_NUMBER() OVER(ORDER BY ...) — global ordering, no partition
+    SqlNode rowNum = window(
+        new SqlBasicCall(SqlStdOperatorTable.ROW_NUMBER, new SqlNode[0], POS),
+        SqlNodeList.EMPTY, new SqlNodeList(ordItems, POS));
+    pipe = select(star(), as(rowNum, "__seq__")).from(pipe).build();
+
+    String leftAlias = nextAlias();
+    SqlNode leftPipe = subquery(pipe, leftAlias);
+
+    // Step 2: Build scalar subqueries for each aggregate
+    List<SqlNode> aggExprs = new ArrayList<>();
+    for (UnresolvedExpression item : node.getWindowFunctionList()) {
+      Alias alias = (Alias) item;
+      WindowFunction wf = (WindowFunction) alias.getDelegated();
+      SqlNode aggSql = buildWindowAggSql(wf.getFunction());
+
+      // Frame filter
+      SqlNode frameFilter = buildResetFrameFilter(wf.getWindowFrame(), node.isCurrent(), leftAlias);
+
+      // Group filter with NULL handling
+      SqlNode groupFilter = null;
+      for (String colName : partColNames) {
+        SqlNode eqOrNull = or(
+            eq(identifier(colName), identifier(leftAlias, colName)),
+            and(isNull(identifier(colName)), isNull(identifier(leftAlias, colName)))
+        );
+        groupFilter = groupFilter == null ? eqOrNull : and(groupFilter, eqOrNull);
+      }
+
+      SqlNode filter = groupFilter != null ? and(frameFilter, groupFilter) : frameFilter;
+
+      SqlNode scalarSub = select(aggSql).from(subquery(pipe, nextAlias())).where(filter).build();
+      if (nullCheck != null) {
+        scalarSub = caseWhen(List.of(nullCheck), List.of(scalarSub), literal(null));
+      }
+      aggExprs.add(as(scalarSub, alias.getName()));
+    }
+
+    // Step 3: Final SELECT with base columns (strips __seq__) + aggregates
+    List<String> baseCols = resolveBaseColumns();
+    List<SqlNode> finalSelect = new ArrayList<>();
+    if (!baseCols.isEmpty()) {
+      for (String col : baseCols) {
+        finalSelect.add(identifier(col));
+      }
+    } else {
+      finalSelect.add(star());
+    }
+    finalSelect.addAll(aggExprs);
+
+    pipe = select(finalSelect.toArray(new SqlNode[0])).from(leftPipe).build();
+
+    if (savedOrderBy != null && !savedOrderBy.isEmpty()) {
+      pendingOrderBy = savedOrderBy;
+    }
     return pipe;
   }
 
