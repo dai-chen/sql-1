@@ -3023,11 +3023,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       return cast(args.get(0), typeSpec(SqlTypeName.TIME));
     }
     if ("timestamp".equals(name)) {
-      if (args.size() == 1) return cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP));
-      // timestamp(date, time) → CAST(CONCAT(CAST(date AS VARCHAR), ' ', CAST(time AS VARCHAR)) AS TIMESTAMP)
+      SqlDataTypeSpec ts6 = new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS), POS);
+      if (args.size() == 1) return cast(args.get(0), ts6);
+      // timestamp(date, time) → CAST(CONCAT(CAST(date AS VARCHAR), ' ', CAST(time AS VARCHAR)) AS TIMESTAMP(6))
       SqlDataTypeSpec vc = typeSpec(SqlTypeName.VARCHAR);
       return cast(call("CONCAT", call("CONCAT", cast(args.get(0), vc), literal(" ")), cast(args.get(1), vc)),
-          typeSpec(SqlTypeName.TIMESTAMP));
+          ts6);
     }
     if ("datetime".equals(name)) {
       SqlNode nullTs = cast(SqlLiteral.createNull(POS), typeSpec(SqlTypeName.TIMESTAMP));
@@ -3180,8 +3181,21 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           new SqlNode[]{new SqlIntervalQualifier(TimeUnit.MINUTE, null, POS), ts}, POS);
       return cast(plus(times(hours, intLiteral(60)), minutes), typeSpec(SqlTypeName.INTEGER));
     }
-    if ("microsecond".equals(name) && args.size() == 1)
+    if ("microsecond".equals(name) && args.size() == 1) {
+      // Try transpile-time computation to handle microsecond precision (engine only supports millis)
+      String litStr = extractStringLiteral(args.get(0));
+      if (litStr != null) {
+        int dotIdx = litStr.indexOf('.');
+        if (dotIdx >= 0) {
+          String frac = litStr.substring(dotIdx + 1);
+          // Pad to 6 digits
+          frac = (frac + "000000").substring(0, 6);
+          return intLiteral(Integer.parseInt(frac));
+        }
+        return intLiteral(0);
+      }
       return castExtract("MICROSECOND", args.get(0));
+    }
     // date_add / adddate
     if ("date_add".equals(name) || "adddate".equals(name)) {
       SqlNode intervalArg = args.get(1);
@@ -3267,6 +3281,26 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SqlNode epoch = cast(literal("1970-01-01 00:00:00"), typeSpec(SqlTypeName.TIMESTAMP));
       if (args.isEmpty())
         return cast(call("TIMESTAMPDIFF", identifier("SECOND"), epoch, identifier("CURRENT_TIMESTAMP")), typeSpec(SqlTypeName.DOUBLE));
+      // Try transpile-time computation for numeric literals (MySQL interprets numbers as datetime strings)
+      java.math.BigDecimal numVal = extractNumericLiteral(args.get(0));
+      if (numVal != null) {
+        String numStr = numVal.toPlainString();
+        // Remove decimal point if present
+        if (numStr.contains(".")) numStr = numStr.substring(0, numStr.indexOf('.'));
+        try {
+          java.time.LocalDateTime ldt;
+          if (numStr.length() <= 10) {
+            // YYMMDDHHmmss or shorter
+            ldt = java.time.LocalDateTime.parse(numStr, java.time.format.DateTimeFormatter.ofPattern("uuuuMMddHHmmss".substring(0, Math.max(8, numStr.length()))));
+          } else {
+            ldt = java.time.LocalDateTime.parse(numStr, java.time.format.DateTimeFormatter.ofPattern("uuuuMMddHHmmss"));
+          }
+          long epochSec = ldt.toEpochSecond(ZoneOffset.UTC);
+          return cast(SqlLiteral.createExactNumeric(Long.toString(epochSec), POS), typeSpec(SqlTypeName.DOUBLE));
+        } catch (Exception e) {
+          // Fall through to default handling
+        }
+      }
       return cast(call("TIMESTAMPDIFF", identifier("SECOND"), epoch, cast(args.get(0), typeSpec(SqlTypeName.TIMESTAMP))), typeSpec(SqlTypeName.DOUBLE));
     }
     // from_unixtime
@@ -3366,6 +3400,22 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     }
     // maketime
     if ("maketime".equals(name)) {
+      // Try transpile-time computation for literal inputs to preserve fractional seconds
+      java.math.BigDecimal h = extractNumericLiteral(args.get(0));
+      java.math.BigDecimal m = extractNumericLiteral(args.get(1));
+      java.math.BigDecimal s = extractNumericLiteral(args.get(2));
+      if (h != null && m != null && s != null) {
+        int hh = Math.round(h.floatValue());
+        int mm = Math.round(m.floatValue());
+        int ss = s.intValue();
+        long micros = s.subtract(java.math.BigDecimal.valueOf(ss))
+            .multiply(java.math.BigDecimal.valueOf(1_000_000)).longValue();
+        String timeStr = micros > 0
+            ? String.format("%02d:%02d:%02d.%06d", hh, mm, ss, micros).replaceAll("0+$", "")
+            : String.format("%02d:%02d:%02d", hh, mm, ss);
+        SqlDataTypeSpec t6 = new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIME, 6, POS), POS);
+        return cast(literal(timeStr), t6);
+      }
       SqlNode epoch = cast(literal("00:00:00"), typeSpec(SqlTypeName.TIME));
       SqlNode t1 = call("TIMESTAMPADD", identifier("HOUR"), cast(args.get(0), typeSpec(SqlTypeName.INTEGER)), epoch);
       SqlNode t2 = call("TIMESTAMPADD", identifier("MINUTE"), cast(args.get(1), typeSpec(SqlTypeName.INTEGER)), t1);
@@ -3435,8 +3485,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       if (arg0 instanceof SqlBasicCall && ((SqlBasicCall) arg0).getOperator() == SqlStdOperatorTable.CAST) {
         SqlNode inner = ((SqlBasicCall) arg0).operand(0);
         arg0 = cast(inner, ts6);
+      } else {
+        arg0 = cast(arg0, ts6);
       }
-      SqlNode ts = cast(arg0, ts6);
+      SqlNode ts = arg0;
       if (args.size() >= 2 && args.get(1) instanceof SqlCharStringLiteral) {
         String fmt = ((SqlCharStringLiteral) args.get(1)).getNlsString().getValue();
         SqlNode formatted = buildDateFormatExpr(ts, fmt, false, null);
@@ -3831,6 +3883,30 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     SqlTypeName sqlType;
     switch (typeName) {
       case "STRING":
+        // Handle numeric literal → string at transpile time to avoid Calcite formatting issues
+        java.math.BigDecimal numLit = extractNumericLiteral(expr);
+        if (numLit != null) {
+          return literal(numLit.toPlainString());
+        }
+        // For CAST(CAST(literal AS DOUBLE/FLOAT) AS VARCHAR), compute at transpile time
+        // to avoid scientific notation (0E0) and float precision issues (6.199999...)
+        if (expr instanceof SqlBasicCall) {
+          SqlBasicCall bc = (SqlBasicCall) expr;
+          if (bc.getOperator() == SqlStdOperatorTable.CAST && bc.getOperandList().size() == 2) {
+            String innerType = bc.getOperandList().get(1).toString().toUpperCase();
+            if (innerType.contains("DOUBLE") || innerType.contains("FLOAT")) {
+              java.math.BigDecimal innerNum = extractNumericLiteral(bc.operand(0));
+              if (innerNum != null) {
+                double dv = innerNum.doubleValue();
+                // Format without scientific notation, preserving at least one decimal place
+                String formatted = dv == Math.floor(dv) && !Double.isInfinite(dv)
+                    ? String.format("%.1f", dv)
+                    : java.math.BigDecimal.valueOf(dv).stripTrailingZeros().toPlainString();
+                return literal(formatted);
+              }
+            }
+          }
+        }
         return cast(expr, typeSpec(SqlTypeName.VARCHAR));
       case "INT":
       case "INTEGER":
@@ -3855,12 +3931,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         sqlType = SqlTypeName.DATE;
         break;
       case "TIME":
-        sqlType = SqlTypeName.TIME;
-        break;
+        return cast(expr, new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIME, 6, POS), POS));
       case "TIMESTAMP":
       case "DATETIME":
-        sqlType = SqlTypeName.TIMESTAMP;
-        break;
+        return cast(expr, new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS), POS));
       default:
         sqlType = SqlTypeName.VARCHAR;
         break;
@@ -4124,7 +4198,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (isAlreadyCastToTime(arg)) {
       target = promoteTimeToTimestamp(arg);
     } else {
-      target = cast(arg, typeSpec(SqlTypeName.TIMESTAMP));
+      target = cast(arg, new SqlDataTypeSpec(new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, 6, POS), POS));
     }
     SqlIntervalQualifier qualifier = new SqlIntervalQualifier(tu, null, POS);
     SqlNode extract = new SqlBasicCall(SqlStdOperatorTable.EXTRACT, new SqlNode[]{qualifier, target}, POS);
@@ -5086,7 +5160,18 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           case 'D': // day with ordinal suffix
             parts.add(buildOrdinal(day)); break;
           case 'f': // microseconds (6 digits) - MOD to get only fractional part
-            parts.add(zeroPad(cast(call("MOD", extractPart(TimeUnit.MICROSECOND, ts), intLiteral(1000000)), typeSpec(SqlTypeName.INTEGER)), 6)); break;
+            // Try transpile-time computation for literal inputs (engine only supports millis)
+            String fLit = extractStringLiteral(ts);
+            if (fLit != null && fLit.contains(".")) {
+              String frac = fLit.substring(fLit.indexOf('.') + 1);
+              frac = (frac + "000000").substring(0, 6);
+              parts.add(literal(frac));
+            } else if (fLit != null) {
+              parts.add(literal("000000"));
+            } else {
+              parts.add(zeroPad(cast(call("MOD", extractPart(TimeUnit.MICROSECOND, ts), intLiteral(1000000)), typeSpec(SqlTypeName.INTEGER)), 6));
+            }
+            break;
           case 'j': // day of year (3 digits)
             parts.add(zeroPad(call("DAYOFYEAR", ts), 3)); break;
           case 'W':
