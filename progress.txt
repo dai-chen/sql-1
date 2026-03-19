@@ -2012,3 +2012,31 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - The pattern `uuuu-MM-dd` (not `yyyy-MM-dd`) is required for STRICT resolver — `yyyy` is era-based and doesn't work with STRICT.
   - CalcitePPLBuiltinDatetimeFunctionInvalidIT (45 tests) is excluded from the test suite in build.gradle because invalid date literals crash the Calcite code generator. These tests are NOT counted in the pass rate.
 ---
+
+## 2026-03-18T23:49 - V4-012 (Iteration 54): datetime(ts, tz) timezone conversion
+- **What was fixed**: 11 new tests passing across 2 test classes
+  - **datetime(ts, tz) 2-arg timezone conversion**: Replaced CAST(NULL AS TIMESTAMP) stub with full transpile-time timezone conversion. Parses embedded ±HH:MM offset from arg0 timestamp string, parses target offset from arg1 (±HH:MM format or named timezone via ZoneId.of().getRules().getOffset()). Computes delta = targetMinutes - sourceMinutes, generates TIMESTAMPADD(MINUTE, delta, CAST('base_datetime' AS TIMESTAMP)). Validation: source offset ±14:00 (±840 min), target offset -840 < tgt ≤ 840 (excludes -14:00 per MySQL semantics). Invalid datetime or out-of-range offsets return CAST(NULL AS TIMESTAMP).
+  - **datetime 1-arg with embedded offset**: DATETIME('2008-01-01 02:00:00+10:00') now strips the timezone offset and returns CAST('2008-01-01 02:00:00' AS TIMESTAMP) instead of null.
+- **Pass rate change**: 81.3% (1833/2255 est) → 81.8% (1844/2255 est) = +0.5pp, +11 tests
+- **Per-class results** (before → after):
+  - CalciteDateTimeImplementationIT: 7→17 pass (17 total, 0 fail) ✅ ALL PASS — +10
+  - CalciteDateTimeFunctionIT: 54→55 pass (63 total, 8 fail, 8 skip) — +1 (testDateTime)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteConvertTZFunctionIT: 14/14 (no regression) ✅
+  - CalciteNowLikeFunctionIT: 12/12 (no regression) ✅
+- **Remaining 8 CalciteDateTimeFunctionIT failures** (all engine-blocked):
+  - testUnixTimeStamp: ArithmeticException overflow
+  - testToSeconds: Failed to compile
+  - testDateDiff: Failed to plan
+  - testTimeDiff: Failed to compile
+  - testMicrosecond: returns 0 (engine precision)
+  - testDateFormat: %f microseconds precision
+  - testStrftimeWithDateFields: nanosecond precision lost
+  - testMakeTime: calculation error + precision
+- **Files changed**: api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java
+- **Learnings for future iterations:**
+  - datetime(ts, tz) semantics: arg0 has EMBEDDED timezone offset in the string, arg1 is the TARGET timezone. Convert by computing delta = target - source offset in minutes.
+  - Named timezone support: ZoneId.of(tz).getRules().getOffset(instant) resolves named timezones (e.g., 'America/Los_Angeles') to their offset at the specific datetime, handling DST correctly.
+  - datetime validation range is ±14:00 (±840 min), NOT ±13:00 (±780 min) like convert_tz. The target offset excludes -14:00 exactly (asymmetric range).
+  - 1-arg datetime with embedded offset should strip the offset and return the base datetime, not return null.
+---
