@@ -492,6 +492,11 @@ integTest {
     systemProperty 'tests.security.manager', 'false'
     systemProperty('project.root', project.projectDir.absolutePath)
 
+    // Forward unified gap analysis flag to test JVM
+    if (System.getProperty("unified.gap.analysis") != null) {
+        systemProperty "unified.gap.analysis", System.getProperty("unified.gap.analysis")
+    }
+
     systemProperty "https", System.getProperty("https")
     systemProperty "user", System.getProperty("user")
     systemProperty "password", System.getProperty("password")

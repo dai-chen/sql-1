@@ -66,3 +66,18 @@
   - Stack trace index [3] works for direct test→executeQuery calls; for indirect calls through helpers, it captures the intermediate method name which is still useful for debugging
   - The `isEnabled()` early return ensures zero overhead when gap analysis is off — no stack trace capture, no object creation
 ---
+
+## 2026-03-21T02:32 - US-005
+- Intercepted `SQLIntegTestCase.executeJdbcRequest(String)` and `executeQuery(String sqlQuery)` to replay through unified pipeline
+- Added `replayWithUnifiedPipeline(String)` private method with early return when gap analysis is disabled (zero overhead)
+- Uses `QueryType.SQL` — the `defaultNamespace("opensearch")` is already configured in `UnifiedQueryGapAnalyzer.tryUnifiedExecution` via the context builder
+- Collects result via `GapReportCollector.collect()` with test class name and method name
+- All exceptions caught in outer try/catch — original test behavior completely unchanged
+- Added imports for `QueryType`, `GapReportCollector`, `UnifiedQueryGapAnalyzer`
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/legacy/SQLIntegTestCase.java` (modified)
+- Build passes, test failures are pre-existing (Connection refused flakiness, not related to changes)
+- **Learnings for future iterations:**
+  - `executeJdbcRequest` delegates to `executeQuery(query, "jdbc")` — intercept at `executeJdbcRequest` level to avoid double-counting with the `executeQuery(String, String)` overload
+  - `executeQuery(final String sqlQuery)` is a separate method from `executeQuery(String, String)` — both need interception independently
+  - Stack trace index [3] captures the calling test method (getStackTrace → replayWithUnifiedPipeline → executeJdbcRequest/executeQuery → testMethod)
+---

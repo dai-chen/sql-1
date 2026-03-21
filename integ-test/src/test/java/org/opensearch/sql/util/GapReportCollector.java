@@ -5,6 +5,9 @@
 
 package org.opensearch.sql.util;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -110,5 +113,16 @@ public class GapReportCollector {
 
     sb.append("=".repeat(80)).append("\n");
     System.err.println(sb);
+
+    // Also write to file for reliable access regardless of Gradle output handling
+    String projectRoot = System.getProperty("project.root", ".");
+    Path reportFile = Path.of(projectRoot, "build", "gap-analysis-report.txt");
+    try {
+      Files.createDirectories(reportFile.getParent());
+      Files.writeString(reportFile, sb.toString());
+      System.err.println("Gap analysis report written to: " + reportFile.toAbsolutePath());
+    } catch (IOException e) {
+      System.err.println("Failed to write gap report file: " + e.getMessage());
+    }
   }
 }
