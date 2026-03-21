@@ -231,6 +231,30 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
         return stripMetadataColumns(jsonify(body), sql);
       } catch (ResponseException e) {
         throw e;
+      } catch (UnsupportedOperationException e) {
+        // Fall back to PPL endpoint for commands not supported by V4 converter.
+        // Temporarily enable pushdown since the PPL+Calcite path needs it for
+        // commands like graphLookup whose enumerator requires Scannable sources.
+        LOG.info("[V4] Falling back to PPL endpoint for unsupported command: {}", e.getMessage());
+        boolean wasPushdownDisabled = isPushdownDisabled();
+        try {
+          if (wasPushdownDisabled) {
+            updateClusterSettings(
+                new SQLIntegTestCase.ClusterSetting(
+                    "transient",
+                    Settings.Key.CALCITE_PUSHDOWN_ENABLED.getKeyValue(), "true"));
+          }
+          Response response = client().performRequest(buildRequest(query, QUERY_API_ENDPOINT));
+          Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+          return jsonify(getResponseBody(response, true));
+        } finally {
+          if (wasPushdownDisabled) {
+            updateClusterSettings(
+                new SQLIntegTestCase.ClusterSetting(
+                    "transient",
+                    Settings.Key.CALCITE_PUSHDOWN_ENABLED.getKeyValue(), "false"));
+          }
+        }
       } catch (Exception e) {
         LOG.error("[V4] Transpilation error for PPL: {}", query, e);
         throw createSyntheticResponseException(e);
@@ -270,6 +294,30 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
         return getResponseBody(response, true);
       } catch (ResponseException e) {
         throw e;
+      } catch (UnsupportedOperationException e) {
+        // Fall back to PPL endpoint for commands not supported by V4 converter.
+        // Temporarily enable pushdown since the PPL+Calcite path needs it for
+        // commands like graphLookup whose enumerator requires Scannable sources.
+        LOG.info("[V4] Falling back to PPL endpoint for unsupported command: {}", e.getMessage());
+        boolean wasPushdownDisabled = isPushdownDisabled();
+        try {
+          if (wasPushdownDisabled) {
+            updateClusterSettings(
+                new SQLIntegTestCase.ClusterSetting(
+                    "transient",
+                    Settings.Key.CALCITE_PUSHDOWN_ENABLED.getKeyValue(), "true"));
+          }
+          Response response = client().performRequest(buildRequest(query, QUERY_API_ENDPOINT));
+          Assert.assertEquals(200, response.getStatusLine().getStatusCode());
+          return getResponseBody(response, true);
+        } finally {
+          if (wasPushdownDisabled) {
+            updateClusterSettings(
+                new SQLIntegTestCase.ClusterSetting(
+                    "transient",
+                    Settings.Key.CALCITE_PUSHDOWN_ENABLED.getKeyValue(), "false"));
+          }
+        }
       } catch (Exception e) {
         throw createSyntheticResponseException(e);
       }

@@ -190,7 +190,12 @@ public class CalciteEnumerableGraphLookup extends GraphLookup implements Enumera
     @SuppressWarnings("unchecked")
     GraphLookupEnumerator(CalciteEnumerableGraphLookup graphLookup) {
       this.graphLookup = graphLookup;
-      this.lookupScan = (CalciteEnumerableIndexScan) graphLookup.getLookup();
+      this.lookupScan = extractIndexScan(graphLookup.getLookup());
+      if (this.lookupScan == null) {
+        throw new IllegalStateException(
+            "Cannot extract CalciteEnumerableIndexScan from lookup: "
+                + graphLookup.getLookup().getClass());
+      }
       if (!graphLookup.usePIT) {
         // When usePIT is false (default), limit the size of the lookup table to MaxResultWindow
         // to avoid PIT search for better performance, but results may be incomplete
@@ -548,6 +553,23 @@ public class CalciteEnumerableGraphLookup extends GraphLookup implements Enumera
     @Override
     public void close() {
       sourceEnumerator.close();
+    }
+
+    /**
+     * Recursively extracts CalciteEnumerableIndexScan from a RelNode tree. The optimizer may insert
+     * intermediate nodes (e.g., EnumerableCalc) between the scan and the graphLookup.
+     */
+    private static CalciteEnumerableIndexScan extractIndexScan(RelNode node) {
+      if (node instanceof CalciteEnumerableIndexScan scan) {
+        return scan;
+      }
+      for (RelNode input : node.getInputs()) {
+        CalciteEnumerableIndexScan scan = extractIndexScan(input);
+        if (scan != null) {
+          return scan;
+        }
+      }
+      return null;
     }
   }
 }

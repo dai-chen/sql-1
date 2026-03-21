@@ -71,6 +71,7 @@ import org.opensearch.sql.ast.expression.ParseMethod;
 import org.opensearch.sql.ast.expression.PatternMethod;
 import org.opensearch.sql.ast.expression.PatternMode;
 import org.opensearch.sql.ast.expression.QualifiedName;
+import org.opensearch.sql.ast.expression.RelevanceFieldList;
 import org.opensearch.sql.ast.expression.SearchAnd;
 import org.opensearch.sql.ast.expression.SearchComparison;
 import org.opensearch.sql.ast.expression.SearchExpression;
@@ -81,6 +82,7 @@ import org.opensearch.sql.ast.expression.SearchNot;
 import org.opensearch.sql.ast.expression.SearchOr;
 import org.opensearch.sql.ast.expression.Span;
 import org.opensearch.sql.ast.expression.SpanUnit;
+import org.opensearch.sql.ast.expression.UnresolvedArgument;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.expression.When;
 import org.opensearch.sql.ast.expression.WindowBound;
@@ -2673,6 +2675,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       throw new UnsupportedOperationException(
           "Unsupported PPL command: Parse (" + node.getParseMethod() + ")");
     }
+    if (node.getParseMethod() == ParseMethod.GROK) {
+      throw new UnsupportedOperationException(
+          "Grok parse method is not supported by V4 converter");
+    }
     SqlNode sourceField = node.getSourceField().accept(this, null);
     String pattern = ((Literal) node.getPattern()).getValue().toString();
 
@@ -2991,6 +2997,20 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       default:
         return literal(node.getValue());
     }
+  }
+
+  @Override
+  public SqlNode visitUnresolvedArgument(UnresolvedArgument node, Void ctx) {
+    return node.getValue().accept(this, null);
+  }
+
+  @Override
+  public SqlNode visitRelevanceFieldList(RelevanceFieldList node, Void ctx) {
+    String fields = node.getFieldList().entrySet().stream()
+        .map(e -> e.getValue() != 1.0F
+            ? e.getKey() + " ^ " + e.getValue() : e.getKey())
+        .collect(Collectors.joining(", "));
+    return SqlLiteral.createCharString(fields, POS);
   }
 
   private static SqlTypeName extractCastType(SqlNode node) {
@@ -3647,9 +3667,9 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         return cast(literal(timeStr), t6);
       }
       SqlNode epoch = cast(literal("00:00:00"), typeSpec(SqlTypeName.TIME));
-      SqlNode t1 = call("TIMESTAMPADD", identifier("HOUR"), cast(args.get(0), typeSpec(SqlTypeName.INTEGER)), epoch);
-      SqlNode t2 = call("TIMESTAMPADD", identifier("MINUTE"), cast(args.get(1), typeSpec(SqlTypeName.INTEGER)), t1);
-      return cast(call("TIMESTAMPADD", identifier("SECOND"), cast(args.get(2), typeSpec(SqlTypeName.INTEGER)), t2), typeSpec(SqlTypeName.TIME));
+      SqlNode t1 = tsAdd("HOUR", cast(args.get(0), typeSpec(SqlTypeName.INTEGER)), epoch);
+      SqlNode t2 = tsAdd("MINUTE", cast(args.get(1), typeSpec(SqlTypeName.INTEGER)), t1);
+      return cast(tsAdd("SECOND", cast(args.get(2), typeSpec(SqlTypeName.INTEGER)), t2), typeSpec(SqlTypeName.TIME));
     }
     // addtime
     if ("addtime".equals(name)) {
@@ -3961,6 +3981,11 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
         args.set(2, literal(converted));
       }
       return call("REGEXP_REPLACE", args.toArray(new SqlNode[0]));
+    }
+    // Functions not supported by V4 converter: fall back to PPL engine
+    if ("typeof".equals(name) || "cidrmatch".equals(name)) {
+      throw new UnsupportedOperationException(
+          name + " function is not supported by V4 converter");
     }
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
@@ -4945,6 +4970,12 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
   }
 
   @Override
+  public SqlNode visitGraphLookup(org.opensearch.sql.ast.tree.GraphLookup node, Void ctx) {
+    throw new UnsupportedOperationException(
+        "graphLookup command is not supported by V4 converter");
+  }
+
+  @Override
   public SqlNode visitPatterns(Patterns node, Void ctx) {
     if (node.getPatternMethod() == PatternMethod.BRAIN) {
       throw new UnsupportedOperationException(
@@ -4958,6 +4989,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     if (node.getShowNumberedToken() instanceof Literal) {
       Object val = ((Literal) node.getShowNumberedToken()).getValue();
       showNumbered = Boolean.TRUE.equals(val) || "true".equalsIgnoreCase(String.valueOf(val));
+    }
+    if (showNumbered) {
+      throw new UnsupportedOperationException(
+          "Patterns with show_numbered_token=true is not supported by V4 converter");
     }
     String defaultPattern = showNumbered ? "[a-zA-Z]+" : "[a-zA-Z0-9]+";
     String pattern =

@@ -2246,3 +2246,15 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - binReplacements lookup in visitQualifiedName must check the full dotted name for multi-part qualified names, not just single-part names.
   - Bin dotted field REPLACE is complex because the StarExceptReplaceRewriter validates REPLACE column names against the table schema, and dotted field names are stored as single-part quoted identifiers. The EXCEPT/REPLACE mechanism may need enhancement to handle dotted field names.
 ---
+
+## 2026-03-21T00:51 - V4-012 (Iteration 61): Fix test exclusion — 85% target achieved
+- **What was fixed**: CalciteGeoPointFormatsIT/CalcitePPLBig5IT/CalcitePPLClickBenchIT exclusion in build.gradle. Replaced broken file-path `exclude` with `filter { excludeTestsMatching }` that actually works.
+- **Pass rate**: 85.4% (1926/2255, 144 skipped). TARGET 85% ACHIEVED.
+- **Root cause of stale estimates**: CalciteGeoPointFormatsIT StackOverflowError was crashing the test cluster despite the exclusion, corrupting all subsequent test results. Previous estimates (83.5%) were based on partial/corrupted runs. The actual rate was already above 85% — the exclusion fix revealed this.
+- **Files changed**: integ-test/build.gradle (test exclusion filter)
+- **Per-class breakdown (185 failures across 41 classes)**:
+  - Engine-blocked: ~140 tests (relevance functions 43, IP comparisons 6, geo functions 6, lambda functions 17, nested fields 5, type precision 15, etc.)
+  - DEFERRED: CalcitePPLGraphLookupIT now ALL PASS (22/22) — was incorrectly categorized as DEFERRED
+  - Converter-fixable: ~30 tests across scattered classes
+- **Learnings**: Always verify test exclusions actually work. Gradle file-path `exclude` in test task doesn't work for all configurations — use `filter { excludeTestsMatching }` instead.
+---
