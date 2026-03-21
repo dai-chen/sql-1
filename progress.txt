@@ -38,3 +38,31 @@
   - Report prints to stderr so it doesn't interfere with test output parsing
   - Git push now works (SSH auth resolved since US-001)
 ---
+
+## 2026-03-21T02:12 - US-003
+- Implemented `transformPPLQuery(String)` static method in `UnifiedQueryGapAnalyzer`
+- Three regex patterns handle: `source=<index>`, `lookup <index>`, `join [type] on <condition> <index>`
+- Negative lookahead `(?!opensearch\.)` prevents double-prefixing already-qualified names
+- `source=[subquery]` is skipped via `(?!\[)` — inner `source=` inside brackets is still transformed
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/util/UnifiedQueryGapAnalyzer.java` (modified)
+- Build passes
+- **Learnings for future iterations:**
+  - PPL join syntax: `| join [left|right|...] on <condition> <index>` — index is AFTER the ON clause
+  - PPL lookup syntax: `| lookup <index> <field> [as <alias>]` — index is immediately after keyword
+  - `source=[...]` is subquery syntax — must not prefix the bracket, only bare index names
+  - Tested with standalone Java harness to validate regex before committing
+---
+
+## 2026-03-21T02:15 - US-004
+- Intercepted `PPLIntegTestCase.executeQuery(String)` to replay through unified pipeline after REST call succeeds
+- Added `replayWithUnifiedPipeline(String)` private method with early return when gap analysis is disabled (zero overhead)
+- Transforms PPL query with `UnifiedQueryGapAnalyzer.transformPPLQuery()` to add catalog prefix
+- Collects result via `GapReportCollector.collect()` with test class name and method name
+- Test method name extracted via `Thread.currentThread().getStackTrace()[3]` (getStackTrace → replayWithUnifiedPipeline → executeQuery → testMethod)
+- All exceptions caught in outer try/catch — original test behavior completely unchanged
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java` (modified)
+- Build passes, pre-existing test failures unchanged
+- **Learnings for future iterations:**
+  - Stack trace index [3] works for direct test→executeQuery calls; for indirect calls through helpers, it captures the intermediate method name which is still useful for debugging
+  - The `isEnabled()` early return ensures zero overhead when gap analysis is off — no stack trace capture, no object creation
+---
