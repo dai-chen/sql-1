@@ -260,6 +260,8 @@ public class DateTimeUtils {
   }
 
   private static String normalizeUnit(String rawUnit) {
+    // Uppercase M alone means month (PPL/Splunk convention)
+    if ("M".equals(rawUnit)) return "M";
     // strict minute (m or M)
     switch (rawUnit.toLowerCase(Locale.ROOT)) {
       case "m", "min", "mins", "minute", "minutes" -> {

@@ -564,7 +564,45 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       SqlNode valueLiteral;
       if ("@timestamp".equals(fieldName)) {
         String resolved = resolveTimestampValue(rawValue);
-        valueLiteral = SqlLiteral.createCharString(resolved, POS);
+        // Determine timestamp granularity for range adjustments
+        int tsGranularity = timestampGranularity(resolved);
+        switch (cmp.getOperator()) {
+          case EQUALS:
+            // Expand equality to range covering the appropriate time unit
+            if (tsGranularity == TS_DATE_ONLY || tsGranularity == TS_SECOND) {
+              String upper = nextTimestampUnit(resolved, tsGranularity);
+              return and(gte(field, SqlLiteral.createCharString(resolved, POS)),
+                  lt(field, SqlLiteral.createCharString(upper, POS)));
+            }
+            // Millisecond or finer: use second-range since engine has millis precision
+            {
+              String secBase = resolved.substring(0, 19); // yyyy-MM-dd HH:mm:ss
+              String secNext = nextTimestampUnit(secBase, TS_SECOND);
+              return and(gte(field, SqlLiteral.createCharString(secBase, POS)),
+                  lt(field, SqlLiteral.createCharString(secNext, POS)));
+            }
+          case GREATER_THAN:
+            // > second-precision timestamp means >= next second
+            if (tsGranularity == TS_SECOND) {
+              return gte(field, SqlLiteral.createCharString(
+                  nextTimestampUnit(resolved, tsGranularity), POS));
+            }
+            return gt(field, SqlLiteral.createCharString(resolved, POS));
+          case LESS_OR_EQUAL:
+            // <= second-precision timestamp means < next second
+            if (tsGranularity == TS_SECOND) {
+              return lt(field, SqlLiteral.createCharString(
+                  nextTimestampUnit(resolved, tsGranularity), POS));
+            }
+            return lte(field, SqlLiteral.createCharString(resolved, POS));
+          case GREATER_OR_EQUAL:
+            return gte(field, SqlLiteral.createCharString(resolved, POS));
+          case LESS_THAN:
+            return lt(field, SqlLiteral.createCharString(resolved, POS));
+          case NOT_EQUALS:
+            return neq(field, SqlLiteral.createCharString(truncateToMillis(resolved), POS));
+          default: return null;
+        }
       } else {
         valueLiteral = literal(rawObj);
       }
@@ -589,11 +627,27 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       String fieldName = in.getField().getField().toString();
       SqlNode field = identifier(fieldName);
       boolean isTimestamp = "@timestamp".equals(fieldName);
+      if (isTimestamp) {
+        // Convert IN to OR'd second-range conditions for timestamp fields
+        SqlNode combined = null;
+        for (SearchLiteral lit : in.getValues()) {
+          String raw = ((Literal) lit.getLiteral()).getValue().toString();
+          if (raw.startsWith("\"") && raw.endsWith("\"")) raw = raw.substring(1, raw.length() - 1);
+          String resolved = resolveTimestampValue(raw);
+          String secBase = resolved.length() >= 19 ? resolved.substring(0, 19) : resolved;
+          String secNext = nextTimestampUnit(secBase, TS_SECOND);
+          SqlNode rangeCond = and(
+              gte(field, SqlLiteral.createCharString(secBase, POS)),
+              lt(field, SqlLiteral.createCharString(secNext, POS)));
+          combined = combined == null ? rangeCond : or(combined, rangeCond);
+        }
+        return combined;
+      }
       List<SqlNode> vals = new ArrayList<>();
       for (SearchLiteral lit : in.getValues()) {
         String raw = ((Literal) lit.getLiteral()).getValue().toString();
         if (raw.startsWith("\"") && raw.endsWith("\"")) raw = raw.substring(1, raw.length() - 1);
-        vals.add(SqlLiteral.createCharString(isTimestamp ? resolveTimestampValue(raw) : raw, POS));
+        vals.add(SqlLiteral.createCharString(raw, POS));
       }
       return new SqlBasicCall(SqlStdOperatorTable.IN,
           new SqlNode[]{field, new SqlNodeList(vals, POS)}, POS);
@@ -727,8 +781,47 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
             java.time.format.DateTimeFormatter.ISO_DATE_TIME);
         return zdt.format(VARIABLE_NANOS_FMT);
       } catch (Exception ignored) {}
+      // Try date-only format: yyyy-MM-dd
+      if (raw.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+        return raw + " 00:00:00";
+      }
     }
     return resolveDateMathToTimestamp(raw);
+  }
+
+  // Timestamp granularity constants
+  private static final int TS_DATE_ONLY = 0;
+  private static final int TS_SECOND = 1;
+  private static final int TS_MILLIS_OR_FINER = 2;
+
+  /** Determine the granularity of a resolved timestamp string. */
+  private static int timestampGranularity(String ts) {
+    if (ts.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")) return TS_SECOND;
+    if (ts.matches("^\\d{4}-\\d{2}-\\d{2}$") || ts.matches("^\\d{4}-\\d{2}-\\d{2} 00:00:00$"))
+      return TS_DATE_ONLY;
+    return TS_MILLIS_OR_FINER;
+  }
+
+  /** Compute the next timestamp unit boundary for range expansion. */
+  private static String nextTimestampUnit(String ts, int granularity) {
+    if (granularity == TS_DATE_ONLY) {
+      String dateStr = ts.length() > 10 ? ts.substring(0, 10) : ts;
+      java.time.LocalDate d = java.time.LocalDate.parse(dateStr);
+      return d.plusDays(1).toString() + " 00:00:00";
+    }
+    // TS_SECOND: add 1 second
+    java.time.LocalDateTime ldt = java.time.LocalDateTime.parse(ts,
+        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    return ldt.plusSeconds(1).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+  }
+
+  /** Truncate a resolved timestamp string to millisecond precision (3 fractional digits). */
+  private static String truncateToMillis(String ts) {
+    int dotIdx = ts.indexOf('.');
+    if (dotIdx < 0) return ts;
+    // Keep at most 3 fractional digits
+    int end = Math.min(dotIdx + 4, ts.length());
+    return ts.substring(0, end);
   }
 
   private static final java.time.format.DateTimeFormatter TS_FMT =
@@ -826,7 +919,7 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       case "m" -> t.truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
       case "h", "H" -> t.truncatedTo(java.time.temporal.ChronoUnit.HOURS);
       case "d" -> t.truncatedTo(java.time.temporal.ChronoUnit.DAYS);
-      case "w" -> t.minusDays((t.getDayOfWeek().getValue() % 7))
+      case "w" -> t.minusDays(t.getDayOfWeek().getValue() - 1)
           .truncatedTo(java.time.temporal.ChronoUnit.DAYS);
       case "M" -> t.withDayOfMonth(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS);
       case "y" -> t.withDayOfYear(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS);
