@@ -259,6 +259,24 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
           "LOCALTIMESTAMP",
           "LOCALTIME");
 
+  /** Single-field relevance functions: match, match_phrase, match_bool_prefix, match_phrase_prefix. */
+  private static final Set<String> SINGLE_FIELD_RELEVANCE =
+      Set.of("match", "match_phrase", "match_bool_prefix", "match_phrase_prefix");
+
+  /** Multi-field relevance functions: multi_match, query_string, simple_query_string. */
+  private static final Set<String> MULTI_FIELD_RELEVANCE =
+      Set.of("multi_match", "query_string", "simple_query_string");
+
+  /** Maps PPL relevance function name to SQL operator name (used in operator table). */
+  private static final Map<String, String> RELEVANCE_SQL_NAME = Map.of(
+      "match", "PPL_MATCH",
+      "match_phrase", "MATCH_PHRASE",
+      "match_bool_prefix", "MATCH_BOOL_PREFIX",
+      "match_phrase_prefix", "MATCH_PHRASE_PREFIX",
+      "multi_match", "MULTI_MATCH",
+      "query_string", "QUERY_STRING",
+      "simple_query_string", "SIMPLE_QUERY_STRING");
+
   protected final AtomicInteger aliasCounter;
 
   /** When true, the next wrapAsSubquery() call is skipped (used after JOIN to preserve aliases). */
@@ -3982,6 +4000,10 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
       }
       return call("REGEXP_REPLACE", args.toArray(new SqlNode[0]));
     }
+    // Relevance / full-text search functions
+    if (SINGLE_FIELD_RELEVANCE.contains(name) || MULTI_FIELD_RELEVANCE.contains(name)) {
+      return buildRelevanceCall(name, node.getFuncArgs());
+    }
     // Functions not supported by V4 converter: fall back to PPL engine
     if ("typeof".equals(name) || "cidrmatch".equals(name)) {
       throw new UnsupportedOperationException(
@@ -3990,6 +4012,40 @@ public class PPLToSqlNodeConverter extends AbstractNodeVisitor<SqlNode, Void> {
     // Default: FUNC_MAP lookup
     String sqlName = FUNC_MAP.getOrDefault(name, name.toUpperCase());
     return call(sqlName, args.toArray(new SqlNode[0]));
+  }
+
+  /**
+   * Build a SQL function call for a PPL relevance function.
+   * Converts UnresolvedArgument list to flat SqlNode args: field/fields, query, ...options.
+   * Each optional param becomes a string literal "key=value".
+   */
+  private SqlNode buildRelevanceCall(String name, List<UnresolvedExpression> funcArgs) {
+    String sqlName = RELEVANCE_SQL_NAME.get(name);
+    List<SqlNode> sqlArgs = new ArrayList<>();
+    for (UnresolvedExpression arg : funcArgs) {
+      if (arg instanceof UnresolvedArgument) {
+        UnresolvedArgument ua = (UnresolvedArgument) arg;
+        String argName = ua.getArgName();
+        if ("field".equals(argName) || "query".equals(argName) || "fields".equals(argName)) {
+          sqlArgs.add(ua.getValue().accept(this, null));
+        } else {
+          // Optional parameter: emit as "key=value" string literal
+          String value = extractArgValue(ua.getValue());
+          sqlArgs.add(SqlLiteral.createCharString(argName + "=" + value, POS));
+        }
+      } else {
+        sqlArgs.add(arg.accept(this, null));
+      }
+    }
+    return call(sqlName, sqlArgs.toArray(new SqlNode[0]));
+  }
+
+  /** Extract the string value from a Literal or other expression for relevance optional params. */
+  private static String extractArgValue(UnresolvedExpression expr) {
+    if (expr instanceof Literal) {
+      return ((Literal) expr).getValue().toString();
+    }
+    return expr.toString();
   }
 
   @Override

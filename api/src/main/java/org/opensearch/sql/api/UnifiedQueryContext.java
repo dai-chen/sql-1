@@ -250,12 +250,7 @@ public class UnifiedQueryContext implements AutoCloseable {
 
       SchemaPlus defaultSchema = findSchemaByPath(rootSchema, defaultNamespace);
 
-      SqlBasicFunction matchPhraseUpper =
-          SqlBasicFunction.create(
-              "MATCH_PHRASE",
-              ReturnTypes.BOOLEAN,
-              OperandTypes.family(SqlTypeFamily.CHARACTER, SqlTypeFamily.CHARACTER));
-      SqlBasicFunction matchPhraseLower =
+      SqlBasicFunction matchPhraseLowerInline =
           SqlBasicFunction.create(
               "match_phrase",
               ReturnTypes.BOOLEAN,
@@ -299,7 +294,21 @@ public class UnifiedQueryContext implements AutoCloseable {
                       SqlLibrary.BIG_QUERY,
                       SqlLibrary.SPARK,
                       SqlLibrary.POSTGRESQL),
-                  SqlOperatorTables.of(matchPhraseUpper, matchPhraseLower,
+                  SqlOperatorTables.of(matchPhraseLowerInline,
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH, "PPL_MATCH"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH, "ppl_match"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH_PHRASE, "MATCH_PHRASE"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH_PHRASE, "match_phrase"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH_BOOL_PREFIX, "MATCH_BOOL_PREFIX"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH_BOOL_PREFIX, "match_bool_prefix"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH_PHRASE_PREFIX, "MATCH_PHRASE_PREFIX"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MATCH_PHRASE_PREFIX, "match_phrase_prefix"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MULTI_MATCH, "MULTI_MATCH"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.MULTI_MATCH, "multi_match"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.QUERY_STRING, "QUERY_STRING"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.QUERY_STRING, "query_string"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.SIMPLE_QUERY_STRING, "SIMPLE_QUERY_STRING"),
+                      wrapRelevanceUdf(PPLBuiltinOperators.SIMPLE_QUERY_STRING, "simple_query_string"),
                       pplFirst, pplLast, percentileApprox, percentileApproxUpper, take,
                       list, values, PPLBuiltinOperators.SHA2, PPLBuiltinOperators.MVFIND, PPLBuiltinOperators.MVFIND_UPPER,
                       PPLToSqlNodeConverter.MVAPPEND_WRAPPED,
@@ -372,6 +381,22 @@ public class UnifiedQueryContext implements AutoCloseable {
           return original.isDeterministic();
         }
       };
+    }
+
+    /**
+     * Wraps a relevance UDF with variadic operand metadata and a custom name.
+     * Used to register relevance functions with alternative names (e.g., PPL_MATCH)
+     * or both upper and lowercase variants.
+     */
+    private static SqlUserDefinedFunction wrapRelevanceUdf(SqlOperator udf, String name) {
+      SqlUserDefinedFunction original = (SqlUserDefinedFunction) udf;
+      return new SqlUserDefinedFunction(
+          new SqlIdentifier(Collections.singletonList(name), SqlParserPos.ZERO),
+          SqlKind.OTHER_FUNCTION,
+          original.getReturnTypeInference(),
+          InferTypes.ANY_NULLABLE,
+          VARIADIC_METADATA,
+          original.getFunction());
     }
 
   }
