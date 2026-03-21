@@ -9,6 +9,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
@@ -60,8 +61,52 @@ public class UnifiedQueryGapAnalyzer {
     }
   }
 
+  private static final String CATALOG = "opensearch";
+  private static final String CATALOG_DOT = CATALOG + ".";
+
+  // Matches source=<index> with optional spaces, case-insensitive.
+  // Skips source=[subquery] (bracket indicates subquery, not an index name).
+  private static final Pattern SOURCE_PATTERN =
+      Pattern.compile(
+          "(?i)(\\bsource\\s*=\\s*)(?!\\[)(?!" + Pattern.quote(CATALOG_DOT) + ")([\\w.*-]+)");
+
+  // Matches join ... on <condition> <index> — the index is the word after the ON clause
+  private static final Pattern JOIN_PATTERN =
+      Pattern.compile(
+          "(?i)(\\bjoin\\b\\s+(?:(?:left|right|semi|anti|cross|inner|outer|full)\\s+)*"
+              + "(?:on\\s+\\S+\\s+))(?!"
+              + Pattern.quote(CATALOG_DOT)
+              + ")([\\w.*-]+)");
+
+  // Matches lookup <index> (the index right after lookup keyword)
+  private static final Pattern LOOKUP_PATTERN =
+      Pattern.compile(
+          "(?i)(\\blookup\\s+)(?!" + Pattern.quote(CATALOG_DOT) + ")([\\w.*-]+)");
+
   public static boolean isEnabled() {
     return Boolean.getBoolean(PROPERTY);
+  }
+
+  /**
+   * Transforms a PPL query to add the opensearch catalog prefix to index names. Handles
+   * source=index, join index, and lookup index patterns. Does not modify queries that already have
+   * the catalog prefix.
+   */
+  public static String transformPPLQuery(String query) {
+    // Transform source=<index> (but not source=[subquery...])
+    String result =
+        SOURCE_PATTERN
+            .matcher(query)
+            .replaceAll(m -> m.group(1) + CATALOG_DOT + m.group(2));
+
+    // Transform lookup <index>
+    result =
+        LOOKUP_PATTERN.matcher(result).replaceAll(m -> m.group(1) + CATALOG_DOT + m.group(2));
+
+    // Transform join ... <index>
+    result = JOIN_PATTERN.matcher(result).replaceAll(m -> m.group(1) + CATALOG_DOT + m.group(2));
+
+    return result;
   }
 
   /**
