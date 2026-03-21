@@ -21,3 +21,20 @@
   - Each call creates fresh context to avoid cross-test connection issues
   - Build command: `./gradlew :integ-test:compileTestJava` — takes ~45s
 ---
+
+## 2026-03-21T01:37 - US-002
+- Implemented `GapReportCollector` at `integ-test/src/test/java/org/opensearch/sql/util/GapReportCollector.java`
+- Static `collect(testClassName, testMethodName, query, QueryType, GapResult)` accumulates entries in a `ConcurrentLinkedQueue`
+- Static `printReport()` outputs categorized report to stderr
+- Report iterates over `QueryType.values()` (PPL, SQL) — separates sections per query type
+- Each section shows total/success/failed counts with percentages
+- Failures grouped by `phase | errorMessage` key, showing exception class and listing each test+query
+- JVM shutdown hook registered in static initializer to auto-print
+- `collect()` silently ignores null results (when gap analysis is disabled)
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/util/GapReportCollector.java` (new)
+- Build passes, integration test failures are pre-existing (not caused by this change)
+- **Learnings for future iterations:**
+  - `ConcurrentLinkedQueue` used for thread safety since tests may run in parallel
+  - Report prints to stderr so it doesn't interfere with test output parsing
+  - Git push now works (SSH auth resolved since US-001)
+---
