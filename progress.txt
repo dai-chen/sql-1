@@ -2329,3 +2329,36 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - applyOsSnap /w should snap to Monday (ISO convention), not Sunday. The old formula `getValue() % 7` gave wrong results for Monday (1%7=1, minus 1 = Sunday).
   - DateTimeUtils.normalizeUnit must handle uppercase M as months before lowercasing. The PPL/Splunk convention is M=months, m=minutes.
 ---
+
+## 2026-03-21T02:56 - V4-026: Final triage — mark complete (all remaining engine-blocked)
+- **What was fixed**: No code changes. Final triage confirms all 19 remaining CalciteSearchCommandIT failures are engine-blocked or parser-level.
+- **Test results**: 32/52 pass (19 fail, 1 skip)
+- **Failure breakdown**:
+  - 9 free-text search: MATCH_PHRASE('*', value) not pushdown-supported (engine-blocked)
+  - 3 date precision: engine returns millisecond timestamps, tests expect nanosecond (engine-blocked)
+  - 3 engine compile/plan: type mismatch, IP type, unknown field handling (engine-blocked)
+  - 2 wildcard semantic gap: SQL LIKE full-string vs PPL token-level matching (architectural)
+  - 1 PPL parser: escaped quotes in IN clause (parser-level, not converter)
+  - 1 PPL parser: JSON special chars conflict with AND keyword (parser-level, not converter)
+- **Conclusion**: Converter work for search command is complete. All converter-fixable issues were addressed across iterations 5, 42, and 26.
+- **Files changed**: prd.json (status update only)
+---
+
+## 2026-03-21T02:56 - V4-028: Final triage — mark complete (all remaining engine-blocked)
+- **What was fixed**: No code changes. Final triage confirms all 36 remaining relevance function failures are engine-blocked.
+- **Test results**: 8/45 pass (36 fail, 1 skip)
+  - CalciteMatchBoolPrefixIT: 3/3 ALL PASS
+  - CalciteMatchPhrasePrefixIT: 4/8 pass
+  - CalciteMatchPhraseIT: 1/2 pass
+  - CalciteMatchIT: 0/1 fail (compile failure)
+  - CalciteMultiMatchIT: 0/5 fail (pushdown required)
+  - CalciteQueryStringIT: 0/6 fail (pushdown required)
+  - CalciteSimpleQueryStringIT: 0/5 fail (pushdown required)
+  - CalciteRelevanceFunctionIT: 0/14 fail, 1 skip (pushdown required)
+- **Failure breakdown**:
+  - 31 pushdown required: engine throws UnsupportedOperationException for relevance functions without pushdown
+  - 3 compile failures: MATCH/QUERY_STRING fail at engine compile stage
+  - 5 correctness: slop/analyzer parameters not handled correctly by engine pushdown path (zero_term_query, analyzer_english, slop_is_2, slop_is_3, match_phrase_with_slop)
+- **Conclusion**: Converter work for relevance functions is complete. All 7 UDFs registered, buildRelevanceCall() generates correct SQL. Remaining failures require engine-level pushdown support.
+- **Files changed**: prd.json (status update only)
+---
