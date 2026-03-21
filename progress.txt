@@ -1,4 +1,23 @@
 # Codebase Patterns
-(Patterns discovered during implementation will be consolidated here)
+
+- **Settings holder pattern**: UnifiedQueryContext.builder().build() creates Settings internally. To pass settings to OpenSearchIndex in the lazy schema, use a `Settings[]` holder array — set `holder[0] = context.getSettings()` after build, and the schema closure reads from `holder[0]` when tables are first accessed.
+- **Context per execution**: Each `tryUnifiedExecution` call creates its own context and closes it after. This avoids stale connection issues across tests. The overhead is acceptable since gap analysis is opt-in.
+- **UnifiedQueryCompiler** lives in `org.opensearch.sql.api.compiler` package (not `org.opensearch.sql.api`).
+- **InternalRestHighLevelClient** is already in `org.opensearch.sql.util` package — same package as our gap analyzer.
+- **Git push fails** due to SSH auth — commits are local only. Push will need to be done manually or with proper credentials.
 
 # Iteration Log
+
+## 2026-03-21T01:32 - US-001
+- Implemented `UnifiedQueryGapAnalyzer` at `integ-test/src/test/java/org/opensearch/sql/util/UnifiedQueryGapAnalyzer.java`
+- Static `tryUnifiedExecution(RestClient, String, QueryType)` method runs plan → compile → execute
+- `GapResult` inner class with Phase enum (PLAN/COMPILE/EXECUTE), success, errorMessage, exceptionClass
+- All exceptions caught — never propagates to calling test
+- Controlled by `unified.gap.analysis` system property (returns null when disabled)
+- Uses same schema pattern as `UnifiedQueryOpenSearchIT` with lazy `OpenSearchIndex` creation
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/util/UnifiedQueryGapAnalyzer.java` (new)
+- **Learnings for future iterations:**
+  - Settings holder array pattern needed because context must be built before settings are available to schema
+  - Each call creates fresh context to avoid cross-test connection issues
+  - Build command: `./gradlew :integ-test:compileTestJava` — takes ~45s
+---
