@@ -344,7 +344,7 @@
       ],
       "priority": 26,
       "passes": false,
-      "notes": "46 failures. BLOCKED: requires full-text search UDF registration in Calcite SQL engine. Will be addressed separately."
+      "notes": "2 new tests passing (30\u219232 of 52). Fixed: (1) applyOsSnap /w week snap: corrected formula from t.minusDays(getValue()%7) to t.minusDays(getValue()-1) for Monday-based week snap. (2) DateTimeUtils.normalizeUnit: uppercase M alone now returns M (months) instead of falling through to lowercase m (minutes). (3) @timestamp equality range expansion: date-only format (yyyy-MM-dd) generates >= date AND < next_date; second-precision generates >= ts AND < next_second; millis/finer generates second-range. (4) @timestamp IN: converts to OR of second-range conditions instead of exact IN. (5) @timestamp > second-precision: converts to >= next_second. (6) @timestamp <= second-precision: converts to < next_second. Remaining 19 failures: 9 free-text search (match_phrase not pushdown-supported), 3 engine-level compile/plan failures (IP, type mismatch, invalid field), 3 date precision (engine returns millis, tests expect nanos), 2 wildcard semantic gap (SQL LIKE vs PPL token-level matching), 1 parser error (JSON special chars), 1 escaped quotes in IN. BLOCKED: 9 free-text search tests require full-text search UDF registration in Calcite SQL engine."
     },
     {
       "id": "V4-027",

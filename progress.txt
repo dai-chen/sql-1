@@ -2293,3 +2293,39 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Optional relevance parameters (slop, analyzer, boost, etc.) are encoded as "key=value" string literals in the SQL function call. The engine's RelevanceQueryFunction implementation parses these back into a Map.
   - CalciteMatchBoolPrefixIT and CalciteMatchPhrasePrefixIT (basic cases) pass because these functions ARE pushed down by the engine when the query is simple enough. Complex cases with optional parameters fail because the pushdown path doesn't handle all parameter combinations.
 ---
+
+## 2026-03-21T02:09 - V4-026: Search command date handling fixes
+- **What was fixed**: 2 new tests passing in CalciteSearchCommandIT (30→32 of 52)
+  - **applyOsSnap /w week snap**: Corrected formula from `t.minusDays(getValue() % 7)` to `t.minusDays(t.getDayOfWeek().getValue() - 1)` for Monday-based week snap. The old formula snapped to Sunday (getValue()%7 for Monday=1%7=1, so minus 1 day = Sunday). The new formula snaps to Monday (getValue()-1 for Monday=1-1=0, stays on Monday). Fixed testSearchTimeModifierWithSnappedWeek.
+  - **DateTimeUtils.normalizeUnit uppercase M**: Added early return for exact `"M"` before the `toLowerCase` switch. Uppercase M alone means months (PPL/Splunk convention), but the old code lowercased it to `m` which matched minutes. Fixed testSearchWithQuarterlyModifiers (quarter offset uses M for months).
+  - **@timestamp equality range expansion**: For SearchComparison with `=` operator on @timestamp:
+    - Date-only format (yyyy-MM-dd): generates `@timestamp >= 'date 00:00:00' AND @timestamp < 'next_date 00:00:00'`
+    - Second-precision: generates `@timestamp >= 'ts' AND @timestamp < 'next_second'`
+    - Millis/finer: generates second-range (engine has millis precision)
+  - **@timestamp IN range expansion**: Converts SearchIn for @timestamp to OR'd second-range conditions instead of exact IN. Each value becomes `>= secBase AND < secNext`.
+  - **@timestamp comparison adjustments**: `>` with second-precision → `>= next_second`. `<=` with second-precision → `< next_second`. Preserves nanosecond-precision comparisons as-is.
+  - **resolveTimestampValue date-only handling**: Added regex check for `yyyy-MM-dd` format, appends ` 00:00:00` to create valid timestamp string.
+  - **Helper methods**: `timestampGranularity()` (TS_DATE_ONLY, TS_SECOND, TS_MILLIS_OR_FINER), `nextTimestampUnit()` (adds 1 day or 1 second), `truncateToMillis()` (keeps 3 fractional digits for NOT_EQUALS).
+- **Pass rate change**: 85.4% (1926/2255) → estimated 85.5% (1928/2255) = +0.1pp, +2 tests
+- **Per-class results** (before → after):
+  - CalciteSearchCommandIT: 30→32 pass (52 total, 19 fail, 1 skip) — +2 (testSearchTimeModifierWithSnappedWeek, testSearchWithQuarterlyModifiers)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalciteNowLikeFunctionIT: 12/12 (no regression) ✅
+- **Remaining 19 CalciteSearchCommandIT failures**:
+  - 9 free-text search (engine-blocked): match_phrase('*', value) not pushdown-supported
+  - 3 engine-level compile/plan failures: testSearchWithTypeMismatch, testSearchWithInvalidFieldName, testSearchWithIPAddress
+  - 3 date precision (engine-blocked): testSearchWithDateFormats, testSearchWithDateRangeComparisons, testSearchWithDateINOperator — converter generates correct SQL returning correct rows, but engine returns millisecond precision output while tests expect nanosecond precision
+  - 2 wildcard semantic gap: testWildcardPatternMatching (SQL LIKE does full-string matching vs PPL token-level matching on analyzed text fields), testWildcardEscaping (free-text wildcard + escaped wildcard)
+  - 1 parser error: testSearchWithJSONSpecialChars
+  - 1 escaped quotes: testSearchWithSingleValueIN (PPL parser can't handle escaped quotes in IN values)
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+95/-3: @timestamp range expansion, helper methods, resolveTimestampValue date-only, applyOsSnap /w fix)
+  - core/src/main/java/org/opensearch/sql/utils/DateTimeUtils.java (+2: normalizeUnit uppercase M early return)
+- **Learnings for future iterations:**
+  - OpenSearch date_nanos fields store nanosecond precision, but the Calcite no-pushdown scan path (CalciteNoPushdownIndexScan) converts timestamps to epoch millis, losing nanosecond precision. The converter generates correct SQL but the engine truncates output.
+  - PPL search `@timestamp="2024-01-15"` (date-only) should match ALL timestamps on that date, not exact equality. Must expand to range condition.
+  - PPL search `@timestamp="2024-01-15T10:30:01"` (second-precision) should match all timestamps within that second. Must expand to range condition.
+  - applyOsSnap /w should snap to Monday (ISO convention), not Sunday. The old formula `getValue() % 7` gave wrong results for Monday (1%7=1, minus 1 = Sunday).
+  - DateTimeUtils.normalizeUnit must handle uppercase M as months before lowercasing. The PPL/Splunk convention is M=months, m=minutes.
+---
