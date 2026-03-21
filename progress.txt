@@ -1,0 +1,4 @@
+# Codebase Patterns
+(Patterns discovered during implementation will be consolidated here)
+
+# Iteration Log
