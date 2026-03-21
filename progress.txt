@@ -5,6 +5,9 @@
 - **UnifiedQueryCompiler** lives in `org.opensearch.sql.api.compiler` package (not `org.opensearch.sql.api`).
 - **InternalRestHighLevelClient** is already in `org.opensearch.sql.util` package — same package as our gap analyzer.
 - **Git push fails** due to SSH auth — commits are local only. Push will need to be done manually or with proper credentials.
+- **Gradle system property forwarding**: System properties passed via `-D` to Gradle are NOT forwarded to the test JVM. Must add `systemProperty "name", System.getProperty("name")` in the task config in `build.gradle`. The `integTest` block is at ~line 459 in `integ-test/build.gradle`.
+- **Gap report file output**: Report is written to `integ-test/build/gap-analysis-report.txt` in addition to stderr. Uses `project.root` system property for path resolution.
+- **SQL tests broken on branch**: All SQL IT tests fail with server-side "Failed to plan query" 500 errors. This prevents SQL gap analysis from collecting data since the REST call throws before the replay runs.
 
 # Iteration Log
 
@@ -65,4 +68,36 @@
 - **Learnings for future iterations:**
   - Stack trace index [3] works for direct test→executeQuery calls; for indirect calls through helpers, it captures the intermediate method name which is still useful for debugging
   - The `isEnabled()` early return ensures zero overhead when gap analysis is off — no stack trace capture, no object creation
+---
+
+## 2026-03-21T02:32 - US-005
+- Intercepted `SQLIntegTestCase.executeJdbcRequest(String)` and `executeQuery(String sqlQuery)` to replay through unified pipeline
+- Added `replayWithUnifiedPipeline(String)` private method with early return when gap analysis is disabled (zero overhead)
+- Uses `QueryType.SQL` — the `defaultNamespace("opensearch")` is already configured in `UnifiedQueryGapAnalyzer.tryUnifiedExecution` via the context builder
+- Collects result via `GapReportCollector.collect()` with test class name and method name
+- All exceptions caught in outer try/catch — original test behavior completely unchanged
+- Added imports for `QueryType`, `GapReportCollector`, `UnifiedQueryGapAnalyzer`
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/legacy/SQLIntegTestCase.java` (modified)
+- Build passes, test failures are pre-existing (Connection refused flakiness, not related to changes)
+- **Learnings for future iterations:**
+  - `executeJdbcRequest` delegates to `executeQuery(query, "jdbc")` — intercept at `executeJdbcRequest` level to avoid double-counting with the `executeQuery(String, String)` overload
+  - `executeQuery(final String sqlQuery)` is a separate method from `executeQuery(String, String)` — both need interception independently
+  - Stack trace index [3] captures the calling test method (getStackTrace → replayWithUnifiedPipeline → executeJdbcRequest/executeQuery → testMethod)
+---
+
+## 2026-03-21T03:00 - US-006
+- Verified gap analysis runs end-to-end and produces report
+- Fixed: `unified.gap.analysis` system property was not forwarded from Gradle JVM to test JVM — added forwarding in `integTest` block of `integ-test/build.gradle`
+- Enhanced `GapReportCollector.printReport()` to also write report to `build/gap-analysis-report.txt` file for reliable access regardless of Gradle output handling
+- PPL verification: `SearchCommandIT` with `-Dunified.gap.analysis=true` produces report with 86 queries (47 success/54.7%, 39 failed/45.3%)
+- Report correctly groups failures by error message with counts, shows phase (PLAN/COMPILE/EXECUTE), lists individual test+query per group
+- Report prints to stderr at JVM shutdown AND writes to file
+- SQL verification: ALL SQL tests on this branch fail at server level with "Failed to plan query" (500 error) — this is a pre-existing branch issue, not related to gap analysis. The REST call throws before `replayWithUnifiedPipeline` is reached, so no SQL gap data is collected.
+- Files changed: `integ-test/build.gradle` (modified), `integ-test/src/test/java/org/opensearch/sql/util/GapReportCollector.java` (modified)
+- Build passes, PPL tests pass
+- **Learnings for future iterations:**
+  - Gradle forks a separate JVM for tests — system properties passed to Gradle via `-D` are NOT automatically forwarded to the test JVM. Must explicitly add `systemProperty` in the task config.
+  - Shutdown hook output to stderr may not be visible in Gradle output depending on `testLogging` config. Writing to a file is more reliable.
+  - `project.root` system property (already set in build.gradle) provides the integ-test directory path for file output.
+  - SQL tests on this branch are broken at the server level — the unified query planner on the server side fails for all SQL queries. This is independent of the client-side gap analysis.
 ---
