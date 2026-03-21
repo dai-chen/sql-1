@@ -2258,3 +2258,38 @@ CalciteSearchCommandIT (46 failures) and CalciteRelevanceFunctionIT (14 failures
   - Converter-fixable: ~30 tests across scattered classes
 - **Learnings**: Always verify test exclusions actually work. Gradle file-path `exclude` in test task doesn't work for all configurations — use `filter { excludeTestsMatching }` instead.
 ---
+
+## 2026-03-21T01:34 - V4-028: Register relevance UDFs + converter mappings
+- **What was fixed**: 7 new tests passing across 3 test classes (1→8 of 45)
+  - **Relevance UDF registration in UnifiedQueryContext**: Registered all 7 relevance functions with variadic operand metadata via `wrapRelevanceUdf()` helper (same pattern as JSON UDFs). Both uppercase and lowercase variants registered. Replaced simplified 2-arg `matchPhraseUpper`/`matchPhraseLower` SqlBasicFunction with full variadic versions. Kept a lowercase inline `match_phrase` SqlBasicFunction for the search command's inline usage.
+  - **MATCH keyword conflict**: Used alternative name `PPL_MATCH` (same pattern as PPL_VALUES) to avoid SQL parser keyword conflict. The converter emits `PPL_MATCH(field, query, ...)` in SQL.
+  - **buildRelevanceCall() in PPLToSqlNodeConverter**: Converts PPL AST relevance function args to SQL function call. Required args (field/fields/query) are converted via visitor. Optional params become "key=value" string literals. Handles both single-field functions (match, match_phrase, match_bool_prefix, match_phrase_prefix) and multi-field functions (multi_match, query_string, simple_query_string).
+  - **RELEVANCE_SQL_NAME map**: Maps PPL function names to SQL operator names (match→PPL_MATCH, match_phrase→MATCH_PHRASE, etc.).
+- **Pass rate change**: 85.4% (1926/2255) → estimated 85.7% (1933/2255) = +0.3pp, +7 tests
+- **Per-class results** (before → after):
+  - CalciteMatchBoolPrefixIT: 0→3 pass (3 total, 0 fail) ✅ ALL PASS — +3
+  - CalciteMatchPhrasePrefixIT: 0→4 pass (8 total, 4 fail) — +4
+  - CalciteMatchPhraseIT: 1→1 pass (2 total, 1 fail) — 0 (basic already passing)
+  - CalciteMatchIT: 0→0 pass (1 total, 1 fail) — 0 (MATCH keyword conflict at engine level)
+  - CalciteMultiMatchIT: 0→0 pass (5 total, 5 fail) — 0 (pushdown required)
+  - CalciteQueryStringIT: 0→0 pass (6 total, 6 fail) — 0 (pushdown required)
+  - CalciteSimpleQueryStringIT: 0→0 pass (5 total, 5 fail) — 0 (pushdown required)
+  - CalciteRelevanceFunctionIT: 0→0 pass (15 total, 14 fail, 1 skip) — 0 (pushdown required)
+  - CalciteDateTimeComparisonIT: 191/191 (no regression) ✅
+  - CalciteSortCommandIT: 30/30 (no regression) ✅
+  - CalcitePPLAggregationIT: 100/100 (no regression) ✅
+  - CalcitePPLJoinIT: 37/39 (no regression) ✅
+  - CalciteExplainIT: 163/236 (no regression) ✅
+- **Remaining 36 failures** (all engine-level, NOT converter-fixable):
+  - 36 "Relevance search query functions are only supported when they are pushed down": The Calcite SQL engine cannot execute relevance functions without pushdown to OpenSearch. The V4 converter correctly generates SQL with the right function calls and arguments, but the engine's no-pushdown scan path throws UnsupportedOperationException for relevance functions.
+  - 1 MATCH keyword conflict: `MATCH(field, query)` fails SQL parsing because MATCH is a reserved keyword. PPL_MATCH works at the operator table level but the SQL parser still rejects it when the original function name is MATCH.
+- **Files changed**:
+  - api/src/main/java/org/opensearch/sql/api/PPLToSqlNodeConverter.java (+56: SINGLE_FIELD_RELEVANCE, MULTI_FIELD_RELEVANCE, RELEVANCE_SQL_NAME, buildRelevanceCall, extractArgValue)
+  - api/src/main/java/org/opensearch/sql/api/UnifiedQueryContext.java (+32/-7: wrapRelevanceUdf, 14 relevance UDF registrations, removed simplified matchPhraseUpper)
+- **Learnings for future iterations:**
+  - Relevance functions REQUIRE pushdown to OpenSearch — they can't be executed in the Calcite no-pushdown scan path. The engine throws UnsupportedOperationException when trying to compile them as regular functions.
+  - MATCH is a reserved SQL keyword in Calcite's parser. Using PPL_MATCH as the SQL function name avoids the parser conflict, but the function still needs to be recognized by the engine's pushdown path.
+  - The wrapRelevanceUdf() pattern (creating SqlUserDefinedFunction with variadic metadata and custom name) is reusable for any UDF that needs name aliasing or variadic support.
+  - Optional relevance parameters (slop, analyzer, boost, etc.) are encoded as "key=value" string literals in the SQL function call. The engine's RelevanceQueryFunction implementation parses these back into a Map.
+  - CalciteMatchBoolPrefixIT and CalciteMatchPhrasePrefixIT (basic cases) pass because these functions ARE pushed down by the engine when the query is simple enough. Complex cases with optional parameters fail because the pushdown path doesn't handle all parameter combinations.
+---
