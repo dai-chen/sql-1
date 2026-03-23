@@ -55,12 +55,23 @@ public abstract class UnifiedQueryTestBase {
           }
         };
 
-    context =
-        UnifiedQueryContext.builder()
-            .language(QueryType.PPL)
-            .catalog(DEFAULT_CATALOG, testSchema)
-            .build();
+    context = buildContext(queryType());
     planner = new UnifiedQueryPlanner(context);
+  }
+
+  /**
+   * Returns the query type for this test class. Subclasses override to test different languages.
+   */
+  protected QueryType queryType() {
+    return QueryType.PPL;
+  }
+
+  /** Builds a UnifiedQueryContext with the test schema for the given query type. */
+  protected UnifiedQueryContext buildContext(QueryType queryType) {
+    return UnifiedQueryContext.builder()
+        .language(queryType)
+        .catalog(DEFAULT_CATALOG, testSchema)
+        .build();
   }
 
   @After
