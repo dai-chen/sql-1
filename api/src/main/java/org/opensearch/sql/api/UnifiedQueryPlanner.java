@@ -11,6 +11,7 @@ import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalSort;
+import org.opensearch.sql.api.rewriter.DatetimeUdtRewriter;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
@@ -57,7 +58,8 @@ public class UnifiedQueryPlanner {
    */
   public RelNode plan(String query) {
     try {
-      return preserveCollation(analyze(parse(query)));
+      RelNode plan = preserveCollation(analyze(parse(query)));
+      return DatetimeUdtRewriter.rewrite(plan, context.getPlanContext().rexBuilder);
     } catch (SyntaxCheckException e) {
       // Re-throw syntax error without wrapping
       throw e;
