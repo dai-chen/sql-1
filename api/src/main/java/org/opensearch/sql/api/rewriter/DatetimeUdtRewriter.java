@@ -5,7 +5,6 @@
 
 package org.opensearch.sql.api.rewriter;
 
-import java.util.Map;
 import org.apache.calcite.rel.RelHomogeneousShuttle;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
@@ -13,10 +12,7 @@ import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
-import org.apache.calcite.sql.SqlOperator;
-import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.calcite.sql.validate.SqlUserDefinedFunction;
 import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
 
@@ -24,27 +20,13 @@ import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
  * Rewrites a RelNode tree to replace datetime UDT types (EXPR_DATE, EXPR_TIME, EXPR_TIMESTAMP) with
  * standard Calcite DATE/TIME/TIMESTAMP types.
  *
- * <p>This is a <b>logical</b> rewrite — it only changes types, not execution semantics. The
- * resulting RelNode is clean for downstream consumers (pushdown rules, transpilers, etc.).
- *
- * <p>Category A functions (NOW, CURRENT_DATE, CURRENT_TIME, etc.) are replaced with their
- * SqlStdOperatorTable equivalents. Category B functions (PPL-specific datetime UDFs) keep the
- * original UDF call and wrap it with a CAST to the standard Calcite type.
+ * <p>Every RexCall returning a datetime UDT is wrapped with a CAST to the corresponding standard
+ * Calcite type. The original UDF call is preserved — this is a pure type-level rewrite.
  *
  * <p>Operand adaptation (CAST datetime → VARCHAR for PPL UDF implementors) is NOT done here — that
  * is an execution concern handled by {@link UdfOperandAdapter} in the compilation phase.
  */
 public class DatetimeUdtRewriter {
-
-  private static final Map<String, SqlOperator> CATEGORY_A =
-      Map.of(
-          "NOW", SqlStdOperatorTable.CURRENT_TIMESTAMP,
-          "CURRENT_TIMESTAMP", SqlStdOperatorTable.CURRENT_TIMESTAMP,
-          "CURRENT_DATE", SqlStdOperatorTable.CURRENT_DATE,
-          "CURRENT_TIME", SqlStdOperatorTable.CURRENT_TIME,
-          "LOCALTIMESTAMP", SqlStdOperatorTable.LOCALTIMESTAMP,
-          "LOCALTIME", SqlStdOperatorTable.LOCALTIME,
-          "LAST_DAY", SqlStdOperatorTable.LAST_DAY);
 
   private DatetimeUdtRewriter() {}
 
@@ -87,8 +69,7 @@ public class DatetimeUdtRewriter {
       if (!(call.getType() instanceof AbstractExprRelDataType<?> udtType)) {
         return call;
       }
-      ExprUDT udt = udtType.getUdt();
-      SqlTypeName targetType = mapUdtToSqlType(udt);
+      SqlTypeName targetType = mapUdtToSqlType(udtType.getUdt());
       if (targetType == null) {
         return call;
       }
@@ -99,19 +80,7 @@ public class DatetimeUdtRewriter {
               .createTypeWithNullability(
                   rexBuilder.getTypeFactory().createSqlType(targetType),
                   call.getType().isNullable());
-
-      // Category A: replace with SqlStdOperatorTable equivalent
-      SqlOperator stdOp = CATEGORY_A.get(call.getOperator().getName());
-      if (stdOp != null) {
-        return rexBuilder.makeCall(stdReturnType, stdOp, call.getOperands());
-      }
-
-      // Category B: keep original UDF call, wrap with CAST to standard type
-      if (call.getOperator() instanceof SqlUserDefinedFunction) {
-        return rexBuilder.makeCast(stdReturnType, call);
-      }
-
-      return call;
+      return rexBuilder.makeCast(stdReturnType, call);
     }
   }
 
