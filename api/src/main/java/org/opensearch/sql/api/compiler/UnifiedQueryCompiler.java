@@ -16,6 +16,7 @@ import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.tools.RelRunner;
 import org.opensearch.sql.api.UnifiedQueryContext;
+import org.opensearch.sql.api.rewriter.UdfOperandAdapter;
 
 /**
  * {@code UnifiedQueryCompiler} compiles Calcite logical plans ({@link RelNode}) into executable
@@ -46,6 +47,9 @@ public class UnifiedQueryCompiler {
    */
   public PreparedStatement compile(@NonNull RelNode plan) {
     try {
+      // Adapt UDF operands: CAST standard datetime operands to VARCHAR for PPL UDF implementors
+      RelNode adapted = UdfOperandAdapter.adapt(plan, context.getPlanContext().rexBuilder);
+
       // Apply shuttle to convert LogicalTableScan to BindableTableScan
       final RelHomogeneousShuttle shuttle =
           new RelHomogeneousShuttle() {
@@ -59,7 +63,7 @@ public class UnifiedQueryCompiler {
               return super.visit(scan);
             }
           };
-      RelNode transformedPlan = plan.accept(shuttle);
+      RelNode transformedPlan = adapted.accept(shuttle);
 
       Connection connection = context.getPlanContext().connection;
       final RelRunner runner = connection.unwrap(RelRunner.class);

@@ -5,8 +5,6 @@
 
 package org.opensearch.sql.api.rewriter;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import org.apache.calcite.rel.RelHomogeneousShuttle;
 import org.apache.calcite.rel.RelNode;
@@ -26,12 +24,15 @@ import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
  * Rewrites a RelNode tree to replace datetime UDT types (EXPR_DATE, EXPR_TIME, EXPR_TIMESTAMP) with
  * standard Calcite DATE/TIME/TIMESTAMP types.
  *
- * <p>Category A functions (NOW, CURRENT_DATE, CURRENT_TIME, etc.) are replaced with their
- * SqlStdOperatorTable equivalents.
+ * <p>This is a <b>logical</b> rewrite — it only changes types, not execution semantics. The
+ * resulting RelNode is clean for downstream consumers (pushdown rules, transpilers, etc.).
  *
- * <p>Category B functions (PPL-specific datetime UDFs) keep the original UDF call (which returns
- * String via UDT) and wrap it with a CAST to the standard Calcite type. Calcite's built-in CAST
- * from VARCHAR to DATE/TIME/TIMESTAMP calls DateTimeUtils conversion methods internally.
+ * <p>Category A functions (NOW, CURRENT_DATE, CURRENT_TIME, etc.) are replaced with their
+ * SqlStdOperatorTable equivalents. Category B functions (PPL-specific datetime UDFs) keep the
+ * original UDF call and wrap it with a CAST to the standard Calcite type.
+ *
+ * <p>Operand adaptation (CAST datetime → VARCHAR for PPL UDF implementors) is NOT done here — that
+ * is an execution concern handled by {@link UdfOperandAdapter} in the compilation phase.
  */
 public class DatetimeUdtRewriter {
 
@@ -58,7 +59,6 @@ public class DatetimeUdtRewriter {
     return plan.accept(new UdtRelShuttle(rexBuilder));
   }
 
-  /** Visits every RelNode and applies the RexShuttle to rewrite expressions. */
   private static class UdtRelShuttle extends RelHomogeneousShuttle {
     private final RexBuilder rexBuilder;
 
@@ -73,7 +73,6 @@ public class DatetimeUdtRewriter {
     }
   }
 
-  /** Visits every RexCall bottom-up and rewrites datetime UDT calls to standard Calcite types. */
   private static class UdtRexShuttle extends RexShuttle {
     private final RexBuilder rexBuilder;
 
@@ -83,17 +82,7 @@ public class DatetimeUdtRewriter {
 
     @Override
     public RexNode visitCall(RexCall call) {
-      // Bottom-up: rewrite operands first
       call = (RexCall) super.visitCall(call);
-
-      // For ANY UDF with standard datetime operands, adapt them to VARCHAR
-      // so the original implementor (which expects String) works correctly.
-      if (call.getOperator() instanceof SqlUserDefinedFunction) {
-        List<RexNode> adaptedOperands = adaptOperands(call.getOperands());
-        if (!adaptedOperands.equals(call.getOperands())) {
-          call = (RexCall) rexBuilder.makeCall(call.getType(), call.getOperator(), adaptedOperands);
-        }
-      }
 
       if (!(call.getType() instanceof AbstractExprRelDataType<?> udtType)) {
         return call;
@@ -117,43 +106,20 @@ public class DatetimeUdtRewriter {
         return rexBuilder.makeCall(stdReturnType, stdOp, call.getOperands());
       }
 
-      // Category B: keep original UDF call, wrap with CAST to standard type.
-      // The original UDF returns UDT (VARCHAR-backed String). Calcite's built-in CAST
-      // from VARCHAR to DATE/TIME/TIMESTAMP calls DateTimeUtils.dateStringToUnixDate etc.
+      // Category B: keep original UDF call, wrap with CAST to standard type
       if (call.getOperator() instanceof SqlUserDefinedFunction) {
         return rexBuilder.makeCast(stdReturnType, call);
       }
 
       return call;
     }
-
-    /**
-     * For operands that have standard DATE/TIME/TIMESTAMP types (from rewritten inner calls),
-     * insert a CAST to VARCHAR so the original implementor receives String values.
-     */
-    private List<RexNode> adaptOperands(List<RexNode> operands) {
-      List<RexNode> adapted = new ArrayList<>(operands.size());
-      for (RexNode operand : operands) {
-        SqlTypeName typeName = operand.getType().getSqlTypeName();
-        if (typeName == SqlTypeName.DATE
-            || typeName == SqlTypeName.TIME
-            || typeName == SqlTypeName.TIMESTAMP) {
-          RelDataType varcharType =
-              rexBuilder
-                  .getTypeFactory()
-                  .createTypeWithNullability(
-                      rexBuilder.getTypeFactory().createSqlType(SqlTypeName.VARCHAR),
-                      operand.getType().isNullable());
-          adapted.add(rexBuilder.makeCast(varcharType, operand));
-        } else {
-          adapted.add(operand);
-        }
-      }
-      return adapted;
-    }
   }
 
-  /** Maps a datetime ExprUDT to the corresponding standard Calcite SqlTypeName. */
+  /**
+   * Maps datetime UDTs to standard Calcite types. Only datetime UDTs are rewritten because they
+   * have standard Calcite equivalents with different runtime representations (int/long vs String).
+   * EXPR_BINARY and EXPR_IP have no standard Calcite equivalent and are String-compatible as-is.
+   */
   private static SqlTypeName mapUdtToSqlType(ExprUDT udt) {
     return switch (udt) {
       case EXPR_DATE -> SqlTypeName.DATE;
