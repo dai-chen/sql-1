@@ -1,8 +1,8 @@
-# Unified Query API — Gap Analysis Report
+# Unified Query API — SQL Gap Analysis Report
 
 **Date:** 2026-03-24  
 **Branch:** `poc/unified-sql-support-gap-analysis`  
-**Scope:** All SQL IT tests (`org.opensearch.sql.sql.*IT`, 50 classes) + PPL IT tests (`SearchCommandIT`)  
+**Scope:** All SQL IT tests (`org.opensearch.sql.sql.*IT`) — 50 test classes  
 **Pipeline:** `UnifiedQueryPlanner` → `UnifiedQueryCompiler` → `PreparedStatement.executeQuery()`
 
 ---
@@ -294,50 +294,6 @@ curl -s -XPOST 'localhost:9200/_plugins/_sql' -H 'Content-Type: application/json
 |-------|------------|
 | `SELECT COUNT(age) AS cnt FROM opensearch-sql_test_index_account` | 257 |
 | `SELECT SUM(balance) AS total_sales FROM opensearch-sql_test_index_account` | 257 |
-
----
-
-## PPL Gap Analysis Results
-
-**Scope:** `SearchCommandIT` — 86 queries  
-**Success:** 47 (54.7%) | **Failed:** 39 (45.3%)  
-**All failures:** PLAN phase `SyntaxCheckException`
-
-### Root Cause: Double-Quoted String Literals
-
-All 39 PPL failures are caused by the unified PPL parser not supporting double-quoted string literals (`"value"`) in search command expressions. The V2 PPL engine handles these, but the unified planner's ANTLR grammar does not.
-
-| Sub-Category | Count | Sample Query |
-|-------------|-------|-------------|
-| Free-text / phrase search | 8 | `search source=...otel_logs "Payment failed" \| fields body` |
-| Field comparison (`field="value"`) | 19 | `search source=...otel_logs severityText="ERROR" \| fields severityText` |
-| IN operator (`field IN ("v1","v2")`) | 4 | `search source=...otel_logs severityText IN ("ERROR", "WARN")` |
-| Date range comparison | 4 | `search source=...otel_logs @timestamp>"2024-01-15T10:30:00Z"` |
-| Special index names (dots/hyphens) | 2 | `search source=logs-2021.01.11` |
-| Escaped quotes in values | 2 | `search source=...otel_logs "wildcard\*" \| fields body` |
-
-### Fix
-
-Update the unified PPL ANTLR grammar to accept double-quoted strings as valid string literals in search command context. This single fix resolves 37/39 failures (94.9%), bringing PPL success from 54.7% to ~97.7%. The remaining 2 failures (special index names with dots/hyphens) require a separate grammar fix for index name rules.
-
-### Manual Verification
-
-```bash
-# Create otel_logs test index
-curl -s -XPUT 'localhost:9200/opensearch-sql_test_index_otel_logs' -H 'Content-Type: application/json' \
-  -d '{"mappings":{"properties":{"body":{"type":"text"},"severityText":{"type":"keyword"},"severityNumber":{"type":"integer"},"@timestamp":{"type":"date"}}}}'
-curl -s -XPOST 'localhost:9200/opensearch-sql_test_index_otel_logs/_bulk' \
-  -H 'Content-Type: application/json' --data-binary '
-{"index":{}}
-{"body":"Payment failed for user","severityText":"ERROR","severityNumber":17,"@timestamp":"2024-01-15T10:30:00Z"}
-{"index":{}}
-{"body":"User login successful","severityText":"INFO","severityNumber":9,"@timestamp":"2024-01-15T10:30:01Z"}
-'
-
-# Test double-quoted string (fails in unified pipeline)
-curl -s -XPOST 'localhost:9200/_plugins/_ppl' -H 'Content-Type: application/json' \
-  -d '{"query": "search source=opensearch-sql_test_index_otel_logs severityText=\"ERROR\" | fields severityText"}'
-```
 
 ---
 
