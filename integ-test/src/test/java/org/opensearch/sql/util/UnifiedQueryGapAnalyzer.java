@@ -57,7 +57,11 @@ public class UnifiedQueryGapAnalyzer {
     }
 
     public static GapResult failure(Phase phase, Throwable t) {
-      return new GapResult(phase, false, t.getMessage(), t.getClass().getName());
+      Throwable root = t;
+      while (root.getCause() != null && root.getCause() != root) {
+        root = root.getCause();
+      }
+      return new GapResult(phase, false, root.getMessage(), root.getClass().getName());
     }
   }
 
@@ -176,10 +180,10 @@ public class UnifiedQueryGapAnalyzer {
 
   private static AbstractSchema createSchema(
       OpenSearchClient osClient, Settings[] settingsHolder) {
-    return new AbstractSchema() {
-      @Override
-      protected Map<String, Table> getTableMap() {
-        return new HashMap<>() {
+    // Single shared map instance — avoids re-creating on every getTableMap() call,
+    // which caused redundant REST _mapping fetches and race conditions under concurrency.
+    Map<String, Table> tableMap =
+        new HashMap<>() {
           @Override
           public Table get(Object key) {
             if (!super.containsKey(key)) {
@@ -189,6 +193,10 @@ public class UnifiedQueryGapAnalyzer {
             return super.get(key);
           }
         };
+    return new AbstractSchema() {
+      @Override
+      protected Map<String, Table> getTableMap() {
+        return tableMap;
       }
     };
   }
