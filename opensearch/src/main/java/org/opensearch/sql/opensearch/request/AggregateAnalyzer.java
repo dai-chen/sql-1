@@ -476,7 +476,7 @@ public class AggregateAnalyzer {
               new SingleValueParser(aggName));
       // 1. Only case SUM, skip SUM0 / COUNT since calling avg() in DSL should be faster.
       // 2. To align with databases, SUM0 is not preferred now.
-      case SUM ->
+      case SUM, SUM0 ->
           Pair.of(
               helper.build(args.getFirst().getKey(), AggregationBuilders.sum(aggName)),
               new SingleValueParser(aggName));

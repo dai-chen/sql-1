@@ -11,6 +11,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.opensearch.sql.common.setting.Settings.Key.*;
 
+import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.junit.Test;
 import org.opensearch.sql.calcite.SysLimit;
 import org.opensearch.sql.executor.QueryType;
@@ -63,14 +64,34 @@ public class UnifiedQueryContextTest extends UnifiedQueryTestBase {
     UnifiedQueryContext.builder().catalog("opensearch", testSchema).build();
   }
 
-  @Test(expected = IllegalArgumentException.class)
-  public void testUnsupportedQueryType() {
+  @Test
+  public void testSqlQueryType() {
     UnifiedQueryContext context =
         UnifiedQueryContext.builder()
-            .language(QueryType.SQL) // only PPL is supported for now
+            .language(QueryType.SQL)
             .catalog("opensearch", testSchema)
             .build();
-    new UnifiedQueryPlanner(context);
+    assertNotNull(new UnifiedQueryPlanner(context));
+  }
+
+  @Test
+  public void testSqlWithConformance() {
+    UnifiedQueryContext context =
+        UnifiedQueryContext.builder()
+            .language(QueryType.SQL)
+            .conformance(SqlConformanceEnum.DEFAULT)
+            .catalog("opensearch", testSchema)
+            .build();
+    assertNotNull(new UnifiedQueryPlanner(context));
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testConformanceOnlyForSql() {
+    UnifiedQueryContext.builder()
+        .language(QueryType.PPL)
+        .conformance(SqlConformanceEnum.DEFAULT)
+        .catalog("opensearch", testSchema)
+        .build();
   }
 
   @Test(expected = IllegalArgumentException.class)

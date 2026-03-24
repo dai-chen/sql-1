@@ -16,6 +16,8 @@ import java.util.Map;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
+import org.apache.calcite.sql.validate.SqlConformance;
+import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.junit.After;
 import org.junit.Test;
 import org.opensearch.common.unit.TimeValue;
@@ -41,11 +43,25 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
   public void init() throws Exception {
     super.init();
     loadIndex(Index.ACCOUNT);
+    initContext(QueryType.PPL);
+  }
 
+  @After
+  public void cleanUp() throws Exception {
+    if (context != null) {
+      context.close();
+    }
+  }
+
+  private void initContext(QueryType queryType) {
+    initContext(queryType, null);
+  }
+
+  private void initContext(QueryType queryType, SqlConformance conformance) {
     String catalogName = "opensearch";
-    context =
+    var builder =
         UnifiedQueryContext.builder()
-            .language(QueryType.PPL)
+            .language(queryType)
             .catalog(catalogName, createOpenSearchSchema())
             .defaultNamespace(catalogName)
             .setting("plugins.query.size_limit", 200)
@@ -55,17 +71,13 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
             .setting("plugins.query.field_type_tolerance", true)
             .setting("plugins.calcite.enabled", true)
             .setting("plugins.calcite.pushdown.enabled", true)
-            .setting("plugins.calcite.pushdown.rowcount.estimation.factor", 0.9)
-            .build();
+            .setting("plugins.calcite.pushdown.rowcount.estimation.factor", 0.9);
+    if (conformance != null) {
+      builder.conformance(conformance);
+    }
+    context = builder.build();
     planner = new UnifiedQueryPlanner(context);
     compiler = new UnifiedQueryCompiler(context);
-  }
-
-  @After
-  public void cleanUp() throws Exception {
-    if (context != null) {
-      context.close();
-    }
   }
 
   @Test
@@ -101,6 +113,84 @@ public class UnifiedQueryOpenSearchIT extends PPLIntegTestCase implements Result
         assertNotNull(rs);
         assertTrue("Expected at least one row for query: " + query, rs.next());
       }
+    }
+  }
+
+  @Test
+  public void testSimpleSQLQueryExecution() throws Exception {
+    initContext(QueryType.SQL);
+    String sqlQuery =
+        String.format(
+            "SELECT firstname, age FROM `%s` WHERE lastname = 'Duke' LIMIT 3",
+            TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(sqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      verify(resultSet)
+          .expectSchema(col("firstname", VARCHAR), col("age", BIGINT))
+          .expectData(row("Amber", 32L));
+    }
+  }
+
+  @Test
+  public void testSimpleAnsiSQLQueryExecution() throws Exception {
+    initContext(QueryType.SQL, SqlConformanceEnum.DEFAULT);
+    String ansiSqlQuery =
+        String.format(
+            "SELECT \"firstname\", \"age\" FROM \"%s\" WHERE \"lastname\" = 'Duke'",
+            TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(ansiSqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      verify(resultSet)
+          .expectSchema(col("firstname", VARCHAR), col("age", BIGINT))
+          .expectData(row("Amber", 32L));
+    }
+  }
+
+  @Test
+  public void testSQLWithMatchUDF() throws Exception {
+    initContext(QueryType.SQL);
+    String sqlQuery =
+        String.format(
+            "SELECT firstname, lastname FROM `%s` WHERE match(lastname, 'Bates') LIMIT 5",
+            TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(sqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      verify(resultSet)
+          .expectSchema(col("firstname", VARCHAR), col("lastname", VARCHAR))
+          .expectData(row("Nanette", "Bates"));
+    }
+  }
+
+  @Test
+  public void testAnsiSQLSelfJoinWithAggregation() throws Exception {
+    initContext(QueryType.SQL, SqlConformanceEnum.DEFAULT);
+    // Self-join on state: count pairs where a.age > 30 and b.age < 30 in state IL
+    // IL has 10 people with age>30 and 11 with age<30, so cross count = 110
+    String ansiSqlQuery =
+        String.format(
+            "SELECT a.\"state\", COUNT(*) AS \"cnt\""
+                + " FROM \"%1$s\" a"
+                + " INNER JOIN \"%1$s\" b ON a.\"state\" = b.\"state\""
+                + " WHERE a.\"age\" > 30 AND b.\"age\" < 30 AND a.\"state\" = 'IL'"
+                + " GROUP BY a.\"state\"",
+            TEST_INDEX_ACCOUNT);
+
+    RelNode logicalPlan = planner.plan(ansiSqlQuery);
+    try (PreparedStatement statement = compiler.compile(logicalPlan)) {
+      ResultSet resultSet = statement.executeQuery();
+
+      verify(resultSet)
+          .expectSchema(col("state", VARCHAR), col("cnt", BIGINT))
+          .expectData(row("IL", 110L));
     }
   }
 

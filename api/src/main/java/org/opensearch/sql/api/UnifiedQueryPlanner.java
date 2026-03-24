@@ -9,8 +9,12 @@ import org.antlr.v4.runtime.tree.ParseTree;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalSort;
+import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.tools.Frameworks;
+import org.apache.calcite.tools.Planner;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
@@ -19,8 +23,7 @@ import org.opensearch.sql.common.antlr.Parser;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.executor.QueryType;
 import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
-import org.opensearch.sql.ppl.parser.AstBuilder;
-import org.opensearch.sql.ppl.parser.AstStatementBuilder;
+import org.opensearch.sql.sql.antlr.SQLSyntaxParser;
 
 /**
  * {@code UnifiedQueryPlanner} provides a high-level API for parsing and analyzing queries using the
@@ -34,6 +37,9 @@ public class UnifiedQueryPlanner {
   /** Unified query context containing CalcitePlanContext with all configuration. */
   private final UnifiedQueryContext context;
 
+  /** Whether to use Calcite's native SQL parser instead of the ANTLR-based parser. */
+  private final boolean useCalciteParser;
+
   /** AST-to-RelNode visitor that builds logical plans from the parsed AST. */
   private final CalciteRelNodeVisitor relNodeVisitor =
       new CalciteRelNodeVisitor(new EmptyDataSourceService());
@@ -44,22 +50,25 @@ public class UnifiedQueryPlanner {
    * @param context the unified query context containing CalcitePlanContext
    */
   public UnifiedQueryPlanner(UnifiedQueryContext context) {
-    this.parser = buildQueryParser(context.getPlanContext().queryType);
     this.context = context;
+    this.useCalciteParser =
+        context.getPlanContext().queryType == QueryType.SQL && context.getConformance() != null;
+    this.parser = useCalciteParser ? null : buildQueryParser(context.getPlanContext().queryType);
   }
 
   /**
-   * Parses and analyzes a query string into a Calcite logical plan (RelNode). TODO: Generate
-   * optimal physical plan to fully unify query execution and leverage Calcite's optimizer.
+   * Parses and analyzes a query string into a Calcite logical plan (RelNode).
    *
-   * @param query the raw query string in PPL or other supported syntax
+   * @param query the raw query string in PPL or SQL syntax
    * @return a logical plan representing the query
    */
   public RelNode plan(String query) {
     try {
+      if (useCalciteParser) {
+        return planWithCalcite(query);
+      }
       return preserveCollation(analyze(parse(query)));
     } catch (SyntaxCheckException e) {
-      // Re-throw syntax error without wrapping
       throw e;
     } catch (Exception e) {
       throw new IllegalStateException("Failed to plan query", e);
@@ -67,25 +76,67 @@ public class UnifiedQueryPlanner {
   }
 
   private Parser buildQueryParser(QueryType queryType) {
-    if (queryType == QueryType.PPL) {
-      return new PPLSyntaxParser();
-    }
-    throw new IllegalArgumentException("Unsupported query type: " + queryType);
+    return switch (queryType) {
+      case PPL -> new PPLSyntaxParser();
+      case SQL -> new SQLSyntaxParser();
+    };
   }
 
   private UnresolvedPlan parse(String query) {
     ParseTree cst = parser.parse(query);
-    AstStatementBuilder astStmtBuilder =
-        new AstStatementBuilder(
-            new AstBuilder(query, context.getSettings()),
-            AstStatementBuilder.StatementBuilderContext.builder().build());
-    Statement statement = cst.accept(astStmtBuilder);
+    Statement statement =
+        switch (context.getPlanContext().queryType) {
+          case PPL -> {
+            var astBuilder =
+                new org.opensearch.sql.ppl.parser.AstBuilder(query, context.getSettings());
+            var stmtBuilder =
+                new org.opensearch.sql.ppl.parser.AstStatementBuilder(
+                    astBuilder,
+                    org.opensearch.sql.ppl.parser.AstStatementBuilder.StatementBuilderContext
+                        .builder()
+                        .build());
+            yield cst.accept(stmtBuilder);
+          }
+          case SQL -> {
+            var astBuilder = new org.opensearch.sql.sql.parser.AstBuilder(query);
+            var stmtBuilder =
+                new org.opensearch.sql.sql.parser.AstStatementBuilder(
+                    astBuilder,
+                    org.opensearch.sql.sql.parser.AstStatementBuilder.StatementBuilderContext
+                        .builder()
+                        .build());
+            yield cst.accept(stmtBuilder);
+          }
+        };
 
     if (statement instanceof Query) {
       return ((Query) statement).getPlan();
     }
     throw new UnsupportedOperationException(
         "Only query statements are supported but got " + statement.getClass().getSimpleName());
+  }
+
+  private RelNode planWithCalcite(String query) {
+    try {
+      Planner planner = Frameworks.getPlanner(context.getPlanContext().config);
+      SqlNode parsed = planner.parse(query);
+      SqlNode validated = planner.validate(parsed);
+      RelRoot relRoot = planner.rel(validated);
+      planner.close();
+
+      // Run AggregateCaseToFilterRule to rewrite SUM(CASE WHEN cond THEN NULL ELSE expr END)
+      // into SUM(expr) FILTER(WHERE NOT cond) for native OpenSearch filter aggregation pushdown
+      RelNode rel = relRoot.rel;
+      org.apache.calcite.plan.hep.HepPlanner hepPlanner =
+          new org.apache.calcite.plan.hep.HepPlanner(
+              new org.apache.calcite.plan.hep.HepProgramBuilder()
+                  .addRuleInstance(org.apache.calcite.rel.rules.CoreRules.AGGREGATE_CASE_TO_FILTER)
+                  .build());
+      hepPlanner.setRoot(rel);
+      return hepPlanner.findBestExp();
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to plan SQL query", e);
+    }
   }
 
   private RelNode analyze(UnresolvedPlan ast) {

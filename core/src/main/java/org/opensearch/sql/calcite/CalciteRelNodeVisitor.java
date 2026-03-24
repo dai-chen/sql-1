@@ -84,6 +84,7 @@ import org.opensearch.sql.ast.Node;
 import org.opensearch.sql.ast.dsl.AstDSL;
 import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.Alias;
+import org.opensearch.sql.ast.expression.Alias;
 import org.opensearch.sql.ast.expression.AllFields;
 import org.opensearch.sql.ast.expression.AllFieldsExcludeMeta;
 import org.opensearch.sql.ast.expression.Argument;
@@ -123,6 +124,7 @@ import org.opensearch.sql.ast.tree.Flatten;
 import org.opensearch.sql.ast.tree.GraphLookup;
 import org.opensearch.sql.ast.tree.GraphLookup.Direction;
 import org.opensearch.sql.ast.tree.Head;
+import org.opensearch.sql.ast.tree.Limit;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Kmeans;
 import org.opensearch.sql.ast.tree.Lookup;
@@ -509,6 +511,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
               .filter(addedFields::add)
               .forEach(field -> expandedFields.add(context.relBuilder.field(field)));
         }
+        case Alias alias -> {
+          RexNode resolved = rexVisitor.analyze(alias.getDelegated(), context);
+          String displayName = alias.getAlias() != null ? alias.getAlias() : alias.getName();
+          if (addedFields.add(displayName)) {
+            expandedFields.add(context.relBuilder.alias(resolved, displayName));
+          }
+        }
         default ->
             throw new IllegalStateException(
                 "Unexpected expression type in project list: " + expr.getClass().getSimpleName());
@@ -724,6 +733,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   public RelNode visitHead(Head node, CalcitePlanContext context) {
     visitChildren(node, context);
     context.relBuilder.limit(node.getFrom(), node.getSize());
+    return context.relBuilder.peek();
+  }
+
+  @Override
+  public RelNode visitLimit(Limit node, CalcitePlanContext context) {
+    visitChildren(node, context);
+    context.relBuilder.limit(node.getOffset(), node.getLimit());
     return context.relBuilder.peek();
   }
 
@@ -1383,7 +1399,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   @Override
   public RelNode visitAggregation(Aggregation node, CalcitePlanContext context) {
     Argument.ArgumentMap statsArgs = Argument.ArgumentMap.of(node.getArgExprList());
-    Boolean bucketNullable = (Boolean) statsArgs.get(Argument.BUCKET_NULLABLE).getValue();
+    Literal bucketNullableLiteral = statsArgs.get(Argument.BUCKET_NULLABLE);
+    Boolean bucketNullable =
+        bucketNullableLiteral != null ? (Boolean) bucketNullableLiteral.getValue() : true;
     int nGroup = node.getGroupExprList().size() + (Objects.nonNull(node.getSpan()) ? 1 : 0);
     BitSet nonNullGroupMask = new BitSet(nGroup);
     if (!bucketNullable) {

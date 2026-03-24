@@ -83,10 +83,14 @@ public class RestSqlAction extends BaseRestHandler {
   /** New SQL query request handler. */
   private final RestSQLQueryAction newSqlQueryHandler;
 
+  /** Unified query API handler for SQL queries. */
+  private final RestUnifiedSQLQueryAction unifiedSqlQueryHandler;
+
   public RestSqlAction(Settings settings, Injector injector) {
     super();
     this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     this.newSqlQueryHandler = new RestSQLQueryAction(injector);
+    this.unifiedSqlQueryHandler = new RestUnifiedSQLQueryAction(injector);
   }
 
   @Override
@@ -134,7 +138,7 @@ public class RestSqlAction extends BaseRestHandler {
 
       Format format = SqlRequestParam.getFormat(request.params());
 
-      // Route request to new query engine if it's supported already
+      // Route request to unified query API
       SQLQueryRequest newSqlRequest =
           new SQLQueryRequest(
               sqlRequest.getJsonContent(),
@@ -142,26 +146,19 @@ public class RestSqlAction extends BaseRestHandler {
               request.path(),
               request.params(),
               sqlRequest.cursor());
-      return newSqlQueryHandler.prepareRequest(
-          newSqlRequest,
-          (restChannel, exception) -> {
-            try {
-              if (newSqlRequest.isExplainRequest()) {
-                LOG.info(
-                    "Request is falling back to old SQL engine due to: " + exception.getMessage());
-              }
-              LOG.info(
-                  "[{}] Request {} is not supported and falling back to old SQL engine",
-                  QueryContext.getRequestId(),
-                  newSqlRequest);
-              LOG.info("Request Query: {}", QueryDataAnonymizer.anonymizeData(sqlRequest.getSql()));
-              QueryAction queryAction = explainRequest(client, sqlRequest, format);
-              executeSqlRequest(request, queryAction, client, restChannel);
-            } catch (Exception e) {
-              handleException(restChannel, e);
-            }
-          },
-          this::handleException);
+
+      // Route all SQL queries through unified query API (clean cutover)
+      LOG.info(
+          "[{}] Routing to unified query API (mode={})",
+          QueryContext.getRequestId(),
+          newSqlRequest.isAnsiMode() ? "ansi" : "opensearch");
+      return channel -> {
+        try {
+          unifiedSqlQueryHandler.execute(newSqlRequest, channel, client);
+        } catch (Exception e) {
+          handleException(channel, e);
+        }
+      };
     } catch (Exception e) {
       return channel -> handleException(channel, e);
     }
@@ -192,7 +189,8 @@ public class RestSqlAction extends BaseRestHandler {
     Set<String> responseParams = new HashSet<>(super.responseParams());
     responseParams.addAll(
         Arrays.asList(
-            "sql", "flat", "separator", "_score", "_type", "_id", "newLine", "format", "sanitize"));
+            "sql", "flat", "separator", "_score", "_type", "_id", "newLine", "format", "sanitize",
+            "mode"));
     return responseParams;
   }
 
