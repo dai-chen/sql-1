@@ -5,9 +5,12 @@
 
 package org.opensearch.sql.api;
 
+import static java.sql.Types.BIGINT;
+import static java.sql.Types.DATE;
 import static java.sql.Types.INTEGER;
 import static java.sql.Types.VARCHAR;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -118,6 +121,87 @@ public class DatetimeUdtRewriterTest extends UnifiedQueryTestBase implements Res
     }
   }
 
+  // ==================== T2: TIMESTAMP column comparison ====================
+
+  @Test
+  public void testTimestampColumnComparisonWithTimestampFunction() throws Exception {
+    RelNode plan =
+        planner.plan(
+            "source = catalog.employees"
+                + " | where last_updated > TIMESTAMP('2024-03-01 00:00:00')"
+                + " | fields id, name");
+    assertNoDatetimeUDTs(plan);
+
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+      ResultSet rs = stmt.executeQuery();
+      verify(rs).expectSchema(col("id", INTEGER), col("name", VARCHAR)).expectData(row(2, "Bob"));
+    }
+  }
+
+  // ==================== T3: TIME column comparison ====================
+
+  @Test
+  public void testTimeColumnComparisonWithTimeFunction() throws Exception {
+    RelNode plan =
+        planner.plan(
+            "source = catalog.employees"
+                + " | where login_time > TIME('12:00:00')"
+                + " | fields id, name");
+    assertNoDatetimeUDTs(plan);
+
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+      ResultSet rs = stmt.executeQuery();
+      verify(rs).expectSchema(col("id", INTEGER), col("name", VARCHAR)).expectData(row(2, "Bob"));
+    }
+  }
+
+  // ==================== T4: CURRENT_DATE() zero-arg function ====================
+
+  @Test
+  public void testCurrentDateFunction() throws Exception {
+    RelNode plan =
+        planner.plan("source = catalog.employees | eval today = CURRENT_DATE() | fields id, today");
+    assertNoDatetimeUDTs(plan);
+
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+      ResultSet rs = stmt.executeQuery();
+      // Just verify it compiles and executes — value is dynamic
+      int rowCount = 0;
+      while (rs.next()) {
+        rowCount++;
+        // today should be a java.sql.Date (standard DATE type)
+        Object today = rs.getObject("today");
+        assertTrue(
+            "CURRENT_DATE should return java.sql.Date but got " + today.getClass(),
+            today instanceof java.sql.Date);
+      }
+      assertTrue("Should have rows", rowCount > 0);
+    }
+  }
+
+  // ==================== T5: Nested datetime functions ====================
+
+  @Test
+  public void testNestedDatetimeFunctions() throws Exception {
+    // Test nested rewrite: inner DATE() is rewritten (returns standard DATE),
+    // then DATEDIFF receives the standard DATE operand (adapted to VARCHAR for the UDF).
+    RelNode plan =
+        planner.plan(
+            "source = catalog.employees"
+                + " | eval days_since = DATEDIFF(DATE('2025-01-01'), DATE(date_hired))"
+                + " | fields id, days_since");
+    assertNoDatetimeUDTs(plan);
+
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+      ResultSet rs = stmt.executeQuery();
+      verify(rs)
+          .expectSchema(col("id", INTEGER), col("days_since", BIGINT))
+          .expectData(
+              row(1, 1753L), // 2025-01-01 - 2020-03-15
+              row(2, 1291L)); // 2025-01-01 - 2021-06-20
+    }
+  }
+
   // ==================== T6: Date extraction functions ====================
 
   @Test
@@ -136,6 +220,67 @@ public class DatetimeUdtRewriterTest extends UnifiedQueryTestBase implements Res
     }
   }
 
+  // ==================== T7: CAST to datetime type ====================
+
+  @Test
+  public void testCastToDateType() throws Exception {
+    RelNode plan =
+        planner.plan(
+            "source = catalog.employees"
+                + " | eval d = CAST('2024-01-01' AS DATE)"
+                + " | fields id, d");
+    assertNoDatetimeUDTs(plan);
+
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+      ResultSet rs = stmt.executeQuery();
+      verify(rs)
+          .expectSchema(col("id", INTEGER), col("d", DATE))
+          .expectData(
+              row(1, java.sql.Date.valueOf("2024-01-01")),
+              row(2, java.sql.Date.valueOf("2024-01-01")));
+    }
+  }
+
+  // ==================== T8: DATEDIFF with standard date columns ====================
+
+  @Test
+  public void testDatediffWithStandardDateColumns() throws Exception {
+    RelNode plan =
+        planner.plan(
+            "source = catalog.employees"
+                + " | eval days = DATEDIFF(DATE('2025-01-01'), date_hired)"
+                + " | fields id, days");
+    assertNoDatetimeUDTs(plan);
+
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+      ResultSet rs = stmt.executeQuery();
+      verify(rs)
+          .expectSchema(col("id", INTEGER), col("days", BIGINT))
+          .expectData(
+              row(1, 1753L), // 2025-01-01 - 2020-03-15
+              row(2, 1291L)); // 2025-01-01 - 2021-06-20
+    }
+  }
+
+  // ==================== T9: DATE_FORMAT with standard timestamp column ====================
+
+  @Test
+  public void testDateFormatWithStandardTimestampColumn() throws Exception {
+    RelNode plan =
+        planner.plan(
+            "source = catalog.employees"
+                + " | eval formatted = DATE_FORMAT(last_updated, '%Y-%m')"
+                + " | fields id, formatted");
+    assertNoDatetimeUDTs(plan);
+
+    try (PreparedStatement stmt = compiler.compile(plan)) {
+      ResultSet rs = stmt.executeQuery();
+      verify(rs)
+          .expectSchema(col("id", INTEGER), col("formatted", VARCHAR))
+          .expectData(row(1, "2024-01"), row(2, "2024-06"));
+    }
+  }
+
   // ==================== T10: Plan inspection — no UDTs in explain ====================
 
   @Test
@@ -144,5 +289,20 @@ public class DatetimeUdtRewriterTest extends UnifiedQueryTestBase implements Res
         planner.plan(
             "source = catalog.employees | where date_hired > DATE('2020-06-01') | fields id, name");
     assertNoDatetimeUDTs(plan);
+  }
+
+  // ==================== T11: Plan inspection — Category B UDF present with standard type ========
+
+  @Test
+  public void testCategoryBUdfPresentWithStandardReturnType() {
+    RelNode plan =
+        planner.plan(
+            "source = catalog.employees"
+                + " | eval d = ADDDATE(date_hired, 1)"
+                + " | fields id, d");
+    assertNoDatetimeUDTs(plan);
+    String explained = plan.explain();
+    // ADDDATE should still appear as a UDF (no standard equivalent)
+    assertTrue("ADDDATE should be in plan", explained.contains("ADDDATE"));
   }
 }
