@@ -138,7 +138,7 @@ public class RestSqlAction extends BaseRestHandler {
 
       Format format = SqlRequestParam.getFormat(request.params());
 
-      // Route request to unified query API
+      // Route request to new query engine if it's supported already
       SQLQueryRequest newSqlRequest =
           new SQLQueryRequest(
               sqlRequest.getJsonContent(),
@@ -147,18 +147,41 @@ public class RestSqlAction extends BaseRestHandler {
               request.params(),
               sqlRequest.cursor());
 
-      // Route all SQL queries through unified query API (clean cutover)
-      LOG.info(
-          "[{}] Routing to unified query API (mode={})",
-          QueryContext.getRequestId(),
-          newSqlRequest.isAnsiMode() ? "ansi" : "opensearch");
-      return channel -> {
-        try {
-          unifiedSqlQueryHandler.execute(newSqlRequest, channel, client);
-        } catch (Exception e) {
-          handleException(channel, e);
-        }
-      };
+      // Route to unified query API only for explicit ANSI mode requests
+      if (newSqlRequest.isAnsiMode()) {
+        LOG.info(
+            "[{}] Routing to unified query API (mode=ansi)",
+            QueryContext.getRequestId());
+        return channel -> {
+          try {
+            unifiedSqlQueryHandler.execute(newSqlRequest, channel, client);
+          } catch (Exception e) {
+            handleException(channel, e);
+          }
+        };
+      }
+
+      // Default: V2 engine with legacy fallback
+      return newSqlQueryHandler.prepareRequest(
+          newSqlRequest,
+          (restChannel, exception) -> {
+            try {
+              if (newSqlRequest.isExplainRequest()) {
+                LOG.info(
+                    "Request is falling back to old SQL engine due to: " + exception.getMessage());
+              }
+              LOG.info(
+                  "[{}] Request {} is not supported and falling back to old SQL engine",
+                  QueryContext.getRequestId(),
+                  newSqlRequest);
+              LOG.info("Request Query: {}", QueryDataAnonymizer.anonymizeData(sqlRequest.getSql()));
+              QueryAction queryAction = explainRequest(client, sqlRequest, format);
+              executeSqlRequest(request, queryAction, client, restChannel);
+            } catch (Exception e) {
+              handleException(restChannel, e);
+            }
+          },
+          this::handleException);
     } catch (Exception e) {
       return channel -> handleException(channel, e);
     }
