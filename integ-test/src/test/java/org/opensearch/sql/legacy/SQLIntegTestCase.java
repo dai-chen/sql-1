@@ -354,8 +354,9 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
       return;
     }
     try {
+      String unescaped = UnifiedQueryGapAnalyzer.unescapeJsonString(query);
       UnifiedQueryGapAnalyzer.GapResult gap =
-          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), query, QueryType.SQL);
+          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), unescaped, QueryType.SQL);
       StackTraceElement[] stack = Thread.currentThread().getStackTrace();
       String testMethod = stack.length > 3 ? stack[3].getMethodName() : "unknown";
       GapReportCollector.collect(

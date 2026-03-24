@@ -97,10 +97,14 @@ public class UnifiedQueryGapAnalyzer {
    * the catalog prefix.
    */
   public static String transformPPLQuery(String query) {
+    // Unescape JSON encoding — test queries are pre-escaped for buildRequest()'s JSON template,
+    // but the unified pipeline receives the raw string without a JSON decode round-trip.
+    String result = unescapeJsonString(query);
+
     // Transform source=<index> (but not source=[subquery...])
-    String result =
+    result =
         SOURCE_PATTERN
-            .matcher(query)
+            .matcher(result)
             .replaceAll(m -> m.group(1) + CATALOG_DOT + m.group(2));
 
     // Transform lookup <index>
@@ -176,6 +180,14 @@ public class UnifiedQueryGapAnalyzer {
     } catch (Exception e) {
       return GapResult.failure(GapResult.Phase.PLAN, e);
     }
+  }
+
+  /**
+   * Unescape JSON string encoding. Test queries are pre-escaped for the REST buildRequest() JSON
+   * template (e.g., \" becomes \\\"), but the unified pipeline bypasses the JSON round-trip.
+   */
+  public static String unescapeJsonString(String s) {
+    return s.replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\");
   }
 
   private static AbstractSchema createSchema(
