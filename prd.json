@@ -32,7 +32,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "This will cause many downstream failures. Fix compilation errors in this story, leave test failures for later stories."
     },
     {

@@ -215,9 +215,9 @@ public class CalcitePPLFunctionTypeTest extends CalcitePPLAbstractTest {
         "source=EMP | eval formatted = strftime(date('2020-09-16'), '%Y-%m-%d') | fields formatted";
     RelNode relNode = getRelNode(ppl);
     assertNotNull(relNode);
-    // The plan should show TIMESTAMP(DATE(...)) indicating auto-conversion
+    // The plan should show SAFE_CAST(DATE(...)) indicating auto-conversion from DATE to TIMESTAMP
     String planString = relNode.explain();
-    assertTrue(planString.contains("STRFTIME") && planString.contains("TIMESTAMP"));
+    assertTrue(planString.contains("STRFTIME") && planString.contains("SAFE_CAST"));
   }
 
   @Test

@@ -169,11 +169,11 @@ public class OpenSearchTypeFactory extends JavaTypeFactoryImpl {
         case BOOLEAN:
           return TYPE_FACTORY.createSqlType(SqlTypeName.BOOLEAN, nullable);
         case DATE:
-          return TYPE_FACTORY.createUDT(ExprUDT.EXPR_DATE, nullable);
+          return TYPE_FACTORY.createSqlType(SqlTypeName.DATE, nullable);
         case TIME:
-          return TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIME, nullable);
+          return TYPE_FACTORY.createSqlType(SqlTypeName.TIME, nullable);
         case TIMESTAMP:
-          return TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP, nullable);
+          return TYPE_FACTORY.createSqlType(SqlTypeName.TIMESTAMP, nullable);
         case ARRAY:
           return TYPE_FACTORY.createArrayType(
               TYPE_FACTORY.createSqlType(SqlTypeName.ANY, nullable), -1);
@@ -191,11 +191,11 @@ public class OpenSearchTypeFactory extends JavaTypeFactoryImpl {
       if (fieldType.legacyTypeName().equalsIgnoreCase("binary")) {
         return TYPE_FACTORY.createUDT(ExprUDT.EXPR_BINARY, nullable);
       } else if (fieldType.legacyTypeName().equalsIgnoreCase("timestamp")) {
-        return TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP, nullable);
+        return TYPE_FACTORY.createSqlType(SqlTypeName.TIMESTAMP, nullable);
       } else if (fieldType.legacyTypeName().equalsIgnoreCase("date")) {
-        return TYPE_FACTORY.createUDT(ExprUDT.EXPR_DATE, nullable);
+        return TYPE_FACTORY.createSqlType(SqlTypeName.DATE, nullable);
       } else if (fieldType.legacyTypeName().equalsIgnoreCase("time")) {
-        return TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIME, nullable);
+        return TYPE_FACTORY.createSqlType(SqlTypeName.TIME, nullable);
       } else if (fieldType.legacyTypeName().equalsIgnoreCase("geo_point")) {
         return TYPE_FACTORY.createSqlType(SqlTypeName.GEOMETRY, nullable);
       } else if (fieldType.legacyTypeName().equalsIgnoreCase("text")) {

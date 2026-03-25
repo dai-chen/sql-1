@@ -1,6 +1,8 @@
 # Codebase Patterns
 - **OpenSearchTypeSystem** is a singleton (`INSTANCE`) extending `RelDataTypeSystemImpl`. Override methods like `getMaxPrecision()` use a switch on `SqlTypeName` and delegate to `super` for unhandled cases.
-- **Build/test/verify cycle**: `./gradlew build -x integTest -x doctest` → `./gradlew test` → `./gradlew spotlessCheck`. All three must pass before committing.
+- **Build/test/verify cycle**: `./gradlew build -x integTest -x doctest -x yamlRestTest` → `./gradlew test` → `./gradlew spotlessCheck`. All three must pass before committing.
+- **yamlRestTest** is a separate Gradle task from `integTest` and requires a running cluster — must be excluded in the build command.
+- **convertRelDataTypeToExprType** already handles standard `SqlTypeName.DATE/TIME/TIMESTAMP` → `ExprCoreType` mapping, so code that checks `ExprCoreType` after conversion works with both UDT and standard types.
 
 # Iteration Log
 
@@ -13,3 +15,18 @@
   - The existing codebase had no tests specifically for `getMaxPrecision`, so no test updates needed.
 ---
 
+
+## 2026-03-25T03:05 - US-002
+- Changed `PPLReturnTypes.java` to return standard Calcite DATE/TIME/TIMESTAMP instead of UDTs:
+  - `DATE_FORCE_NULLABLE` → `ReturnTypes.DATE.andThen(SqlTypeTransforms.FORCE_NULLABLE)`
+  - `TIME_FORCE_NULLABLE` → `ReturnTypes.TIME.andThen(SqlTypeTransforms.FORCE_NULLABLE)`
+  - `TIMESTAMP_FORCE_NULLABLE` → `ReturnTypes.TIMESTAMP.andThen(SqlTypeTransforms.FORCE_NULLABLE)`
+  - `TIME_APPLY_RETURN_TYPE` → uses `typeFactory.createSqlType(SqlTypeName.TIME/TIMESTAMP)` with nullability instead of UDT constants
+- Files changed: `core/src/main/java/org/opensearch/sql/calcite/utils/PPLReturnTypes.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - `UserDefinedFunctionUtils` import stays because `IP_FORCE_NULLABLE` still uses it.
+  - `yamlRestTest` is a separate Gradle task from `integTest` — must be excluded separately in build command: `./gradlew build -x integTest -x doctest -x yamlRestTest`
+  - `convertRelDataTypeToExprType` already handles standard SqlTypeName.DATE/TIME/TIMESTAMP → ExprCoreType mapping, so `TIME_APPLY_RETURN_TYPE`'s logic works unchanged with standard types.
+  - Calcite `ReturnTypes` has `DATE_NULLABLE`, `TIME_NULLABLE`, `TIMESTAMP_NULLABLE` built-in, but AC specified `.andThen(FORCE_NULLABLE)` pattern.
+---
