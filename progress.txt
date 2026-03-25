@@ -1,5 +1,15 @@
 # Codebase Patterns
-(Patterns discovered during implementation will be consolidated here)
+- **OpenSearchTypeSystem** is a singleton (`INSTANCE`) extending `RelDataTypeSystemImpl`. Override methods like `getMaxPrecision()` use a switch on `SqlTypeName` and delegate to `super` for unhandled cases.
+- **Build/test/verify cycle**: `./gradlew build -x integTest -x doctest` → `./gradlew test` → `./gradlew spotlessCheck`. All three must pass before committing.
 
 # Iteration Log
+
+## 2026-03-25T02:51 - US-001
+- Overrode `getMaxPrecision(SqlTypeName)` in `OpenSearchTypeSystem` to return 9 for `TIMESTAMP` and `TIMESTAMP_WITH_LOCAL_TIME_ZONE`, delegating to `super` for all others.
+- Files changed: `core/src/main/java/org/opensearch/sql/executor/OpenSearchTypeSystem.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - The change was purely additive — no downstream breakage since nothing yet depends on TIMESTAMP(9) precision.
+  - The existing codebase had no tests specifically for `getMaxPrecision`, so no test updates needed.
+---
 

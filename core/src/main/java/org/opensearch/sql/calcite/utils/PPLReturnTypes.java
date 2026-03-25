@@ -10,6 +10,7 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.type.ReturnTypes;
 import org.apache.calcite.sql.type.SqlReturnTypeInference;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeTransforms;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.opensearch.sql.data.type.ExprCoreType;
@@ -22,11 +23,11 @@ public final class PPLReturnTypes {
   private PPLReturnTypes() {}
 
   public static final SqlReturnTypeInference DATE_FORCE_NULLABLE =
-      ReturnTypes.explicit(UserDefinedFunctionUtils.NULLABLE_DATE_UDT);
+      ReturnTypes.DATE.andThen(SqlTypeTransforms.FORCE_NULLABLE);
   public static final SqlReturnTypeInference TIME_FORCE_NULLABLE =
-      ReturnTypes.explicit(UserDefinedFunctionUtils.NULLABLE_TIME_UDT);
+      ReturnTypes.TIME.andThen(SqlTypeTransforms.FORCE_NULLABLE);
   public static final SqlReturnTypeInference TIMESTAMP_FORCE_NULLABLE =
-      ReturnTypes.explicit(UserDefinedFunctionUtils.NULLABLE_TIMESTAMP_UDT);
+      ReturnTypes.TIMESTAMP.andThen(SqlTypeTransforms.FORCE_NULLABLE);
   public static final SqlReturnTypeInference IP_FORCE_NULLABLE =
       ReturnTypes.explicit(UserDefinedFunctionUtils.NULLABLE_IP_UDT);
   public static SqlReturnTypeInference INTEGER_FORCE_NULLABLE =
@@ -35,12 +36,15 @@ public final class PPLReturnTypes {
       ReturnTypes.VARCHAR.andThen(SqlTypeTransforms.FORCE_NULLABLE);
   public static SqlReturnTypeInference TIME_APPLY_RETURN_TYPE =
       opBinding -> {
+        RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
         RelDataType temporalType = opBinding.getOperandType(0);
         if (ExprCoreType.TIME.equals(
             OpenSearchTypeFactory.convertRelDataTypeToExprType(temporalType))) {
-          return UserDefinedFunctionUtils.NULLABLE_TIME_UDT;
+          return typeFactory.createTypeWithNullability(
+              typeFactory.createSqlType(SqlTypeName.TIME), true);
         }
-        return UserDefinedFunctionUtils.NULLABLE_TIMESTAMP_UDT;
+        return typeFactory.createTypeWithNullability(
+            typeFactory.createSqlType(SqlTypeName.TIMESTAMP), true);
       };
   public static SqlReturnTypeInference ARG0_ARRAY =
       opBinding -> {
