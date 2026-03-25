@@ -1,9 +1,17 @@
 # Unified Query API — PPL Gap Analysis Report
 
 **Date:** 2026-03-24  
-**Branch:** `poc/unified-sql-support-gap-analysis`  
-**Scope:** PPL IT tests (`SearchCommandIT`) — 86 queries  
+**Branch:** `poc/gap-analysis-on-formal` (based on `feature/unified-calcite-sql-support`)  
+**Scope:** All PPL IT tests (`org.opensearch.sql.ppl.*IT`) — 1593 queries  
 **Pipeline:** `UnifiedQueryPlanner` → `UnifiedQueryCompiler` → `PreparedStatement.executeQuery()`
+
+---
+
+## Approach
+
+The gap analyzer intercepts every query in the PPL integration test base class (`PPLIntegTestCase.executeQuery()`) and replays it through the unified query pipeline in shadow mode — after the normal REST call succeeds, the same query is planned, compiled, and executed via `UnifiedQueryPlanner` + `UnifiedQueryCompiler`. Failures are collected without affecting the original test. Results are categorized by failure phase (PLAN/COMPILE/EXECUTE) and grouped by error message.
+
+Toggle: `-Dunified.gap.analysis=true`
 
 ---
 
@@ -11,89 +19,113 @@
 
 | Metric | Value |
 |--------|-------|
-| Total Queries | 86 |
-| Success | 84 (97.7%) |
-| Failed | 2 (2.3%) |
+| Total Queries | 1593 |
+| Success | 1566 (98.3%) |
+| Failed | 27 (1.7%) |
 | Failure Phase | 100% PLAN |
-| Root Cause | Special index names with dots/hyphens |
-
-**Zero COMPILE or EXECUTE phase failures.** After fixing the gap analyzer's JSON escaping issue (which caused 37 false positives from double-quoted string literals), only 2 real failures remain.
 
 ---
 
-## Category 1: Special Index Names (2 queries)
+## Category 1: Special Index Names with Dots/Hyphens (2 queries)
 
-**Phase:** PLAN  
 **Error:** `SyntaxCheckException: [logs-2021.01.11] is not a valid term`  
-**Root Cause:** Index names containing dots and hyphens (e.g., `logs-2021.01.11`, `logs-7.10.0-2021.01.11`) are not recognized as valid identifiers by the unified parser. The parser treats dots and hyphens as operators.
+**Root Cause:** Index names containing dots and hyphens are not recognized as valid identifiers by the unified PPL parser.
 
 | Test Method | Sample Query |
 |-------------|-------------|
 | `testSearchCommandWithSpecialIndexName` | `search source=logs-2021.01.11` |
 | `testSearchCommandWithSpecialIndexName` | `search source=logs-7.10.0-2021.01.11` |
 
-### Fix
+---
 
-Update the unified PPL grammar's index name rule to allow dots and hyphens within unquoted index names, or require backtick-quoting for such names.
+## Category 2: Newline in Multi-Line Commands (2 queries)
+
+**Error:** `SyntaxCheckException: [n] is not a valid term`  
+**Root Cause:** Test queries contain literal `\n` characters (JSON-escaped newlines) that the parser receives as `\n` instead of actual newlines.
+
+| Test Method | Sample Query |
+|-------------|-------------|
+| `CommentIT.testMultipleLinesCommand` | `source=...account \n\| fields firstname \n\| where firstname='Amber'` |
+| `CommentIT.testMultipleLinesCommand` | Similar multi-line query |
 
 ---
 
-## Manual Verification
+## Category 3: Unsupported Calcite Features (3 queries)
 
-```bash
-# Create otel_logs test index
-curl -s -XPUT 'localhost:9200/opensearch-sql_test_index_otel_logs' -H 'Content-Type: application/json' \
-  -d '{"mappings":{"properties":{"body":{"type":"text"},"severityText":{"type":"keyword"},"severityNumber":{"type":"integer"},"@timestamp":{"type":"date"},"time":{"type":"date"},"attributes.user.email":{"type":"keyword"},"attributes.client.ip":{"type":"ip"},"attributes.error.type":{"type":"keyword"},"attributes.span.duration":{"type":"keyword"},"resource.attributes.service.name":{"type":"keyword"}}}}'
-curl -s -XPOST 'localhost:9200/opensearch-sql_test_index_otel_logs/_bulk' \
-  -H 'Content-Type: application/json' --data-binary '
-{"index":{}}
-{"body":"Payment failed for user","severityText":"ERROR","severityNumber":17,"@timestamp":"2024-01-15T10:30:00.123456789Z","time":"2024-01-15T10:30:00Z","attributes.user.email":"user@example.com","resource.attributes.service.name":"payment-service"}
-{"index":{}}
-{"body":"User login successful","severityText":"INFO","severityNumber":9,"@timestamp":"2024-01-15T10:30:01.234567890Z","time":"2024-01-15T10:30:01Z","attributes.user.email":"admin@example.com","resource.attributes.service.name":"auth-service"}
-{"index":{}}
-{"body":"Connection timeout warning","severityText":"WARN","severityNumber":13,"@timestamp":"2024-01-15T10:30:02Z","time":"2024-01-15T10:30:02Z"}
-'
+**Error:** Various `CalciteUnsupportedException`  
+**Root Cause:** Features explicitly guarded as not yet implemented.
 
-# Test Category 1b: field="value" (fails in unified pipeline)
-curl -s -XPOST 'localhost:9200/_plugins/_ppl' -H 'Content-Type: application/json' \
-  -d '{"query": "search source=opensearch-sql_test_index_otel_logs severityText=\"ERROR\" | fields severityText"}'
+| Feature | Test | Sample Query |
+|---------|------|--------------|
+| Table function | `InformationSchemaCommandIT` | `source=my_prometheus.information_schema.tables` |
+| SHOW DATASOURCES | `InformationSchemaCommandIT` | `SHOW DATASOURCES` |
+| Consecutive dedup | `DedupCommandIT` | `... \| dedup 1 ... \| dedup 1 ...` |
 
-# Test Category 1a: phrase search (fails in unified pipeline)
-curl -s -XPOST 'localhost:9200/_plugins/_ppl' -H 'Content-Type: application/json' \
-  -d '{"query": "search source=opensearch-sql_test_index_otel_logs \"Payment failed\" | fields body"}'
+---
 
-# Test Category 1c: IN operator (fails in unified pipeline)
-curl -s -XPOST 'localhost:9200/_plugins/_ppl' -H 'Content-Type: application/json' \
-  -d '{"query": "search source=opensearch-sql_test_index_otel_logs severityText IN (\"ERROR\", \"WARN\") | fields severityText"}'
+## Category 4: Unregistered Function (1 query)
 
-# Test Category 2: special index name
-curl -s -XPUT 'localhost:9200/logs-2021.01.11' -H 'Content-Type: application/json' \
-  -d '{"mappings":{"properties":{"msg":{"type":"text"}}}}'
-curl -s -XPOST 'localhost:9200/logs-2021.01.11/_doc' -H 'Content-Type: application/json' \
-  -d '{"msg":"test"}'
-curl -s -XPOST 'localhost:9200/_plugins/_ppl' -H 'Content-Type: application/json' \
-  -d '{"query": "search source=logs-2021.01.11"}'
-```
+**Error:** `Cannot resolve function: GEOIP`
+
+| Test Method | Sample Query |
+|-------------|-------------|
+| `GeoIpCommandIT` | `... \| geoip ip_address` |
+
+---
+
+## Category 5: Prometheus/External Datasource (5 queries)
+
+**Error:** `Table 'my_prometheus...' not found`  
+**Root Cause:** Prometheus datasource tables not available in the gap analyzer's schema (only OpenSearch indices are registered).
+
+| Test | Sample Query |
+|------|--------------|
+| `InformationSchemaCommandIT` | `source=my_prometheus.prometheus_http_requests_total` |
+| `PrometheusDataSourceCommandsIT` | Various prometheus queries |
+
+---
+
+## Category 6: Index Not Found (3 queries)
+
+**Error:** `index_not_found_exception: no such index [logs*]`  
+**Root Cause:** Wildcard index patterns or indices that don't exist in the test cluster.
+
+| Test | Sample Query |
+|------|--------------|
+| `SearchCommandIT` | `search source=logs-2021.01.11` (after catalog prefix) |
+| Various | Queries referencing non-existent indices |
+
+---
+
+## Category 7: Null Statement (1 query)
+
+**Error:** `Cannot invoke "Object.getClass()" because "statement" is null`  
+**Root Cause:** Query that produces a null compiled statement — needs investigation.
 
 ---
 
 ## Priority Matrix
 
-| Priority | Category | Unique Queries | Fix Complexity |
-|----------|----------|---------------|----------------|
-| **P1** | Special index names (dots/hyphens) | 2 | Low — update ANTLR grammar index name rule |
+| Priority | Category | Queries | Fix Complexity |
+|----------|----------|---------|----------------|
+| **P1** | Special index names | 2 | Low — grammar fix |
+| **P2** | Newline escaping | 2 | Low — gap analyzer fix |
+| **P2** | Unsupported Calcite features | 3 | Medium |
+| **P3** | GEOIP function | 1 | Low — register function |
+| **N/A** | Prometheus datasource | 5 | N/A — external datasource |
+| **N/A** | Index not found | 3 | N/A — test data issue |
+| **P2** | Null statement | 1 | Needs investigation |
 
 ---
 
 ## How to Run
 
 ```bash
-# Run PPL gap analysis (SearchCommandIT)
+# All PPL IT tests
+./gradlew :integ-test:integTest --tests 'org.opensearch.sql.ppl.*IT' -Dunified.gap.analysis=true
+
+# Specific test class
 ./gradlew :integ-test:integTest --tests 'org.opensearch.sql.ppl.SearchCommandIT' -Dunified.gap.analysis=true
 
-# Run PPL gap analysis (all PPL tests)
-./gradlew :integ-test:integTest --tests 'org.opensearch.sql.ppl.*' -Dunified.gap.analysis=true
-
-# Report output
-cat integ-test/build/gap-analysis-report.txt
+# Report is printed to stderr at JVM shutdown
 ```
