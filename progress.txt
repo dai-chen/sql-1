@@ -171,3 +171,10 @@
 - Build: PASS, Tests: PASS, SpotlessCheck: PASS
 - Updated prd.json to mark `passes: true`.
 ---
+
+
+## 2026-03-25T05:16 - US-011
+- All unit tests already pass. `./gradlew test` → BUILD SUCCESSFUL. `./gradlew build -x integTest -x doctest -x yamlRestTest` → BUILD SUCCESSFUL. `./gradlew spotlessCheck` → BUILD SUCCESSFUL.
+- Prior stories (US-003, US-007, US-009) already fixed all compilation errors and test assertion failures during their implementation.
+- Updated prd.json to mark `passes: true`.
+---
