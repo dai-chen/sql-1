@@ -190,6 +190,21 @@ public class UnifiedQueryGapAnalyzer {
     return s.replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\");
   }
 
+  // Matches unquoted table names containing hyphens in FROM/JOIN clauses.
+  // Handles: FROM name, JOIN name, FROM name AS alias
+  private static final Pattern HYPHENATED_TABLE =
+      Pattern.compile(
+          "(?i)(\\bFROM\\s+|\\bJOIN\\s+)([\\w][\\w.-]*-[\\w.-]*)");
+
+  /**
+   * Double-quote hyphenated table names so Calcite's SQL parser treats them as identifiers instead
+   * of expressions with minus operators. E.g., {@code FROM opensearch-sql_test_index_account}
+   * becomes {@code FROM "opensearch-sql_test_index_account"}.
+   */
+  public static String quoteHyphenatedTableNames(String sql) {
+    return HYPHENATED_TABLE.matcher(sql).replaceAll(m -> m.group(1) + "\"" + m.group(2) + "\"");
+  }
+
   private static AbstractSchema createSchema(
       OpenSearchClient osClient, Settings[] settingsHolder) {
     // Single shared map instance — avoids re-creating on every getTableMap() call,
