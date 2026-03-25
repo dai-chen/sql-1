@@ -173,10 +173,21 @@ public class ExprValueUtils {
   public static ExprValue fromObjectValue(Object o, ExprType type) {
     switch (type) {
       case TIMESTAMP:
+        if (o instanceof Long) {
+          return new ExprTimestampValue(Instant.ofEpochMilli((Long) o));
+        } else if (o instanceof Instant) {
+          return new ExprTimestampValue((Instant) o);
+        }
         return new ExprTimestampValue((String) o);
       case DATE:
+        if (o instanceof Integer) {
+          return new ExprDateValue(LocalDate.ofEpochDay((Integer) o));
+        }
         return new ExprDateValue((String) o);
       case TIME:
+        if (o instanceof Integer) {
+          return new ExprTimeValue(LocalTime.ofNanoOfDay((Integer) o * 1_000_000L));
+        }
         return new ExprTimeValue((String) o);
       default:
         return fromObjectValue(o);
