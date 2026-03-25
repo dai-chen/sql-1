@@ -30,3 +30,22 @@
   - `convertRelDataTypeToExprType` already handles standard SqlTypeName.DATE/TIME/TIMESTAMP → ExprCoreType mapping, so `TIME_APPLY_RETURN_TYPE`'s logic works unchanged with standard types.
   - Calcite `ReturnTypes` has `DATE_NULLABLE`, `TIME_NULLABLE`, `TIMESTAMP_NULLABLE` built-in, but AC specified `.andThen(FORCE_NULLABLE)` pattern.
 ---
+
+
+## 2026-03-25T03:27 - US-003
+- Changed `OpenSearchTypeFactory.convertExprTypeToRelDataType()` to return standard Calcite types instead of UDTs for DATE/TIME/TIMESTAMP:
+  - ExprCoreType switch: `createUDT(ExprUDT.EXPR_DATE/TIME/TIMESTAMP)` → `createSqlType(SqlTypeName.DATE/TIME/TIMESTAMP)`
+  - Legacy type name branch: same change for "timestamp", "date", "time" string checks
+- Fixed 2 test assertion failures in ppl/ module:
+  - `CalcitePPLFunctionTypeTest.testStrftimeAcceptsDateInput`: plan now shows `SAFE_CAST` instead of `TIMESTAMP(...)` UDF for DATE→TIMESTAMP auto-conversion
+  - `CalcitePPLMultisearchTest.testMultisearchWithTimestampFiltering`: timestamp literals now render as `2025-07-31 23:00:00` in logical plan (not `TIMESTAMP('...')`) and `TIMESTAMP '2025-07-31 23:00:00'` in Spark SQL (not `TIMESTAMP('...')`)
+- Files changed:
+  - `core/src/main/java/org/opensearch/sql/calcite/utils/OpenSearchTypeFactory.java`
+  - `ppl/src/test/java/org/opensearch/sql/ppl/calcite/CalcitePPLFunctionTypeTest.java`
+  - `ppl/src/test/java/org/opensearch/sql/ppl/calcite/CalcitePPLMultisearchTest.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - With standard Calcite types, implicit type coercion uses `SAFE_CAST` instead of UDF calls (e.g., `TIMESTAMP(...)` UDF). Plan assertions checking for UDF names need updating.
+  - Timestamp literals in logical plans render as bare values (`2025-07-31 23:00:00`) not wrapped in UDF calls. In Spark SQL dialect, they render as `TIMESTAMP '...'` (SQL standard literal syntax) instead of `TIMESTAMP('...')` (function call syntax).
+  - The legacy type name branch in `convertExprTypeToRelDataType` handles non-ExprCoreType fields (e.g., OpenSearch custom types) — must be updated alongside the ExprCoreType switch.
+---
