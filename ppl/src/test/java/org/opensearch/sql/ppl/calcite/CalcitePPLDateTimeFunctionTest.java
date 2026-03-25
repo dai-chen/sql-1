@@ -20,10 +20,11 @@ public class CalcitePPLDateTimeFunctionTest extends CalcitePPLAbstractTest {
     String ppl = "source=EMP | eval added = DATE(CURRENT_TIMESTAMP()) | fields added";
     RelNode root = getRelNode(ppl);
     String expectedLogical =
-        "LogicalProject(added=[DATE(NOW())])\n" + "  LogicalTableScan(table=[[scott, EMP]])\n";
+        "LogicalProject(added=[DATE(CURRENT_TIMESTAMP)])\n"
+            + "  LogicalTableScan(table=[[scott, EMP]])\n";
     verifyLogical(root, expectedLogical);
 
-    String expectedSparkSql = "SELECT DATE(NOW()) `added`\nFROM `scott`.`EMP`";
+    String expectedSparkSql = "SELECT DATE(CURRENT_TIMESTAMP) `added`\nFROM `scott`.`EMP`";
     verifyPPLToSparkSQL(root, expectedSparkSql);
   }
 
@@ -32,10 +33,10 @@ public class CalcitePPLDateTimeFunctionTest extends CalcitePPLAbstractTest {
     String ppl = "source=EMP | eval added = CURRENT_DATE() | fields added";
     RelNode root = getRelNode(ppl);
     String expectedLogical =
-        "LogicalProject(added=[CURRENT_DATE()])\n" + "  LogicalTableScan(table=[[scott, EMP]])\n";
+        "LogicalProject(added=[CURRENT_DATE])\n" + "  LogicalTableScan(table=[[scott, EMP]])\n";
     verifyLogical(root, expectedLogical);
 
-    String expectedSparkSql = "SELECT CURRENT_DATE() `added`\nFROM `scott`.`EMP`";
+    String expectedSparkSql = "SELECT CURRENT_DATE `added`\nFROM `scott`.`EMP`";
     verifyPPLToSparkSQL(root, expectedSparkSql);
   }
 }
