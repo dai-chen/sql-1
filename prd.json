@@ -126,8 +126,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "The standard operators have different operand type checkers. The PPLTypeChecker wrapping in registerOperator may need adjustment for standard operators that don't use SqlOperandMetadata."
+      "passes": true,
+      "notes": "Already implemented and committed (8de0cabca). All 17 functions were already registered with standard operators. Build/tests/spotless all pass."
     },
     {
       "id": "US-009",

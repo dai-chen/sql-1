@@ -147,3 +147,19 @@
   - `CurrentFunction.CurrentFunctionImplementor` had a latent bug: `currentDate/currentTime/currentTimestamp` methods cast `valueForCalcite()` to `(String)` but US-005 changed those to return `int`/`long`. Fixed return types to `int`/`int`/`long`.
   - The `leastRestrictive()` UDT preservation logic in `OpenSearchTypeFactory` still works correctly for EXPR_BINARY and EXPR_IP — no changes needed.
 ---
+
+
+## 2026-03-25T05:14 - US-008
+- US-008 was already implemented and committed (8de0cabca) in a prior iteration but `passes` was left as `false` in prd.json.
+- Verified: All 17 PPL UDFs listed in the AC are already registered with standard SqlStdOperatorTable/SqlLibraryOperators operators:
+  - YEAR, QUARTER, MONTH, DAY/DAYOFMONTH/DAY_OF_MONTH, DAYOFWEEK/DAY_OF_WEEK, DAYOFYEAR/DAY_OF_YEAR → SqlStdOperatorTable
+  - HOUR/HOUR_OF_DAY, MINUTE/MINUTE_OF_HOUR, SECOND/SECOND_OF_MINUTE → SqlStdOperatorTable
+  - CURRENT_DATE/CURDATE, CURRENT_TIME/CURTIME, CURRENT_TIMESTAMP/NOW/LOCALTIMESTAMP → SqlStdOperatorTable
+  - LAST_DAY → SqlStdOperatorTable
+  - DAYNAME, MONTHNAME → SqlLibraryOperators
+- Excluded functions (per AC) confirmed still using PPLBuiltinOperators: WEEK, EXTRACT, TIMESTAMPADD, TIMESTAMPDIFF, LOCALTIME
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- Updated prd.json to mark `passes: true`.
+- **Learnings for future iterations:**
+  - Always verify prd.json state matches git history — a prior iteration may have committed code but failed to update the passes flag.
+---
