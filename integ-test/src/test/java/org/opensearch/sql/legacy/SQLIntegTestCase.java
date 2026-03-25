@@ -281,8 +281,9 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
   }
 
   protected JSONObject executeJdbcRequest(String query) {
-    JSONObject result = new JSONObject(executeQuery(query, "jdbc"));
-    replayWithUnifiedPipeline(query);
+    String responseString = executeQuery(query, "jdbc");
+    JSONObject result = new JSONObject(responseString);
+    replayWithUnifiedPipeline(query, responseString);
     return result;
   }
 
@@ -345,11 +346,11 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
 
     final String requestBody = makeRequest(sqlQuery);
     JSONObject result = executeRequest(requestBody);
-    replayWithUnifiedPipeline(sqlQuery);
+    replayWithUnifiedPipeline(sqlQuery, result.toString());
     return result;
   }
 
-  private void replayWithUnifiedPipeline(String query) {
+  private void replayWithUnifiedPipeline(String query, String v2Response) {
     if (!UnifiedQueryGapAnalyzer.isEnabled()) {
       return;
     }
@@ -357,7 +358,7 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
       String unescaped = UnifiedQueryGapAnalyzer.unescapeJsonString(query);
       String transformed = UnifiedQueryGapAnalyzer.quoteHyphenatedTableNames(unescaped);
       UnifiedQueryGapAnalyzer.GapResult gap =
-          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), transformed, QueryType.SQL);
+          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), transformed, QueryType.SQL, v2Response);
       StackTraceElement[] stack = Thread.currentThread().getStackTrace();
       String testMethod = stack.length > 3 ? stack[3].getMethodName() : "unknown";
       GapReportCollector.collect(

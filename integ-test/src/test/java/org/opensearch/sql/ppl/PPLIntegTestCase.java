@@ -53,19 +53,20 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   }
 
   protected JSONObject executeQuery(String query) throws IOException {
-    JSONObject result = jsonify(executeQueryToString(query));
-    replayWithUnifiedPipeline(query);
+    String responseString = executeQueryToString(query);
+    JSONObject result = jsonify(responseString);
+    replayWithUnifiedPipeline(query, responseString);
     return result;
   }
 
-  private void replayWithUnifiedPipeline(String query) {
+  private void replayWithUnifiedPipeline(String query, String v2Response) {
     if (!UnifiedQueryGapAnalyzer.isEnabled()) {
       return;
     }
     try {
       String transformed = UnifiedQueryGapAnalyzer.transformPPLQuery(query);
       UnifiedQueryGapAnalyzer.GapResult gap =
-          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), transformed, QueryType.PPL);
+          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), transformed, QueryType.PPL, v2Response);
       StackTraceElement[] stack = Thread.currentThread().getStackTrace();
       String testMethod = stack.length > 3 ? stack[3].getMethodName() : "unknown";
       GapReportCollector.collect(

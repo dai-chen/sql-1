@@ -7,9 +7,16 @@ package org.opensearch.sql.util;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
@@ -37,7 +44,8 @@ public class UnifiedQueryGapAnalyzer {
     public enum Phase {
       PLAN,
       COMPILE,
-      EXECUTE
+      EXECUTE,
+      RESULT_MISMATCH
     }
 
     public final Phase phase;
@@ -62,6 +70,10 @@ public class UnifiedQueryGapAnalyzer {
         root = root.getCause();
       }
       return new GapResult(phase, false, root.getMessage(), root.getClass().getName());
+    }
+
+    public static GapResult resultMismatch(String diff) {
+      return new GapResult(Phase.RESULT_MISMATCH, false, diff, null);
     }
   }
 
@@ -122,6 +134,16 @@ public class UnifiedQueryGapAnalyzer {
    * caught and returned as a GapResult. Returns null when gap analysis is disabled.
    */
   public static GapResult tryUnifiedExecution(RestClient restClient, String query, QueryType qt) {
+    return tryUnifiedExecution(restClient, query, qt, null);
+  }
+
+  /**
+   * Attempts to run the query through the unified pipeline and optionally compares the result with
+   * the V2 response. Never throws — all exceptions are caught and returned as a GapResult. Returns
+   * null when gap analysis is disabled.
+   */
+  public static GapResult tryUnifiedExecution(
+      RestClient restClient, String query, QueryType qt, String v2Response) {
     if (!isEnabled()) {
       return null;
     }
@@ -168,7 +190,16 @@ public class UnifiedQueryGapAnalyzer {
 
         try (stmt) {
           ResultSet rs = stmt.executeQuery();
-          rs.next();
+          List<List<Object>> calciteRows = extractResultSetData(rs);
+          if (v2Response != null) {
+            List<List<Object>> v2Rows = extractV2Data(v2Response);
+            if (v2Rows != null) {
+              String diff = compareResults(v2Rows, calciteRows, hasOrderBy(query));
+              if (diff != null) {
+                return GapResult.resultMismatch(diff);
+              }
+            }
+          }
         } catch (Exception e) {
           return GapResult.failure(GapResult.Phase.EXECUTE, e);
         }
@@ -203,6 +234,80 @@ public class UnifiedQueryGapAnalyzer {
    */
   public static String quoteHyphenatedTableNames(String sql) {
     return HYPHENATED_TABLE.matcher(sql).replaceAll(m -> m.group(1) + "\"" + m.group(2) + "\"");
+  }
+
+  private static List<List<Object>> extractResultSetData(ResultSet rs) throws Exception {
+    List<List<Object>> rows = new ArrayList<>();
+    ResultSetMetaData meta = rs.getMetaData();
+    int colCount = meta.getColumnCount();
+    while (rs.next()) {
+      List<Object> row = new ArrayList<>();
+      for (int i = 1; i <= colCount; i++) {
+        row.add(rs.getObject(i));
+      }
+      rows.add(row);
+    }
+    return rows;
+  }
+
+  private static List<List<Object>> extractV2Data(String v2Response) {
+    JSONObject json = new JSONObject(v2Response);
+    if (!json.has("datarows")) return null;
+    JSONArray datarows = json.getJSONArray("datarows");
+    List<List<Object>> rows = new ArrayList<>();
+    for (int i = 0; i < datarows.length(); i++) {
+      JSONArray row = datarows.getJSONArray(i);
+      List<Object> rowList = new ArrayList<>();
+      for (int j = 0; j < row.length(); j++) {
+        rowList.add(row.isNull(j) ? null : row.get(j));
+      }
+      rows.add(rowList);
+    }
+    return rows;
+  }
+
+  private static String compareResults(
+      List<List<Object>> v2Rows, List<List<Object>> calciteRows, boolean ordered) {
+    if (v2Rows.size() != calciteRows.size()) {
+      return String.format("Row count: V2=%d, Calcite=%d", v2Rows.size(), calciteRows.size());
+    }
+    List<List<String>> v2Norm = normalize(v2Rows);
+    List<List<String>> calciteNorm = normalize(calciteRows);
+    if (!ordered) {
+      v2Norm.sort(Comparator.comparing(Object::toString));
+      calciteNorm.sort(Comparator.comparing(Object::toString));
+    }
+    for (int i = 0; i < v2Norm.size(); i++) {
+      if (!v2Norm.get(i).equals(calciteNorm.get(i))) {
+        return String.format(
+            "Row %d differs: V2=%s, Calcite=%s", i, v2Norm.get(i), calciteNorm.get(i));
+      }
+    }
+    return null;
+  }
+
+  private static List<List<String>> normalize(List<List<Object>> rows) {
+    return rows.stream()
+        .map(
+            row ->
+                row.stream()
+                    .map(
+                        v -> {
+                          if (v == null) return "NULL";
+                          if (v instanceof Float || v instanceof Double) {
+                            return String.format("%.2f", ((Number) v).doubleValue());
+                          }
+                          if (v instanceof Number) {
+                            return String.valueOf(((Number) v).longValue());
+                          }
+                          return v.toString();
+                        })
+                    .collect(Collectors.toList()))
+        .collect(Collectors.toList());
+  }
+
+  private static boolean hasOrderBy(String query) {
+    return query.toUpperCase().contains("ORDER BY");
   }
 
   private static AbstractSchema createSchema(

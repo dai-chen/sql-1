@@ -96,13 +96,27 @@ public class GapReportCollector {
       for (Map.Entry<String, List<Entry>> group : groups.entrySet()) {
         List<Entry> items = group.getValue();
         Entry sample = items.get(0);
-        sb.append(
-            String.format(
-                "  [%s] %s (%d occurrences)\n",
-                sample.result.phase, sample.result.errorMessage, items.size()));
-        sb.append(String.format("  Exception: %s\n", sample.result.exceptionClass));
-        for (Entry e : items) {
-          sb.append(String.format("    - %s.%s: %s\n", e.testClass, e.testMethod, e.query));
+        if (sample.result.phase
+            == UnifiedQueryGapAnalyzer.GapResult.Phase.RESULT_MISMATCH) {
+          sb.append(
+              String.format(
+                  "  [%s] Query succeeded but returned different results (%d occurrences)\n",
+                  sample.result.phase, items.size()));
+          for (Entry e : items) {
+            sb.append(
+                String.format(
+                    "    - %s.%s: %s\n      Diff: %s\n",
+                    e.testClass, e.testMethod, e.query, e.result.errorMessage));
+          }
+        } else {
+          sb.append(
+              String.format(
+                  "  [%s] %s (%d occurrences)\n",
+                  sample.result.phase, sample.result.errorMessage, items.size()));
+          sb.append(String.format("  Exception: %s\n", sample.result.exceptionClass));
+          for (Entry e : items) {
+            sb.append(String.format("    - %s.%s: %s\n", e.testClass, e.testMethod, e.query));
+          }
         }
         sb.append("\n");
       }
