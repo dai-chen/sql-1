@@ -192,8 +192,8 @@
         "Unit tests pass"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": "Integration tests require a running OpenSearch cluster. If not available, document that and mark as blocked. The goal is to identify the scope of breakage, not fix it."
+      "passes": true,
+      "notes": "Integration tests ran successfully (cluster spun up). 12 test classes had failures, ~250 total test failures documented in progress.txt. Major categories: (1) 500 errors from datetime functions on null/standard types, (2) plan assertion mismatches from UDT→standard type changes, (3) CAST precision loss, (4) standalone datetime function failures."
     }
   ]
 }
