@@ -62,7 +62,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "This is additive — existing String path unchanged. The new paths handle native Calcite representations."
     },
     {

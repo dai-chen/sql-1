@@ -73,6 +73,11 @@ public class ExprDateValue extends AbstractExprValue {
   }
 
   @Override
+  public Object valueForCalcite() {
+    return (int) date.toEpochDay();
+  }
+
+  @Override
   public boolean isDateTime() {
     return true;
   }

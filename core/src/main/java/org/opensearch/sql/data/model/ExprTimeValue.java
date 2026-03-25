@@ -83,6 +83,11 @@ public class ExprTimeValue extends AbstractExprValue {
   }
 
   @Override
+  public Object valueForCalcite() {
+    return (int) (time.toNanoOfDay() / 1_000_000);
+  }
+
+  @Override
   public boolean isDateTime() {
     return true;
   }

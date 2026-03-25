@@ -90,6 +90,11 @@ public class ExprTimestampValue extends AbstractExprValue {
   }
 
   @Override
+  public Object valueForCalcite() {
+    return timestamp.toEpochMilli();
+  }
+
+  @Override
   public boolean isDateTime() {
     return true;
   }

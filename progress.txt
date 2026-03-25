@@ -49,3 +49,17 @@
   - Timestamp literals in logical plans render as bare values (`2025-07-31 23:00:00`) not wrapped in UDF calls. In Spark SQL dialect, they render as `TIMESTAMP '...'` (SQL standard literal syntax) instead of `TIMESTAMP('...')` (function call syntax).
   - The legacy type name branch in `convertExprTypeToRelDataType` handles non-ExprCoreType fields (e.g., OpenSearch custom types) — must be updated alongside the ExprCoreType switch.
 ---
+
+
+## 2026-03-25T03:28 - US-004
+- Updated `ExprValueUtils.fromObjectValue(Object, ExprType)` to handle native Calcite datetime representations:
+  - TIMESTAMP: handles `Long` (epoch millis → `Instant.ofEpochMilli`) and `Instant`, falls through to String
+  - DATE: handles `Integer` (epoch days → `LocalDate.ofEpochDay`), falls through to String
+  - TIME: handles `Integer` (millis of day → `LocalTime.ofNanoOfDay(int * 1_000_000L)`), falls through to String
+- Files changed: `core/src/main/java/org/opensearch/sql/data/model/ExprValueUtils.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - All needed imports (`Instant`, `LocalDate`, `LocalTime`) were already present in ExprValueUtils.
+  - The change is purely additive — existing String paths remain unchanged, so no downstream breakage.
+  - Callers like `CalciteAggregationScript`, `DatePartFunction`, and `SpanFunction` pass String values today; the new int/long paths will be exercised once `valueForCalcite()` returns native types (US-005).
+---
