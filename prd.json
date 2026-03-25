@@ -1,0 +1,199 @@
+{
+  "project": "OpenSearch SQL - Remove Datetime UDT from Core",
+  "branchName": "ralph/datetime-udt-rewrite-v2",
+  "description": "Remove EXPR_DATE, EXPR_TIME, EXPR_TIMESTAMP UDTs from core/ module. All datetime types use standard Calcite SqlTypeName.DATE/TIME/TIMESTAMP. Fix value boundary (fromObjectValue, valueForCalcite), cast handling, OpenSearch adapter, replace 17 UDFs with standard operators, and clean up UDT infrastructure.",
+  "buildCommand": "./gradlew build -x integTest -x doctest",
+  "testCommand": "./gradlew test",
+  "verifyCommand": "./gradlew spotlessCheck",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Override TIMESTAMP precision to 9 in OpenSearchTypeSystem",
+      "description": "As a developer, I want the Calcite type system to support TIMESTAMP(9) so that nanosecond precision can be declared in schemas.",
+      "acceptanceCriteria": [
+        "Override getMaxPrecision() in core/src/main/java/org/opensearch/sql/executor/OpenSearchTypeSystem.java",
+        "Return 9 for TIMESTAMP and TIMESTAMP_WITH_LOCAL_TIME_ZONE, delegate to super for all others",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Follow the Flink pattern: FlinkTypeSystem overrides getMaxPrecision to return 9 for TIMESTAMP types."
+    },
+    {
+      "id": "US-002",
+      "title": "Change PPLReturnTypes to return standard Calcite types",
+      "description": "As a developer, I want PPL datetime return type inferences to produce standard Calcite DATE/TIME/TIMESTAMP instead of UDTs.",
+      "acceptanceCriteria": [
+        "In core/src/main/java/org/opensearch/sql/calcite/utils/PPLReturnTypes.java, change DATE_FORCE_NULLABLE to ReturnTypes.DATE.andThen(SqlTypeTransforms.FORCE_NULLABLE)",
+        "Same for TIME_FORCE_NULLABLE and TIMESTAMP_FORCE_NULLABLE",
+        "Also fix TIME_APPLY_RETURN_TYPE to return standard TIME/TIMESTAMP instead of UDTs",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "This will cause many downstream failures. Fix compilation errors in this story, leave test failures for later stories."
+    },
+    {
+      "id": "US-003",
+      "title": "Change OpenSearchTypeFactory.convertExprTypeToRelDataType to standard types",
+      "description": "As a developer, I want ExprCoreType.DATE/TIME/TIMESTAMP to map to standard Calcite types instead of UDTs.",
+      "acceptanceCriteria": [
+        "In OpenSearchTypeFactory.convertExprTypeToRelDataType(), change DATE/TIME/TIMESTAMP cases to return createSqlType(SqlTypeName.DATE/TIME/TIMESTAMP) instead of createUDT()",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "This changes the schema types for OpenSearch tables. Combined with US-002, all datetime types in the plan become standard."
+    },
+    {
+      "id": "US-004",
+      "title": "Fix ExprValueUtils.fromObjectValue to handle int/long datetime inputs",
+      "description": "As a developer, I want fromObjectValue(Object, ExprType) to handle native Calcite datetime representations (int for DATE/TIME, long for TIMESTAMP) in addition to String.",
+      "acceptanceCriteria": [
+        "In core/src/main/java/org/opensearch/sql/data/model/ExprValueUtils.java, update fromObjectValue(Object, ExprType)",
+        "TIMESTAMP case: handle Long (epoch millis via Instant.ofEpochMilli) and Instant, fall through to String",
+        "DATE case: handle Integer (epoch days via LocalDate.ofEpochDay), fall through to String",
+        "TIME case: handle Integer (millis of day via LocalTime.ofNanoOfDay(int * 1_000_000L)), fall through to String",
+        "Existing String path must remain unchanged",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "This is additive — existing String path unchanged. The new paths handle native Calcite representations."
+    },
+    {
+      "id": "US-005",
+      "title": "Fix ExprValue.valueForCalcite() to return native Calcite representations",
+      "description": "As a developer, I want datetime ExprValue classes to return int/long from valueForCalcite() instead of String, matching standard Calcite expectations.",
+      "acceptanceCriteria": [
+        "Override valueForCalcite() in ExprDateValue: return (int) date.toEpochDay()",
+        "Override valueForCalcite() in ExprTimeValue: return (int) (time.toNanoOfDay() / 1_000_000)",
+        "Override valueForCalcite() in ExprTimestampValue: return timestamp.toEpochMilli()",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "This is the most impactful change — every place that calls valueForCalcite() on datetime values now gets int/long instead of String. Many tests will break. Fix compilation errors here, leave test assertion failures for later."
+    },
+    {
+      "id": "US-006",
+      "title": "Fix ExtendedRexBuilder.makeCast for datetime types",
+      "description": "As a developer, I want CAST to datetime types to use standard Calcite CAST instead of dispatching to PPL UDF calls.",
+      "acceptanceCriteria": [
+        "In core/src/main/java/org/opensearch/sql/calcite/ExtendedRexBuilder.java, remove the EXPR_DATE/EXPR_TIME/EXPR_TIMESTAMP cases from the UDT switch in makeCast()",
+        "Standard Calcite CAST handles DATE/TIME/TIMESTAMP natively via super.makeCast()",
+        "Keep EXPR_IP and EXPR_BINARY cases unchanged",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "After US-003, convertExprTypeToRelDataType returns standard types, so visitCast produces standard types. makeCast no longer needs to dispatch datetime to UDFs."
+    },
+    {
+      "id": "US-007",
+      "title": "Fix OpenSearch adapter: enumerator, pushdown analyzers, serialization",
+      "description": "As a developer, I want the OpenSearch adapter to work with standard Calcite datetime types instead of UDTs.",
+      "acceptanceCriteria": [
+        "OpenSearchIndexEnumerator: valueForCalcite() now returns int/long — verify the enumerator still works (it provides data to Calcite, new types match standard expectations)",
+        "PredicateAnalyzer: change any ExprUDT.EXPR_TIMESTAMP checks to SqlTypeName.TIMESTAMP checks",
+        "AggregateAnalyzer: verify convertRelDataTypeToExprType still works (it has dual-path, standard path should handle it)",
+        "ExtendedRelJson: verify serialization works without UDT type info (standard types serialize natively)",
+        "SpanFunction: change ExprUDT switch to SqlTypeName checks for DATE/TIME/TIMESTAMP",
+        "WidthBucketFunction: change dateRelatedType() to check SqlTypeName instead of ExprUDT",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "This is the highest-risk story. The OpenSearch adapter touches pushdown, serialization, and data flow. Fix one file at a time."
+    },
+    {
+      "id": "US-008",
+      "title": "Replace 17 PPL UDFs with standard/library operators in PPLFuncImpTable",
+      "description": "As a developer, I want PPL functions with standard SQL equivalents to be registered as SqlStdOperatorTable/SqlLibraryOperators operators instead of custom UDFs.",
+      "acceptanceCriteria": [
+        "In PPLFuncImpTable.populate(), change datetime registrations for: YEAR, QUARTER, MONTH, DAY/DAYOFMONTH/DAY_OF_MONTH, DAY_OF_WEEK/DAYOFWEEK, DAY_OF_YEAR/DAYOFYEAR, HOUR/HOUR_OF_DAY, MINUTE/MINUTE_OF_HOUR, SECOND/SECOND_OF_MINUTE, CURRENT_DATE/CURDATE, CURRENT_TIME/CURTIME, CURRENT_TIMESTAMP/NOW/LOCALTIMESTAMP, LAST_DAY, DAYNAME, MONTHNAME",
+        "Use SqlStdOperatorTable equivalents for standard SQL functions",
+        "Use SqlLibraryOperators.DAYNAME and SqlLibraryOperators.MONTHNAME for MySQL library functions",
+        "Do NOT replace: WEEK (semantic mismatch), EXTRACT (operand type mismatch), TIMESTAMPADD/TIMESTAMPDIFF (name+operand mismatch), LOCALTIME (type mismatch)",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "The standard operators have different operand type checkers. The PPLTypeChecker wrapping in registerOperator may need adjustment for standard operators that don't use SqlOperandMetadata."
+    },
+    {
+      "id": "US-009",
+      "title": "Remove datetime UDT infrastructure from core/",
+      "description": "As a developer, I want to clean up the now-unused datetime UDT classes and constants.",
+      "acceptanceCriteria": [
+        "Remove ExprUDT.EXPR_DATE, EXPR_TIME, EXPR_TIMESTAMP enum values (keep EXPR_BINARY, EXPR_IP)",
+        "Remove ExprDateType, ExprTimeType, ExprTimeStampType classes",
+        "Remove UserDefinedFunctionUtils.NULLABLE_DATE_UDT, NULLABLE_TIME_UDT, NULLABLE_TIMESTAMP_UDT constants",
+        "Remove OpenSearchTypeFactory.createUDT() cases for datetime types",
+        "Remove OpenSearchTypeFactory.leastRestrictive() UDT preservation logic for datetime",
+        "Clean up isTimeBasedType() to only check standard SqlTypeName (remove UDT checks)",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Only remove datetime UDTs. EXPR_BINARY and EXPR_IP must remain. Search for all references before removing."
+    },
+    {
+      "id": "US-010",
+      "title": "Remove DatetimeUdtRewriter and UdfOperandAdapter from api/ module",
+      "description": "As a developer, I want to remove the post-planning rewrite that is no longer needed since UDTs are gone from core/.",
+      "acceptanceCriteria": [
+        "Remove api/src/main/java/org/opensearch/sql/api/rewriter/DatetimeUdtRewriter.java",
+        "Remove api/src/main/java/org/opensearch/sql/api/rewriter/UdfOperandAdapter.java",
+        "Remove the rewrite call from UnifiedQueryPlanner.plan()",
+        "Remove the adapt call from UnifiedQueryCompiler.compile()",
+        "Update or remove DatetimeUdtRewriterTest — tests should work without the rewriter since core/ now produces standard types",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "The api/ tests should still pass because the planner now produces clean RelNodes natively (no UDTs from core/). Convert the test to verify this directly."
+    },
+    {
+      "id": "US-011",
+      "title": "Fix unit test failures across all modules",
+      "description": "As a developer, I want all unit tests to pass after the UDT removal.",
+      "acceptanceCriteria": [
+        "Run ./gradlew test and fix all failures",
+        "Expected failure areas: tests asserting UDT type names, tests comparing String datetime values, tests checking ExprUDT enum values",
+        "Do NOT delete tests — fix assertions to match new behavior",
+        "Build passes",
+        "All unit tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "This may be a large story. Focus on compilation errors first, then assertion failures. If too many failures, record them in notes and move on."
+    },
+    {
+      "id": "US-012",
+      "title": "Run Calcite integration tests and document breakage",
+      "description": "As a developer, I want to run all CalciteXXXIT integration tests and document what breaks.",
+      "acceptanceCriteria": [
+        "Run: ./gradlew :integ-test:integTest --tests '*CalcitePPL*' and capture results",
+        "Run: ./gradlew :integ-test:integTest --tests '*Calcite*IT*' and capture results",
+        "Document all failures in progress.txt with: test name, error message, likely cause",
+        "Do NOT fix integration test failures in this story — just document them",
+        "Build passes",
+        "Unit tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Integration tests require a running OpenSearch cluster. If not available, document that and mark as blocked. The goal is to identify the scope of breakage, not fix it."
+    }
+  ]
+}
