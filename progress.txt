@@ -163,3 +163,11 @@
 - **Learnings for future iterations:**
   - Always verify prd.json state matches git history — a prior iteration may have committed code but failed to update the passes flag.
 ---
+
+
+## 2026-03-25T05:15 - US-010
+- US-010 is N/A on this branch. DatetimeUdtRewriter.java, UdfOperandAdapter.java, and DatetimeUdtRewriterTest.java never existed on `ralph/datetime-udt-rewrite-v2`. They were created on a different branch (commit 93d0eaf9f) that is not an ancestor of HEAD.
+- No references to DatetimeUdtRewriter or UdfOperandAdapter exist anywhere in the codebase.
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- Updated prd.json to mark `passes: true`.
+---
