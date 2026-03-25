@@ -114,3 +114,36 @@
 - **Learnings for future iterations:**
   - Always verify prd.json state matches git history — a prior iteration may have committed code but failed to update the passes flag.
 ---
+
+
+## 2026-03-25T04:42 - US-009
+- Removed datetime UDT infrastructure from core/ while preserving EXPR_BINARY and EXPR_IP:
+  - **ExprUDT enum**: Removed `EXPR_DATE`, `EXPR_TIME`, `EXPR_TIMESTAMP` values
+  - **Deleted files**: `ExprDateType.java`, `ExprTimeType.java`, `ExprTimeStampType.java`
+  - **OpenSearchTypeFactory.createUDT()**: Removed datetime cases from switch
+  - **OpenSearchTypeFactory.isTimeBasedType()**: Simplified to only check standard `SqlTypeName` — removed UDT check and fallback string check
+  - **UserDefinedFunctionUtils**: Removed `NULLABLE_DATE_UDT`, `NULLABLE_TIME_UDT`, `NULLABLE_TIMESTAMP_UDT` constants; removed datetime cases from `convertRelDataTypeToSqlTypeName`
+  - **AddSubDateFunction**: Replaced UDT constants with `TYPE_FACTORY.createSqlType(SqlTypeName.DATE/TIMESTAMP, true)`
+  - **CurrentFunction**: Replaced UDT constants with standard types; fixed `valueForCalcite()` cast bug (String→int/long) from US-005
+  - **FromUnixTimeFunction**: Replaced `NULLABLE_TIMESTAMP_UDT` with standard TIMESTAMP type
+  - **ExtendedRelJson**: Updated comment only — serialization/deserialization still works for remaining UDTs
+  - **Tests**: Rewrote `OpenSearchTypeFactoryTest`, `ExtendedRelJsonTest`, `RelJsonSerializerTest` to use EXPR_IP/EXPR_BINARY instead of removed datetime UDTs
+- Files changed:
+  - `core/src/main/java/org/opensearch/sql/calcite/utils/OpenSearchTypeFactory.java`
+  - `core/src/main/java/org/opensearch/sql/calcite/utils/UserDefinedFunctionUtils.java`
+  - `core/src/main/java/org/opensearch/sql/expression/function/udf/datetime/AddSubDateFunction.java`
+  - `core/src/main/java/org/opensearch/sql/expression/function/udf/datetime/CurrentFunction.java`
+  - `core/src/main/java/org/opensearch/sql/expression/function/udf/datetime/FromUnixTimeFunction.java`
+  - `core/src/test/java/org/opensearch/sql/calcite/utils/OpenSearchTypeFactoryTest.java`
+  - `opensearch/src/main/java/org/opensearch/sql/opensearch/storage/serde/ExtendedRelJson.java`
+  - `opensearch/src/test/java/org/opensearch/sql/opensearch/storage/serde/ExtendedRelJsonTest.java`
+  - `opensearch/src/test/java/org/opensearch/sql/opensearch/storage/serde/RelJsonSerializerTest.java`
+  - Deleted: `ExprDateType.java`, `ExprTimeType.java`, `ExprTimeStampType.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - `ExprBinaryType` wraps `SqlTypeName.VARCHAR` (not VARBINARY) — serialization shows `type=VARCHAR` for EXPR_BINARY UDT.
+  - `ExprIPType` extends `ExprJavaType` which wraps a `JavaType` — serialization shows `type=OTHER` with no precision field, and IP UDTs are nullable by default.
+  - `leastRestrictive()` for incompatible UDTs (e.g., EXPR_IP + EXPR_BINARY) throws `AssertionError` from Calcite's `SqlTypeMappingRule` — can't mix OTHER with VARBINARY. Tests should avoid this combination.
+  - `CurrentFunction.CurrentFunctionImplementor` had a latent bug: `currentDate/currentTime/currentTimestamp` methods cast `valueForCalcite()` to `(String)` but US-005 changed those to return `int`/`long`. Fixed return types to `int`/`int`/`long`.
+  - The `leastRestrictive()` UDT preservation logic in `OpenSearchTypeFactory` still works correctly for EXPR_BINARY and EXPR_IP — no changes needed.
+---

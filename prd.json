@@ -144,7 +144,7 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Only remove datetime UDTs. EXPR_BINARY and EXPR_IP must remain. Search for all references before removing."
     },
     {

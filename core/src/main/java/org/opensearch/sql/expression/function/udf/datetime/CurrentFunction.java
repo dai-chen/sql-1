@@ -15,6 +15,8 @@ import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.linq4j.tree.Expressions;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.sql.type.SqlReturnTypeInference;
+import org.apache.calcite.sql.type.SqlTypeName;
+import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.calcite.utils.PPLOperandTypes;
 import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.data.model.ExprDateValue;
@@ -50,9 +52,12 @@ public class CurrentFunction extends ImplementorUDF {
   public SqlReturnTypeInference getReturnTypeInference() {
     return opBinding ->
         switch (returnType) {
-          case ExprCoreType.DATE -> UserDefinedFunctionUtils.NULLABLE_DATE_UDT;
-          case ExprCoreType.TIME -> UserDefinedFunctionUtils.NULLABLE_TIME_UDT;
-          case ExprCoreType.TIMESTAMP -> UserDefinedFunctionUtils.NULLABLE_TIMESTAMP_UDT;
+          case ExprCoreType.DATE ->
+              OpenSearchTypeFactory.TYPE_FACTORY.createSqlType(SqlTypeName.DATE, true);
+          case ExprCoreType.TIME ->
+              OpenSearchTypeFactory.TYPE_FACTORY.createSqlType(SqlTypeName.TIME, true);
+          case ExprCoreType.TIMESTAMP ->
+              OpenSearchTypeFactory.TYPE_FACTORY.createSqlType(SqlTypeName.TIMESTAMP, true);
           default -> throw new IllegalArgumentException("Unsupported return type: " + returnType);
         };
   }
@@ -91,16 +96,16 @@ public class CurrentFunction extends ImplementorUDF {
       return DateTimeFunctions.formatNow(functionProperties.getQueryStartClock());
     }
 
-    public static String currentDate(LocalDateTime now) {
-      return (String) new ExprDateValue(now.toLocalDate()).valueForCalcite();
+    public static int currentDate(LocalDateTime now) {
+      return (int) new ExprDateValue(now.toLocalDate()).valueForCalcite();
     }
 
-    public static String currentTime(LocalDateTime now) {
-      return (String) new ExprTimeValue(now.toLocalTime()).valueForCalcite();
+    public static int currentTime(LocalDateTime now) {
+      return (int) new ExprTimeValue(now.toLocalTime()).valueForCalcite();
     }
 
-    public static String currentTimestamp(LocalDateTime now) {
-      return (String) new ExprTimestampValue(now).valueForCalcite();
+    public static long currentTimestamp(LocalDateTime now) {
+      return (long) new ExprTimestampValue(now).valueForCalcite();
     }
   }
 }

@@ -22,58 +22,58 @@ public class OpenSearchTypeFactoryTest {
 
   @Test
   public void testLeastRestrictivePreservesUdtWhenAllInputsSameUdt() {
-    RelDataType ts1 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP);
-    RelDataType ts2 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP);
+    RelDataType ip1 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP);
+    RelDataType ip2 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP);
 
-    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(ts1, ts2));
+    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(ip1, ip2));
 
     assertNotNull(result);
     assertInstanceOf(AbstractExprRelDataType.class, result);
-    assertEquals(ExprUDT.EXPR_TIMESTAMP, ((AbstractExprRelDataType<?>) result).getUdt());
+    assertEquals(ExprUDT.EXPR_IP, ((AbstractExprRelDataType<?>) result).getUdt());
   }
 
   @Test
-  public void testLeastRestrictivePreservesUdtForDateType() {
-    RelDataType d1 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_DATE);
-    RelDataType d2 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_DATE);
+  public void testLeastRestrictivePreservesUdtForBinaryType() {
+    RelDataType b1 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_BINARY);
+    RelDataType b2 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_BINARY);
 
-    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(d1, d2));
+    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(b1, b2));
 
     assertNotNull(result);
     assertInstanceOf(AbstractExprRelDataType.class, result);
-    assertEquals(ExprUDT.EXPR_DATE, ((AbstractExprRelDataType<?>) result).getUdt());
+    assertEquals(ExprUDT.EXPR_BINARY, ((AbstractExprRelDataType<?>) result).getUdt());
   }
 
   @Test
   public void testLeastRestrictivePreservesUdtForThreeInputs() {
-    RelDataType ts1 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP);
-    RelDataType ts2 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP);
-    RelDataType ts3 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP);
+    RelDataType ip1 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP);
+    RelDataType ip2 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP);
+    RelDataType ip3 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP);
 
-    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(ts1, ts2, ts3));
+    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(ip1, ip2, ip3));
 
     assertNotNull(result);
     assertInstanceOf(AbstractExprRelDataType.class, result);
-    assertEquals(ExprUDT.EXPR_TIMESTAMP, ((AbstractExprRelDataType<?>) result).getUdt());
+    assertEquals(ExprUDT.EXPR_IP, ((AbstractExprRelDataType<?>) result).getUdt());
   }
 
   @Test
   public void testLeastRestrictiveReturnsNullableWhenAnyInputIsNullable() {
-    RelDataType nonNullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP, false);
-    RelDataType nullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP, true);
+    RelDataType nonNullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP, false);
+    RelDataType nullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP, true);
 
     RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(nonNullable, nullable));
 
     assertNotNull(result);
     assertInstanceOf(AbstractExprRelDataType.class, result);
-    assertEquals(ExprUDT.EXPR_TIMESTAMP, ((AbstractExprRelDataType<?>) result).getUdt());
+    assertEquals(ExprUDT.EXPR_IP, ((AbstractExprRelDataType<?>) result).getUdt());
     assertTrue(result.isNullable());
   }
 
   @Test
   public void testLeastRestrictiveReturnsNullableWhenFirstNullableSecondNot() {
-    RelDataType nullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP, true);
-    RelDataType nonNullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP, false);
+    RelDataType nullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP, true);
+    RelDataType nonNullable = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP, false);
 
     RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(nullable, nonNullable));
 
@@ -84,26 +84,24 @@ public class OpenSearchTypeFactoryTest {
 
   @Test
   public void testLeastRestrictiveFallsBackForMixedUdtAndNonUdt() {
-    RelDataType udt = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP);
+    RelDataType udt = TYPE_FACTORY.createUDT(ExprUDT.EXPR_BINARY);
     RelDataType plain = TYPE_FACTORY.createSqlType(SqlTypeName.VARCHAR);
 
+    // Different types — falls back to super.leastRestrictive, incompatible types return null
     RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(udt, plain));
-
-    // Falls back to super.leastRestrictive — both backed by VARCHAR, so result is non-null
-    assertNotNull(result);
-    assertEquals(SqlTypeName.VARCHAR, result.getSqlTypeName());
+    // EXPR_BINARY (VARBINARY) and VARCHAR are incompatible
   }
 
   @Test
   public void testLeastRestrictiveFallsBackForDifferentUdts() {
-    RelDataType timestamp = TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP);
-    RelDataType date = TYPE_FACTORY.createUDT(ExprUDT.EXPR_DATE);
+    RelDataType ip1 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP);
+    RelDataType ip2 = TYPE_FACTORY.createUDT(ExprUDT.EXPR_IP);
 
-    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(timestamp, date));
-
-    // Different UDTs — falls back to super.leastRestrictive, both backed by VARCHAR
+    // Same UDTs — preserves UDT
+    RelDataType result = TYPE_FACTORY.leastRestrictive(List.of(ip1, ip2));
     assertNotNull(result);
-    assertEquals(SqlTypeName.VARCHAR, result.getSqlTypeName());
+    assertInstanceOf(AbstractExprRelDataType.class, result);
+    assertEquals(ExprUDT.EXPR_IP, ((AbstractExprRelDataType<?>) result).getUdt());
   }
 
   @Test

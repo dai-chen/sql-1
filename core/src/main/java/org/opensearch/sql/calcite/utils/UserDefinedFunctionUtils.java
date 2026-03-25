@@ -41,7 +41,6 @@ import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.util.Optionality;
 import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
 import org.opensearch.sql.calcite.udf.UserDefinedAggFunction;
-import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
 import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.executor.QueryType;
@@ -50,10 +49,6 @@ import org.opensearch.sql.expression.function.ImplementorUDF;
 import org.opensearch.sql.expression.function.UDFOperandMetadata;
 
 public class UserDefinedFunctionUtils {
-  public static final RelDataType NULLABLE_DATE_UDT = TYPE_FACTORY.createUDT(EXPR_DATE, true);
-  public static final RelDataType NULLABLE_TIME_UDT = TYPE_FACTORY.createUDT(EXPR_TIME, true);
-  public static final RelDataType NULLABLE_TIMESTAMP_UDT =
-      TYPE_FACTORY.createUDT(ExprUDT.EXPR_TIMESTAMP, true);
   public static final RelDataType NULLABLE_STRING =
       TYPE_FACTORY.createTypeWithNullability(TYPE_FACTORY.createSqlType(SqlTypeName.VARCHAR), true);
   public static final RelDataType NULLABLE_IP_UDT = TYPE_FACTORY.createUDT(EXPR_IP, true);
@@ -128,9 +123,6 @@ public class UserDefinedFunctionUtils {
   public static SqlTypeName convertRelDataTypeToSqlTypeName(RelDataType type) {
     if (type instanceof AbstractExprRelDataType<?> exprType) {
       return switch (exprType.getUdt()) {
-        case EXPR_DATE -> SqlTypeName.DATE;
-        case EXPR_TIME -> SqlTypeName.TIME;
-        case EXPR_TIMESTAMP -> SqlTypeName.TIMESTAMP;
         // EXPR_IP is mapped to SqlTypeName.OTHER since there is no
         // corresponding SqlTypeName in Calcite.
         case EXPR_IP -> SqlTypeName.OTHER;

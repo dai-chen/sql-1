@@ -5,8 +5,7 @@
 
 package org.opensearch.sql.expression.function.udf.datetime;
 
-import static org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils.NULLABLE_DATE_UDT;
-import static org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils.NULLABLE_TIMESTAMP_UDT;
+import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.TYPE_FACTORY;
 import static org.opensearch.sql.utils.DateTimeUtils.extractTimestamp;
 
 import java.time.ZoneOffset;
@@ -25,6 +24,7 @@ import org.apache.calcite.sql.type.CompositeOperandTypeChecker;
 import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.SqlReturnTypeInference;
 import org.apache.calcite.sql.type.SqlTypeFamily;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.calcite.utils.datetime.DateTimeConversionUtils;
@@ -65,9 +65,9 @@ public class AddSubDateFunction extends ImplementorUDF {
       RelDataType temporalDeltaType = opBinding.getOperandType(1);
       if (OpenSearchTypeFactory.convertRelDataTypeToExprType(temporalType) == ExprCoreType.DATE
           && SqlTypeFamily.NUMERIC.contains(temporalDeltaType)) {
-        return NULLABLE_DATE_UDT;
+        return TYPE_FACTORY.createSqlType(SqlTypeName.DATE, true);
       } else {
-        return NULLABLE_TIMESTAMP_UDT;
+        return TYPE_FACTORY.createSqlType(SqlTypeName.TIMESTAMP, true);
       }
     };
   }

@@ -61,19 +61,14 @@ public class ExtendedRelJsonTest {
 
   @Test
   void testSerializeUDT() {
-    RelDataType dateType = typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_DATE);
-    RelDataType timeType = typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIME, true);
-    RelDataType timestampType = typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP);
+    RelDataType ipType = typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_IP);
+    RelDataType binaryType = typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY, true);
 
     assertEquals(
-        Map.of("udt", "EXPR_DATE", "type", "VARCHAR", "nullable", false, "precision", -1),
-        relJson.toJson(dateType));
+        Map.of("udt", "EXPR_IP", "type", "OTHER", "nullable", true), relJson.toJson(ipType));
     assertEquals(
-        Map.of("udt", "EXPR_TIME", "type", "VARCHAR", "nullable", true, "precision", -1),
-        relJson.toJson(timeType));
-    assertEquals(
-        Map.of("udt", "EXPR_TIMESTAMP", "type", "VARCHAR", "nullable", false, "precision", -1),
-        relJson.toJson(timestampType));
+        Map.of("udt", "EXPR_BINARY", "type", "VARCHAR", "nullable", true, "precision", -1),
+        relJson.toJson(binaryType));
   }
 
   @Test
@@ -87,11 +82,11 @@ public class ExtendedRelJsonTest {
 
   @Test
   void testDeserializeUDT() {
-    Map<String, Object> serializedTimestamp =
-        Map.of("udt", "EXPR_TIMESTAMP", "type", "VARCHAR", "nullable", true, "precision", -1);
+    Map<String, Object> serializedBinary =
+        Map.of("udt", "EXPR_BINARY", "type", "VARCHAR", "nullable", true, "precision", -1);
     assertEquals(
-        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP, true).toString(),
-        relJson.toType(typeFactory, serializedTimestamp).toString());
+        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY, true).toString(),
+        relJson.toType(typeFactory, serializedBinary).toString());
   }
 
   @Test
@@ -100,11 +95,11 @@ public class ExtendedRelJsonTest {
         typeFactory
             .builder()
             .add("name", typeFactory.createSqlType(SqlTypeName.VARCHAR))
-            .add("timestamp", typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP))
+            .add("binary", typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY))
             .build();
 
     RelDataTypeField nameField = structType.getFieldList().get(0);
-    RelDataTypeField timestampField = structType.getFieldList().get(1);
+    RelDataTypeField binaryField = structType.getFieldList().get(1);
 
     // Test serialization of regular field
     Object nameFieldJson = relJson.toJson((Object) nameField);
@@ -113,11 +108,11 @@ public class ExtendedRelJsonTest {
         nameFieldJson);
 
     // Test serialization of UDT field
-    Object timestampFieldJson = relJson.toJson(timestampField);
+    Object binaryFieldJson = relJson.toJson(binaryField);
     assertEquals(
         Map.of(
             "udt",
-            "EXPR_TIMESTAMP",
+            "EXPR_BINARY",
             "type",
             "VARCHAR",
             "nullable",
@@ -125,8 +120,8 @@ public class ExtendedRelJsonTest {
             "precision",
             -1,
             "name",
-            "timestamp"),
-        timestampFieldJson);
+            "binary"),
+        binaryFieldJson);
   }
 
   @Test
@@ -135,7 +130,7 @@ public class ExtendedRelJsonTest {
         typeFactory
             .builder()
             .add("name", typeFactory.createSqlType(SqlTypeName.VARCHAR))
-            .add("timestamp", typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP))
+            .add("binary", typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY))
             .build();
 
     Map<String, Object> nameFieldMap =
@@ -143,7 +138,7 @@ public class ExtendedRelJsonTest {
     Map<String, Object> udtFieldMap =
         Map.of(
             "udt",
-            "EXPR_TIMESTAMP",
+            "EXPR_BINARY",
             "type",
             "VARCHAR",
             "nullable",
@@ -151,7 +146,7 @@ public class ExtendedRelJsonTest {
             "precision",
             -1,
             "name",
-            "timestamp");
+            "binary");
     Map<String, Object> structMap =
         Map.of(
             "fields",
@@ -171,9 +166,9 @@ public class ExtendedRelJsonTest {
     RelDataType stringArrayType =
         typeFactory.createArrayType(typeFactory.createSqlType(SqlTypeName.VARCHAR), -1);
 
-    RelDataType timestampArrayType =
+    RelDataType binaryArrayType =
         typeFactory.createArrayType(
-            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP), -1);
+            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY), -1);
 
     RelDataType ipArrayType =
         typeFactory.createArrayType(
@@ -196,8 +191,8 @@ public class ExtendedRelJsonTest {
             "nullable",
             false,
             "component",
-            Map.of("udt", "EXPR_TIMESTAMP", "type", "VARCHAR", "nullable", false, "precision", -1)),
-        relJson.toJson(timestampArrayType));
+            Map.of("udt", "EXPR_BINARY", "type", "VARCHAR", "nullable", false, "precision", -1)),
+        relJson.toJson(binaryArrayType));
 
     Object serializedIpArray = relJson.toJson(ipArrayType);
     Map<String, Object> serializedMap = (Map<String, Object>) serializedIpArray;
@@ -210,24 +205,24 @@ public class ExtendedRelJsonTest {
 
   @Test
   void testDeserializeArrayTypes() {
-    Map<String, Object> serializedTimestampArray =
+    Map<String, Object> serializedBinaryArray =
         Map.of(
             "type",
             "ARRAY",
             "nullable",
             false,
             "component",
-            Map.of("udt", "EXPR_TIMESTAMP", "type", "VARCHAR", "nullable", false, "precision", -1));
+            Map.of("udt", "EXPR_BINARY", "type", "VARCHAR", "nullable", false, "precision", -1));
 
-    RelDataType expectedTimestampArray =
+    RelDataType expectedBinaryArray =
         typeFactory.createArrayType(
-            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP), -1);
+            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY), -1);
 
-    RelDataType deserializedType = relJson.toType(typeFactory, serializedTimestampArray);
-    assertEquals(expectedTimestampArray, deserializedType);
+    RelDataType deserializedType = relJson.toType(typeFactory, serializedBinaryArray);
+    assertEquals(expectedBinaryArray, deserializedType);
 
     assertEquals(
-        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP),
+        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY),
         deserializedType.getComponentType());
   }
 
@@ -243,13 +238,13 @@ public class ExtendedRelJsonTest {
     RelDataType mapWithUdtValueType =
         typeFactory.createMapType(
             typeFactory.createSqlType(SqlTypeName.VARCHAR),
-            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP),
+            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY),
             true);
 
     RelDataType complexMapType =
         typeFactory.createMapType(
             typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_IP),
-            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP),
+            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY),
             false);
 
     Map<String, Object> expectedRegularMap =
@@ -273,7 +268,7 @@ public class ExtendedRelJsonTest {
             "key",
             Map.of("type", "VARCHAR", "nullable", false, "precision", -1),
             "value",
-            Map.of("udt", "EXPR_TIMESTAMP", "type", "VARCHAR", "nullable", false, "precision", -1));
+            Map.of("udt", "EXPR_BINARY", "type", "VARCHAR", "nullable", false, "precision", -1));
     assertEquals(expectedUdtValueMap, relJson.toJson(mapWithUdtValueType));
 
     Object serializedComplexMap = relJson.toJson(complexMapType);
@@ -289,7 +284,7 @@ public class ExtendedRelJsonTest {
 
     assertInstanceOf(Map.class, serializedMap.get("value"));
     Map<String, Object> valueMap = (Map<String, Object>) serializedMap.get("value");
-    assertEquals("EXPR_TIMESTAMP", valueMap.get("udt"));
+    assertEquals("EXPR_BINARY", valueMap.get("udt"));
     assertEquals("VARCHAR", valueMap.get("type"));
   }
 
@@ -304,12 +299,12 @@ public class ExtendedRelJsonTest {
             "key",
             Map.of("udt", "EXPR_IP", "type", "OTHER", "nullable", false, "precision", -1),
             "value",
-            Map.of("udt", "EXPR_TIMESTAMP", "type", "VARCHAR", "nullable", false, "precision", -1));
+            Map.of("udt", "EXPR_BINARY", "type", "VARCHAR", "nullable", false, "precision", -1));
 
     RelDataType expectedComplexMap =
         typeFactory.createMapType(
             typeFactory.createSqlType(SqlTypeName.OTHER, false),
-            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP),
+            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY),
             false);
 
     RelDataType deserializedType = relJson.toType(typeFactory, serializedComplexMap);
@@ -318,7 +313,7 @@ public class ExtendedRelJsonTest {
     assertEquals(
         typeFactory.createSqlType(SqlTypeName.OTHER, false), deserializedType.getKeyType());
     assertEquals(
-        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP),
+        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY),
         deserializedType.getValueType());
   }
 
@@ -327,7 +322,7 @@ public class ExtendedRelJsonTest {
     RelDataType innerMapType =
         typeFactory.createMapType(
             typeFactory.createSqlType(SqlTypeName.VARCHAR),
-            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP),
+            typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY),
             false);
     RelDataType complexType = typeFactory.createArrayType(innerMapType, -1);
 
@@ -342,7 +337,7 @@ public class ExtendedRelJsonTest {
         SqlTypeName.VARCHAR,
         Objects.requireNonNull(deserialized.getComponentType().getKeyType()).getSqlTypeName());
     assertEquals(
-        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP),
+        typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_BINARY),
         deserialized.getComponentType().getValueType());
   }
 
@@ -357,11 +352,11 @@ public class ExtendedRelJsonTest {
             this.relJson.withInputTranslator(
                 new OpenSearchRelInputTranslator(mock(RelDataType.class)));
 
-    // Create UDT types for operands
-    RelDataType timestampType = typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP);
-    RelDataType dateType = typeFactory.createUDT(OpenSearchTypeFactory.ExprUDT.EXPR_DATE);
+    // Create standard types for operands (datetime types are now standard Calcite types)
+    RelDataType timestampType = typeFactory.createSqlType(SqlTypeName.TIMESTAMP);
+    RelDataType dateType = typeFactory.createSqlType(SqlTypeName.DATE);
 
-    // Create RexNodes with UDT types - using literal values
+    // Create RexNodes with standard types - using literal values
     RexNode timestamp =
         rexBuilder.makeCall(
             timestampType,
@@ -371,7 +366,7 @@ public class ExtendedRelJsonTest {
         rexBuilder.makeCall(
             dateType, PPLBuiltinOperators.DATE, List.of(rexBuilder.makeLiteral("2023-01-01")));
 
-    // Create a RexCall using PLUS operator (as an example operation between UDTs)
+    // Create a RexCall using DATE_ADD operator
     RexCall rexCall =
         (RexCall)
             cluster
@@ -405,7 +400,7 @@ public class ExtendedRelJsonTest {
     assertInstanceOf(Map.class, operands.get(0));
     assertInstanceOf(Map.class, operands.get(1));
 
-    // Most importantly, test that deserialization works and preserves UDT types
+    // Most importantly, test that deserialization works and preserves types
     RexNode deserializedRexCall = relJson.toRex(cluster, serializedRexCall);
 
     // Verify the deserialized RexCall
@@ -418,7 +413,7 @@ public class ExtendedRelJsonTest {
     // Check operand count is preserved
     assertEquals(2, deserializedCall.getOperands().size());
 
-    // Most importantly: Check that UDT type information is preserved through round-trip
+    // Check that type information is preserved through round-trip
     assertEquals(timestampType, deserializedCall.getType());
     assertEquals(timestampType, deserializedCall.getOperands().get(0).getType());
     assertEquals(dateType, deserializedCall.getOperands().get(1).getType());

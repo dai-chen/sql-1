@@ -286,7 +286,7 @@ public class ExtendedRelJson extends RelJson {
       map.put("fields", list);
       map.put("nullable", node.isNullable());
     } else {
-      // For UDT like EXPR_TIMESTAMP, we additionally save its UDT info as a tag.
+      // For UDT like EXPR_IP, we additionally save its UDT info as a tag.
       if (node instanceof AbstractExprRelDataType) {
         map.put("udt", ((AbstractExprRelDataType<?>) node).getUdt().name());
       }

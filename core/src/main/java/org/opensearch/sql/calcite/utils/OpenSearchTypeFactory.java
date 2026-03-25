@@ -5,9 +5,6 @@
 
 package org.opensearch.sql.calcite.utils;
 
-import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT.EXPR_DATE;
-import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT.EXPR_TIME;
-import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT.EXPR_TIMESTAMP;
 import static org.opensearch.sql.data.type.ExprCoreType.ARRAY;
 import static org.opensearch.sql.data.type.ExprCoreType.BINARY;
 import static org.opensearch.sql.data.type.ExprCoreType.BOOLEAN;
@@ -48,10 +45,7 @@ import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
 import org.opensearch.sql.calcite.type.ExprBinaryType;
-import org.opensearch.sql.calcite.type.ExprDateType;
 import org.opensearch.sql.calcite.type.ExprIPType;
-import org.opensearch.sql.calcite.type.ExprTimeStampType;
-import org.opensearch.sql.calcite.type.ExprTimeType;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprCoreType;
@@ -71,9 +65,6 @@ public class OpenSearchTypeFactory extends JavaTypeFactoryImpl {
 
   @Getter
   public enum ExprUDT {
-    EXPR_DATE(DATE),
-    EXPR_TIME(TIME),
-    EXPR_TIMESTAMP(TIMESTAMP),
     EXPR_BINARY(BINARY),
     EXPR_IP(IP);
 
@@ -122,12 +113,6 @@ public class OpenSearchTypeFactory extends JavaTypeFactoryImpl {
   public RelDataType createUDT(ExprUDT typeName) {
     RelDataType udt =
         switch (typeName) {
-          case EXPR_DATE:
-            yield new ExprDateType(this);
-          case EXPR_TIME:
-            yield new ExprTimeType(this);
-          case EXPR_TIMESTAMP:
-            yield new ExprTimeStampType(this);
           case EXPR_BINARY:
             yield new ExprBinaryType(this);
           case EXPR_IP:
@@ -424,26 +409,11 @@ public class OpenSearchTypeFactory extends JavaTypeFactoryImpl {
    * @return true if the type is time-based, false otherwise
    */
   public static boolean isTimeBasedType(RelDataType fieldType) {
-    // Check standard SQL time types
     SqlTypeName sqlType = fieldType.getSqlTypeName();
-    if (sqlType == SqlTypeName.TIMESTAMP
+    return sqlType == SqlTypeName.TIMESTAMP
         || sqlType == SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE
         || sqlType == SqlTypeName.DATE
         || sqlType == SqlTypeName.TIME
-        || sqlType == SqlTypeName.TIME_WITH_LOCAL_TIME_ZONE) {
-      return true;
-    }
-
-    // Check for OpenSearch UDT types (EXPR_TIMESTAMP mapped to VARCHAR)
-    if (isUserDefinedType(fieldType)) {
-      AbstractExprRelDataType<?> exprType = (AbstractExprRelDataType<?>) fieldType;
-      ExprType udtType = exprType.getExprType();
-      return udtType == ExprCoreType.TIMESTAMP
-          || udtType == ExprCoreType.DATE
-          || udtType == ExprCoreType.TIME;
-    }
-
-    // Fallback check if type string contains EXPR_TIMESTAMP
-    return fieldType.toString().contains("EXPR_TIMESTAMP");
+        || sqlType == SqlTypeName.TIME_WITH_LOCAL_TIME_ZONE;
   }
 }
