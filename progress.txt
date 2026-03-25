@@ -104,3 +104,13 @@
   - SpanFunction eval methods now take `int` (DATE: epoch days, TIME: millis of day) and `long` (TIMESTAMP: epoch millis) instead of `String`. The `fromObjectValue` method (US-004) handles these native types.
   - The `ExpressionNotAnalyzableException` catch block in `analyzeExpression` swallows the original exception when `ScriptQueryExpression` also fails — makes debugging hard. The original exception `e` is lost.
 ---
+
+
+## 2026-03-25T04:22 - US-006
+- US-006 was already implemented and committed (ed8bc5511) in a prior iteration but `passes` was left as `false` in prd.json.
+- Verified: the EXPR_DATE/EXPR_TIME/EXPR_TIMESTAMP cases were already removed from the UDT switch in `makeCast()`. Only EXPR_IP and default remain.
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- Updated prd.json to mark `passes: true`.
+- **Learnings for future iterations:**
+  - Always verify prd.json state matches git history — a prior iteration may have committed code but failed to update the passes flag.
+---
