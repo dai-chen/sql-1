@@ -218,3 +218,50 @@
 
 - Updated prd.json to mark `passes: true`.
 ---
+
+
+## Round Summary (max iterations reached, iteration 51)
+
+### Progress
+- **Completed this round**: All 12 user stories (US-001 through US-012) passed.
+  - US-001: TIMESTAMP(9) precision override in OpenSearchTypeSystem
+  - US-002: PPLReturnTypes returns standard Calcite DATE/TIME/TIMESTAMP
+  - US-003: OpenSearchTypeFactory.convertExprTypeToRelDataType uses standard types
+  - US-004: ExprValueUtils.fromObjectValue handles int/long datetime inputs
+  - US-005: ExprValue.valueForCalcite() returns native int/long for datetimes
+  - US-006: ExtendedRexBuilder.makeCast no longer dispatches datetime to UDFs
+  - US-007: OpenSearch adapter (PredicateAnalyzer, SpanFunction, WidthBucketFunction) uses SqlTypeName checks
+  - US-008: 17 PPL UDFs replaced with SqlStdOperatorTable/SqlLibraryOperators
+  - US-009: Datetime UDT infrastructure removed (ExprDateType, ExprTimeType, ExprTimeStampType, UDT constants)
+  - US-010: N/A — DatetimeUdtRewriter/UdfOperandAdapter never existed on this branch
+  - US-011: All unit tests pass (no additional fixes needed beyond prior stories)
+  - US-012: Integration tests ran and ~250 failures documented across 12 test classes
+- **Remaining**: No PRD stories remain. The ~250 integration test failures documented in US-012 are the next body of work.
+- **Blockers**: None for the PRD scope. Integration test fixes will require a new PRD or manual work.
+
+### PoC Direction Check
+- **Approach validation**: The approach is viable and working well. All unit tests pass, the build is green, and the core type system successfully uses standard Calcite DATE/TIME/TIMESTAMP instead of UDTs. The value boundary (int/long instead of String) is correctly wired through ExprValue, ExprValueUtils, and the OpenSearch adapter.
+- **Surprises**:
+  - Easier than expected: US-005 (valueForCalcite changes) caused zero unit test failures despite predictions of "many tests will break" — prior stories had already aligned the type system.
+  - Harder than expected: US-007 (OpenSearch adapter) required discovering that `RexLiteral.stringValue()` and `getValueAs(String.class)` both fail for standard TIMESTAMP literals — needed `getValueAs(TimestampString.class).toString()` instead.
+  - US-009 uncovered a latent bug in CurrentFunction where `valueForCalcite()` was cast to String but now returns int/long.
+  - US-010 was entirely N/A — the files never existed on this branch, suggesting the PRD was written against a different branch's state.
+- **Alternative approaches**: None needed. The standard Calcite type approach is clean and the Flink precedent (overriding getMaxPrecision for TIMESTAMP(9)) validated the design.
+- **Risk areas**:
+  - The ~250 integration test failures fall into 5 categories, and the largest (~150 failures) are runtime 500 errors where standard Calcite operators fail at execution time. This likely involves the execution engine's handling of int/long datetime values vs String — may require changes in CalciteExpressionScript or the Enumerable execution path.
+  - CAST precision loss (6 failures) suggests standard Calcite CAST doesn't preserve sub-second precision for datetime strings — may need a custom CAST implementation or format-aware parsing.
+  - Invalid input handling changes (~30 failures) are behavioral: standard operators are more permissive than UDFs. Tests expecting exceptions may need to be updated, or we need wrapper operators that validate inputs.
+- **Open questions**:
+  - Should the ~30 "invalid input handling" test failures be fixed by adding input validation to standard operators, or should the tests be updated to accept the more permissive behavior?
+  - For CAST precision loss, should we implement a custom CAST for datetime types or fix the format parsing in the standard path?
+  - Are the standalone datetime function failures (CalcitePPLDateTimeBuiltinFunctionIT, 41 failures) a priority, or is standalone execution a secondary concern?
+
+### Recommended Next Steps
+1. Create a new PRD for integration test fixes, organized by failure category:
+   - **P1**: Runtime 500 errors (~150 failures) — likely a single root cause in the execution path
+   - **P2**: CAST precision loss (6 failures) — targeted fix for datetime CAST
+   - **P3**: Plan assertion mismatches (~15 failures) — update expected plan strings
+   - **P4**: Invalid input handling (~30 failures) — decide on validation strategy
+   - **P5**: Standalone execution failures (41 failures) — investigate CalcitePPLDateTimeBuiltinFunctionIT
+2. Start with P1 since fixing the runtime 500 errors will likely resolve the largest batch and may also fix some P5 failures.
+3. Before starting fixes, run a single failing integration test with `--info` to get the full stack trace and identify the exact failure point in the execution path.
