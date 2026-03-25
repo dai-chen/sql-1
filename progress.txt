@@ -1,0 +1,103 @@
+# Codebase Patterns
+
+- **Settings holder pattern**: UnifiedQueryContext.builder().build() creates Settings internally. To pass settings to OpenSearchIndex in the lazy schema, use a `Settings[]` holder array — set `holder[0] = context.getSettings()` after build, and the schema closure reads from `holder[0]` when tables are first accessed.
+- **Context per execution**: Each `tryUnifiedExecution` call creates its own context and closes it after. This avoids stale connection issues across tests. The overhead is acceptable since gap analysis is opt-in.
+- **UnifiedQueryCompiler** lives in `org.opensearch.sql.api.compiler` package (not `org.opensearch.sql.api`).
+- **InternalRestHighLevelClient** is already in `org.opensearch.sql.util` package — same package as our gap analyzer.
+- **Git push fails** due to SSH auth — commits are local only. Push will need to be done manually or with proper credentials.
+- **Gradle system property forwarding**: System properties passed via `-D` to Gradle are NOT forwarded to the test JVM. Must add `systemProperty "name", System.getProperty("name")` in the task config in `build.gradle`. The `integTest` block is at ~line 459 in `integ-test/build.gradle`.
+- **Gap report file output**: Report is written to `integ-test/build/gap-analysis-report.txt` in addition to stderr. Uses `project.root` system property for path resolution.
+- **SQL tests broken on branch**: All SQL IT tests fail with server-side "Failed to plan query" 500 errors. This prevents SQL gap analysis from collecting data since the REST call throws before the replay runs.
+
+# Iteration Log
+
+## 2026-03-21T01:32 - US-001
+- Implemented `UnifiedQueryGapAnalyzer` at `integ-test/src/test/java/org/opensearch/sql/util/UnifiedQueryGapAnalyzer.java`
+- Static `tryUnifiedExecution(RestClient, String, QueryType)` method runs plan → compile → execute
+- `GapResult` inner class with Phase enum (PLAN/COMPILE/EXECUTE), success, errorMessage, exceptionClass
+- All exceptions caught — never propagates to calling test
+- Controlled by `unified.gap.analysis` system property (returns null when disabled)
+- Uses same schema pattern as `UnifiedQueryOpenSearchIT` with lazy `OpenSearchIndex` creation
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/util/UnifiedQueryGapAnalyzer.java` (new)
+- **Learnings for future iterations:**
+  - Settings holder array pattern needed because context must be built before settings are available to schema
+  - Each call creates fresh context to avoid cross-test connection issues
+  - Build command: `./gradlew :integ-test:compileTestJava` — takes ~45s
+---
+
+## 2026-03-21T01:37 - US-002
+- Implemented `GapReportCollector` at `integ-test/src/test/java/org/opensearch/sql/util/GapReportCollector.java`
+- Static `collect(testClassName, testMethodName, query, QueryType, GapResult)` accumulates entries in a `ConcurrentLinkedQueue`
+- Static `printReport()` outputs categorized report to stderr
+- Report iterates over `QueryType.values()` (PPL, SQL) — separates sections per query type
+- Each section shows total/success/failed counts with percentages
+- Failures grouped by `phase | errorMessage` key, showing exception class and listing each test+query
+- JVM shutdown hook registered in static initializer to auto-print
+- `collect()` silently ignores null results (when gap analysis is disabled)
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/util/GapReportCollector.java` (new)
+- Build passes, integration test failures are pre-existing (not caused by this change)
+- **Learnings for future iterations:**
+  - `ConcurrentLinkedQueue` used for thread safety since tests may run in parallel
+  - Report prints to stderr so it doesn't interfere with test output parsing
+  - Git push now works (SSH auth resolved since US-001)
+---
+
+## 2026-03-21T02:12 - US-003
+- Implemented `transformPPLQuery(String)` static method in `UnifiedQueryGapAnalyzer`
+- Three regex patterns handle: `source=<index>`, `lookup <index>`, `join [type] on <condition> <index>`
+- Negative lookahead `(?!opensearch\.)` prevents double-prefixing already-qualified names
+- `source=[subquery]` is skipped via `(?!\[)` — inner `source=` inside brackets is still transformed
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/util/UnifiedQueryGapAnalyzer.java` (modified)
+- Build passes
+- **Learnings for future iterations:**
+  - PPL join syntax: `| join [left|right|...] on <condition> <index>` — index is AFTER the ON clause
+  - PPL lookup syntax: `| lookup <index> <field> [as <alias>]` — index is immediately after keyword
+  - `source=[...]` is subquery syntax — must not prefix the bracket, only bare index names
+  - Tested with standalone Java harness to validate regex before committing
+---
+
+## 2026-03-21T02:15 - US-004
+- Intercepted `PPLIntegTestCase.executeQuery(String)` to replay through unified pipeline after REST call succeeds
+- Added `replayWithUnifiedPipeline(String)` private method with early return when gap analysis is disabled (zero overhead)
+- Transforms PPL query with `UnifiedQueryGapAnalyzer.transformPPLQuery()` to add catalog prefix
+- Collects result via `GapReportCollector.collect()` with test class name and method name
+- Test method name extracted via `Thread.currentThread().getStackTrace()[3]` (getStackTrace → replayWithUnifiedPipeline → executeQuery → testMethod)
+- All exceptions caught in outer try/catch — original test behavior completely unchanged
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/ppl/PPLIntegTestCase.java` (modified)
+- Build passes, pre-existing test failures unchanged
+- **Learnings for future iterations:**
+  - Stack trace index [3] works for direct test→executeQuery calls; for indirect calls through helpers, it captures the intermediate method name which is still useful for debugging
+  - The `isEnabled()` early return ensures zero overhead when gap analysis is off — no stack trace capture, no object creation
+---
+
+## 2026-03-21T02:32 - US-005
+- Intercepted `SQLIntegTestCase.executeJdbcRequest(String)` and `executeQuery(String sqlQuery)` to replay through unified pipeline
+- Added `replayWithUnifiedPipeline(String)` private method with early return when gap analysis is disabled (zero overhead)
+- Uses `QueryType.SQL` — the `defaultNamespace("opensearch")` is already configured in `UnifiedQueryGapAnalyzer.tryUnifiedExecution` via the context builder
+- Collects result via `GapReportCollector.collect()` with test class name and method name
+- All exceptions caught in outer try/catch — original test behavior completely unchanged
+- Added imports for `QueryType`, `GapReportCollector`, `UnifiedQueryGapAnalyzer`
+- Files changed: `integ-test/src/test/java/org/opensearch/sql/legacy/SQLIntegTestCase.java` (modified)
+- Build passes, test failures are pre-existing (Connection refused flakiness, not related to changes)
+- **Learnings for future iterations:**
+  - `executeJdbcRequest` delegates to `executeQuery(query, "jdbc")` — intercept at `executeJdbcRequest` level to avoid double-counting with the `executeQuery(String, String)` overload
+  - `executeQuery(final String sqlQuery)` is a separate method from `executeQuery(String, String)` — both need interception independently
+  - Stack trace index [3] captures the calling test method (getStackTrace → replayWithUnifiedPipeline → executeJdbcRequest/executeQuery → testMethod)
+---
+
+## 2026-03-21T03:00 - US-006
+- Verified gap analysis runs end-to-end and produces report
+- Fixed: `unified.gap.analysis` system property was not forwarded from Gradle JVM to test JVM — added forwarding in `integTest` block of `integ-test/build.gradle`
+- Enhanced `GapReportCollector.printReport()` to also write report to `build/gap-analysis-report.txt` file for reliable access regardless of Gradle output handling
+- PPL verification: `SearchCommandIT` with `-Dunified.gap.analysis=true` produces report with 86 queries (47 success/54.7%, 39 failed/45.3%)
+- Report correctly groups failures by error message with counts, shows phase (PLAN/COMPILE/EXECUTE), lists individual test+query per group
+- Report prints to stderr at JVM shutdown AND writes to file
+- SQL verification: ALL SQL tests on this branch fail at server level with "Failed to plan query" (500 error) — this is a pre-existing branch issue, not related to gap analysis. The REST call throws before `replayWithUnifiedPipeline` is reached, so no SQL gap data is collected.
+- Files changed: `integ-test/build.gradle` (modified), `integ-test/src/test/java/org/opensearch/sql/util/GapReportCollector.java` (modified)
+- Build passes, PPL tests pass
+- **Learnings for future iterations:**
+  - Gradle forks a separate JVM for tests — system properties passed to Gradle via `-D` are NOT automatically forwarded to the test JVM. Must explicitly add `systemProperty` in the task config.
+  - Shutdown hook output to stderr may not be visible in Gradle output depending on `testLogging` config. Writing to a file is more reliable.
+  - `project.root` system property (already set in build.gradle) provides the integ-test directory path for file output.
+  - SQL tests on this branch are broken at the server level — the unified query planner on the server side fails for all SQL queries. This is independent of the client-side gap analysis.
+---

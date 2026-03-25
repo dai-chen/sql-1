@@ -29,9 +29,12 @@ import org.opensearch.common.collect.MapBuilder;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.common.setting.Settings.Key;
+import org.opensearch.sql.executor.QueryType;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.protocol.response.format.Format;
+import org.opensearch.sql.util.GapReportCollector;
 import org.opensearch.sql.util.RetryProcessor;
+import org.opensearch.sql.util.UnifiedQueryGapAnalyzer;
 
 /** OpenSearch Rest integration test base for PPL testing. */
 public abstract class PPLIntegTestCase extends SQLIntegTestCase {
@@ -50,7 +53,26 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   }
 
   protected JSONObject executeQuery(String query) throws IOException {
-    return jsonify(executeQueryToString(query));
+    JSONObject result = jsonify(executeQueryToString(query));
+    replayWithUnifiedPipeline(query);
+    return result;
+  }
+
+  private void replayWithUnifiedPipeline(String query) {
+    if (!UnifiedQueryGapAnalyzer.isEnabled()) {
+      return;
+    }
+    try {
+      String transformed = UnifiedQueryGapAnalyzer.transformPPLQuery(query);
+      UnifiedQueryGapAnalyzer.GapResult gap =
+          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), transformed, QueryType.PPL);
+      StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+      String testMethod = stack.length > 3 ? stack[3].getMethodName() : "unknown";
+      GapReportCollector.collect(
+          getClass().getSimpleName(), testMethod, query, QueryType.PPL, gap);
+    } catch (Exception e) {
+      // Never fail the original test
+    }
   }
 
   protected String executeQueryToString(String query) throws IOException {

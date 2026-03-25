@@ -42,6 +42,9 @@ import org.opensearch.client.ResponseException;
 import org.opensearch.client.RestClient;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.datasource.model.DataSourceMetadata;
+import org.opensearch.sql.executor.QueryType;
+import org.opensearch.sql.util.GapReportCollector;
+import org.opensearch.sql.util.UnifiedQueryGapAnalyzer;
 import org.opensearch.sql.utils.SerializeUtils;
 
 /** OpenSearch Rest integration test base for SQL testing */
@@ -278,7 +281,9 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
   }
 
   protected JSONObject executeJdbcRequest(String query) {
-    return new JSONObject(executeQuery(query, "jdbc"));
+    JSONObject result = new JSONObject(executeQuery(query, "jdbc"));
+    replayWithUnifiedPipeline(query);
+    return result;
   }
 
   protected String executeFetchQuery(String query, int fetchSize, String requestType)
@@ -339,7 +344,26 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
   protected JSONObject executeQuery(final String sqlQuery) throws IOException {
 
     final String requestBody = makeRequest(sqlQuery);
-    return executeRequest(requestBody);
+    JSONObject result = executeRequest(requestBody);
+    replayWithUnifiedPipeline(sqlQuery);
+    return result;
+  }
+
+  private void replayWithUnifiedPipeline(String query) {
+    if (!UnifiedQueryGapAnalyzer.isEnabled()) {
+      return;
+    }
+    try {
+      String unescaped = UnifiedQueryGapAnalyzer.unescapeJsonString(query);
+      UnifiedQueryGapAnalyzer.GapResult gap =
+          UnifiedQueryGapAnalyzer.tryUnifiedExecution(client(), unescaped, QueryType.SQL);
+      StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+      String testMethod = stack.length > 3 ? stack[3].getMethodName() : "unknown";
+      GapReportCollector.collect(
+          getClass().getSimpleName(), testMethod, query, QueryType.SQL, gap);
+    } catch (Exception e) {
+      // Never fail the original test
+    }
   }
 
   protected String explainQuery(final String sqlQuery) throws IOException {
