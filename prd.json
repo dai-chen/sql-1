@@ -77,7 +77,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "This is the most impactful change — every place that calls valueForCalcite() on datetime values now gets int/long instead of String. Many tests will break. Fix compilation errors here, leave test assertion failures for later."
     },
     {

@@ -153,9 +153,6 @@ public class ExtendedRexBuilder extends RexBuilder {
       var udt = ((AbstractExprRelDataType<?>) type).getUdt();
       var argExprType = OpenSearchTypeFactory.convertRelDataTypeToExprType(sourceType);
       return switch (udt) {
-        case EXPR_DATE -> makeCall(type, PPLBuiltinOperators.DATE, List.of(exp));
-        case EXPR_TIME -> makeCall(type, PPLBuiltinOperators.TIME, List.of(exp));
-        case EXPR_TIMESTAMP -> makeCall(type, PPLBuiltinOperators.TIMESTAMP, List.of(exp));
         case EXPR_IP -> {
           if (argExprType == ExprCoreType.IP) {
             yield exp;

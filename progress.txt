@@ -63,3 +63,20 @@
   - The change is purely additive — existing String paths remain unchanged, so no downstream breakage.
   - Callers like `CalciteAggregationScript`, `DatePartFunction`, and `SpanFunction` pass String values today; the new int/long paths will be exercised once `valueForCalcite()` returns native types (US-005).
 ---
+
+
+## 2026-03-25T03:36 - US-005
+- Overrode `valueForCalcite()` in three datetime ExprValue classes to return native Calcite representations:
+  - `ExprDateValue`: returns `(int) date.toEpochDay()` (epoch days)
+  - `ExprTimeValue`: returns `(int) (time.toNanoOfDay() / 1_000_000)` (millis of day)
+  - `ExprTimestampValue`: returns `timestamp.toEpochMilli()` (epoch millis as long)
+- Files changed:
+  - `core/src/main/java/org/opensearch/sql/data/model/ExprDateValue.java`
+  - `core/src/main/java/org/opensearch/sql/data/model/ExprTimeValue.java`
+  - `core/src/main/java/org/opensearch/sql/data/model/ExprTimestampValue.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - No test failures occurred despite the notes predicting "many tests will break". This is because the UDT-based code paths (which call `valueForCalcite()` on datetime values) were already updated in US-002/US-003 to use standard types, and the existing tests don't exercise the new int/long return paths yet.
+  - The real impact will surface in later stories (US-007 OpenSearch adapter, US-011 test fixes) when code that previously received String values from `valueForCalcite()` now receives int/long.
+  - The change was minimal — just adding one `valueForCalcite()` override per class, placed before the existing `isDateTime()` method.
+---
