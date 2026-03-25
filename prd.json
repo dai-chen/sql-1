@@ -110,7 +110,7 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "This is the highest-risk story. The OpenSearch adapter touches pushdown, serialization, and data flow. Fix one file at a time."
     },
     {

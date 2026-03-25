@@ -82,9 +82,11 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.ArraySqlType;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.NlsString;
 import org.apache.calcite.util.RangeSets;
 import org.apache.calcite.util.Sarg;
+import org.apache.calcite.util.TimestampString;
 import org.apache.lucene.search.join.ScoreMode;
 import org.opensearch.index.mapper.DateFieldMapper;
 import org.opensearch.index.query.BoolQueryBuilder;
@@ -96,8 +98,6 @@ import org.opensearch.script.Script;
 import org.opensearch.search.sort.ScriptSortBuilder;
 import org.opensearch.sql.calcite.plan.OpenSearchConstants;
 import org.opensearch.sql.calcite.type.ExprIPType;
-import org.opensearch.sql.calcite.type.ExprSqlType;
-import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
 import org.opensearch.sql.calcite.utils.PlanUtils;
 import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.data.model.ExprIpValue;
@@ -1836,8 +1836,10 @@ public class PredicateAnalyzer {
         return doubleValue();
       } else if (isBoolean()) {
         return booleanValue();
-      } else if (isTimestamp() || isDate()) {
-        return timestampValueForPushDown(RexLiteral.stringValue(literal));
+      } else if (isTimestamp()) {
+        return timestampValueForPushDown(literal.getValueAs(TimestampString.class).toString());
+      } else if (isDate()) {
+        return timestampValueForPushDown(literal.getValueAs(DateString.class).toString());
       } else if (isString()) {
         return RexLiteral.stringValue(literal);
       } else if (isIp()) {
@@ -1872,17 +1874,11 @@ public class PredicateAnalyzer {
     }
 
     public boolean isTimestamp() {
-      if (literal.getType() instanceof ExprSqlType exprSqlType) {
-        return exprSqlType.getUdt() == ExprUDT.EXPR_TIMESTAMP;
-      }
-      return false;
+      return literal.getType().getSqlTypeName() == SqlTypeName.TIMESTAMP;
     }
 
     public boolean isDate() {
-      if (literal.getType() instanceof ExprSqlType exprSqlType) {
-        return exprSqlType.getUdt() == ExprUDT.EXPR_DATE;
-      }
-      return false;
+      return literal.getType().getSqlTypeName() == SqlTypeName.DATE;
     }
 
     public boolean isIp() {

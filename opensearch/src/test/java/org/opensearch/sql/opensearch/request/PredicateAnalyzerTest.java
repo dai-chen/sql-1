@@ -31,6 +31,7 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Holder;
 import org.apache.calcite.util.Sarg;
+import org.apache.calcite.util.TimestampString;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.opensearch.index.query.BoolQueryBuilder;
@@ -49,7 +50,6 @@ import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.index.query.TermsQueryBuilder;
 import org.opensearch.index.query.WildcardQueryBuilder;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
-import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
 import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.expression.function.BuiltinFunctionName;
@@ -77,14 +77,14 @@ public class PredicateAnalyzerTest {
       builder.makeInputRef(typeFactory.createSqlType(SqlTypeName.INTEGER), 0);
   final RexInputRef field2 =
       builder.makeInputRef(typeFactory.createSqlType(SqlTypeName.VARCHAR), 1);
-  final RexInputRef field4 = builder.makeInputRef(typeFactory.createUDT(ExprUDT.EXPR_TIMESTAMP), 3);
+  final RexInputRef field4 =
+      builder.makeInputRef(typeFactory.createSqlType(SqlTypeName.TIMESTAMP), 3);
   final RexInputRef field5 =
       builder.makeInputRef(typeFactory.createSqlType(SqlTypeName.BOOLEAN), 4);
   final RexLiteral numericLiteral = builder.makeExactLiteral(new BigDecimal(12));
   final RexLiteral stringLiteral = builder.makeLiteral("Hi");
   final RexNode dateTimeLiteral =
-      builder.makeLiteral(
-          "1987-02-03 04:34:56", typeFactory.createUDT(ExprUDT.EXPR_TIMESTAMP), true);
+      builder.makeTimestampLiteral(new TimestampString("1987-02-03 04:34:56"), 3);
   final RexNode aliasedField2 =
       builder.makeCall(
           SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR, builder.makeLiteral("field"), field2);

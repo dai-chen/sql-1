@@ -22,9 +22,9 @@ import org.apache.calcite.sql.type.CompositeOperandTypeChecker;
 import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.SqlReturnTypeInference;
 import org.apache.calcite.sql.type.SqlTypeFamily;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.util.BuiltInMethod;
-import org.opensearch.sql.calcite.type.ExprSqlType;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.data.model.ExprValueUtils;
@@ -95,22 +95,27 @@ public class SpanFunction extends ImplementorUDF {
                   Expressions.call(BuiltInMethod.FLOOR.method, Expressions.divide(field, interval)),
                   interval);
         };
-      } else if (fieldType instanceof ExprSqlType exprSqlType) {
-        // TODO: pass in constant arguments when constructing
+      } else if (SqlTypeName.DATETIME_TYPES.contains(fieldType.getSqlTypeName())) {
         String methodName =
-            switch (exprSqlType.getUdt()) {
-              case EXPR_DATE -> "evalDate";
-              case EXPR_TIME -> "evalTime";
-              case EXPR_TIMESTAMP -> "evalTimestamp";
+            switch (fieldType.getSqlTypeName()) {
+              case DATE -> "evalDate";
+              case TIME -> "evalTime";
+              case TIMESTAMP -> "evalTimestamp";
               default ->
                   throw new IllegalArgumentException(
-                      String.format("Unsupported expr type: %s", exprSqlType.getExprType()));
+                      String.format("Unsupported datetime type: %s", fieldType.getSqlTypeName()));
+            };
+        Class<?> valueClass =
+            switch (fieldType.getSqlTypeName()) {
+              case DATE, TIME -> int.class;
+              case TIMESTAMP -> long.class;
+              default -> throw new IllegalArgumentException("unreachable");
             };
         ScalarFunctionImpl function =
             (ScalarFunctionImpl)
                 ScalarFunctionImpl.create(
                     Types.lookupMethod(
-                        SpanFunction.class, methodName, String.class, int.class, String.class));
+                        SpanFunction.class, methodName, valueClass, int.class, String.class));
         return function.getImplementor().implement(translator, call, RexImpTable.NullAs.NULL);
       }
       throw new IllegalArgumentException(
@@ -122,7 +127,7 @@ public class SpanFunction extends ImplementorUDF {
 
   @Strict
   public static Object evalDate(
-      @Parameter(name = "value") String value,
+      @Parameter(name = "value") int value,
       @Parameter(name = "interval") int interval,
       @Parameter(name = "unit") String unit) {
     ExprValue exprInterval = ExprValueUtils.fromObjectValue(interval, ExprCoreType.INTEGER);
@@ -133,7 +138,7 @@ public class SpanFunction extends ImplementorUDF {
 
   @Strict
   public static Object evalTime(
-      @Parameter(name = "value") String value,
+      @Parameter(name = "value") int value,
       @Parameter(name = "interval") int interval,
       @Parameter(name = "unit") String unit) {
     ExprValue exprInterval = ExprValueUtils.fromObjectValue(interval, ExprCoreType.INTEGER);
@@ -144,7 +149,7 @@ public class SpanFunction extends ImplementorUDF {
 
   @Strict
   public static Object evalTimestamp(
-      @Parameter(name = "value") String value,
+      @Parameter(name = "value") long value,
       @Parameter(name = "interval") int interval,
       @Parameter(name = "unit") String unit) {
     ExprValue exprInterval = ExprValueUtils.fromObjectValue(interval, ExprCoreType.INTEGER);

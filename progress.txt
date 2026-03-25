@@ -80,3 +80,27 @@
   - The real impact will surface in later stories (US-007 OpenSearch adapter, US-011 test fixes) when code that previously received String values from `valueForCalcite()` now receives int/long.
   - The change was minimal — just adding one `valueForCalcite()` override per class, placed before the existing `isDateTime()` method.
 ---
+
+
+## 2026-03-25T03:52 - US-007
+- Fixed OpenSearch adapter to work with standard Calcite datetime types instead of UDTs:
+  - **PredicateAnalyzer**: Changed `isTimestamp()` and `isDate()` from `ExprUDT` checks to `SqlTypeName` checks. Fixed `LiteralExpression.value()` to use `literal.getValueAs(TimestampString.class).toString()` and `literal.getValueAs(DateString.class).toString()` instead of `RexLiteral.stringValue()` which doesn't work for standard TIMESTAMP/DATE literals.
+  - **SpanFunction**: Changed dispatch from `ExprSqlType`/`ExprUDT` switch to `SqlTypeName` switch. Changed eval method signatures from `String` to `int`/`long` to match native Calcite datetime representations. Updated `lookupMethod` calls accordingly.
+  - **WidthBucketFunction**: Changed `dateRelatedType()` from `ExprUDT` check to `SqlTypeName.DATETIME_TYPES.contains()`.
+  - **ExtendedRelJson**: No changes needed — datetime UDTs won't be serialized anymore (standard types serialize natively), IP UDT path still works.
+  - **OpenSearchIndexEnumerator**: No changes needed — just calls `valueForCalcite()` which was already fixed in US-005.
+  - **AggregateAnalyzer**: No changes needed — no UDT references.
+  - **PredicateAnalyzerTest**: Changed `field4` and `dateTimeLiteral` from UDT-based to standard TIMESTAMP type using `makeTimestampLiteral(TimestampString, precision)`.
+- Files changed:
+  - `opensearch/src/main/java/org/opensearch/sql/opensearch/request/PredicateAnalyzer.java`
+  - `opensearch/src/test/java/org/opensearch/sql/opensearch/request/PredicateAnalyzerTest.java`
+  - `core/src/main/java/org/opensearch/sql/expression/function/udf/SpanFunction.java`
+  - `core/src/main/java/org/opensearch/sql/expression/function/udf/binning/WidthBucketFunction.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - `RexLiteral.stringValue()` does NOT work for standard Calcite TIMESTAMP/DATE literals — it throws `ClassCastException` (TimestampString → NlsString) or `AssertionError`. Use `literal.getValueAs(TimestampString.class).toString()` instead.
+  - `RexLiteral.getValueAs(String.class)` also doesn't work for TIMESTAMP literals in Calcite 1.41.0 — throws `AssertionError: cannot convert TIMESTAMP literal to class java.lang.String`.
+  - `RexBuilder.makeLiteral(String, TIMESTAMP, true)` fails with `ClassCastException: String cannot be cast to Long` — standard TIMESTAMP expects Long (epoch millis). Use `makeTimestampLiteral(TimestampString, precision)` instead.
+  - SpanFunction eval methods now take `int` (DATE: epoch days, TIME: millis of day) and `long` (TIMESTAMP: epoch millis) instead of `String`. The `fromObjectValue` method (US-004) handles these native types.
+  - The `ExpressionNotAnalyzableException` catch block in `analyzeExpression` swallows the original exception when `ScriptQueryExpression` also fails — makes debugging hard. The original exception `e` is lost.
+---
