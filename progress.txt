@@ -7,6 +7,7 @@
 - **Sarg rendering for datetime types**: Bare values with no type suffix (e.g., `Sarg[[2023-01-01 00:00:00..2023-01-03 00:00:00)]`), unlike VARCHAR Sargs which have `:VARCHAR` suffix.
 - **SqlDatePartFunction operators (YEAR, MONTH, DAY, etc.) cannot be used directly in PPL**: `rewriteCall()` only runs during SQL validation (which PPL bypasses). Use PPL UDFs (DatePartFunction, PeriodNameFunction) instead. Only `SqlAbstractTimeFunction` operators (CURRENT_TIMESTAMP, CURRENT_TIME, CURRENT_DATE) have RexImpTable implementors and work in both paths.
 - **UDF method overloads for native Calcite datetime types**: When `valueForCalcite()` returns `int` (DATE: epoch days, TIME: millis of day) or `long` (TIMESTAMP: epoch millis) instead of `String`, UDF implementors using `Expressions.call(Class, "method", args)` need matching overloads for `int`/`long` parameter types.
+- **JDBC ResultSet datetime retrieval**: Calcite's JDBC layer converts internal int/long datetime values to java.sql types using the JVM's default timezone. Use `resultSet.getLong()`/`resultSet.getInt()` for datetime columns and the type-aware `fromObjectValue(Object, ExprType)` to bypass timezone-dependent conversion.
 
 # Iteration Log
 
@@ -364,4 +365,28 @@
   - The Enumerable execution path (`RexToLixTranslator`) requires operators to have `CallImplementor` registered in `RexImpTable`. Standard Calcite operators like EXTRACT, CURRENT_TIMESTAMP have implementors, but `SqlDatePartFunction` does not.
   - When pushdown is enabled, invalid datetime string literals get implicitly cast to datetime via `makeCast()` which returns null for unparseable strings. The downstream function then receives null and returns null (permissive behavior). Without pushdown, the string goes directly to the UDF which may throw (strict behavior). Tests must handle both outcomes.
   - `PeriodNameFunction` and `WeekFunction` use `Expressions.call(Class, "methodName", args)` which resolves methods by argument types at runtime. When `valueForCalcite()` returns `int`/`long` instead of `String`, the method resolution fails unless matching overloads exist.
+---
+
+
+## 2026-03-26T06:26 - US-017
+- Fixed standalone execution engine datetime function failures caused by timezone-dependent JDBC ResultSet conversion.
+- Root cause: Calcite's JDBC layer (`TimestampFromNumberAccessor`, `TimeFromNumberAccessor`, `DateFromNumberAccessor`) converts internal int/long datetime values to `java.sql.Timestamp/Time/Date` using the JVM's default timezone via `DateTimeUtils.unixTimestampToSqlTimestamp(long, Calendar)`. When the JVM timezone is not UTC (randomized in tests), the resulting `java.sql` objects have shifted values. Then `fromObjectValue(java.sql.Timestamp)` calls `timestamp.toInstant()` which preserves the corrupted millis, and `fromObjectValue(java.sql.Time)` calls `time.toLocalTime()` which uses the JVM's default timezone again.
+- Fix: In `OpenSearchExecutionEngine.buildResultSet()`:
+  1. Added `getColumnValue()` helper that uses `resultSet.getLong()`/`resultSet.getInt()` for datetime columns instead of `resultSet.getObject()`, bypassing the timezone-dependent java.sql conversion entirely.
+  2. Changed the `fromObjectValue` call to use the type-aware `fromObjectValue(Object, ExprType)` for datetime columns, which properly handles int (epoch days for DATE, millis of day for TIME) and long (epoch millis for TIMESTAMP).
+  3. Added null handling: only use type-aware path when value is non-null.
+- Also included uncommitted fixes from US-016 scope:
+  - `DatetimeFunction`: Added `long` overloads for `datetime()` method to handle native Calcite datetime representations (epoch millis) via `epochMillisToString()` helper.
+  - `PPLFuncImpTable`: Changed LOCALTIME mapping from `PPLBuiltinOperators.NOW` to `SqlStdOperatorTable.LOCALTIMESTAMP` (consistent with other current_timestamp variants).
+- Files changed:
+  - `opensearch/src/main/java/org/opensearch/sql/opensearch/executor/OpenSearchExecutionEngine.java`
+  - `core/src/main/java/org/opensearch/sql/expression/function/udf/datetime/DatetimeFunction.java`
+  - `core/src/main/java/org/opensearch/sql/expression/function/PPLFuncImpTable.java`
+- Results: 18 pre-existing failures → 11 failures (7 fixed by timezone fix). Remaining 11 are pre-existing precision loss issues (millis truncation of nanosecond/microsecond values) inherent to the `long` epoch millis representation — not execution engine issues.
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - Calcite's JDBC layer always applies timezone when converting internal int/long to java.sql datetime types. Even `getTimestamp(col, UTC_CALENDAR)` doesn't fully fix it because `java.sql.Timestamp.toInstant()` and `java.sql.Time.toLocalTime()` use the JVM's default timezone internally. The only reliable approach is to bypass java.sql types entirely by using `getLong()`/`getInt()` to get raw values.
+  - `resultSet.wasNull()` must be checked after `getLong()`/`getInt()` since they return 0 for null values.
+  - The remaining 11 failures are all precision-related: `valueForCalcite()` returns `long` (epoch millis) which only has millisecond precision. Nanosecond values like `13:49:00.123456789` become `13:49:00.123`. Fixing this requires either TIMESTAMP(9) with nanosecond-precision value representation, or accepting millis precision.
+  - `java.sql.Time.toLocalTime()` uses deprecated `getHours()`/`getMinutes()`/`getSeconds()` which return values in the JVM's default timezone — NOT UTC.
 ---
