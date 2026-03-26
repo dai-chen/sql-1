@@ -14,6 +14,11 @@
 - Jackson (ObjectMapper, databind) is available transitively in cli via cli → api → ppl → core — no explicit dependency needed
 - Jackson deserializes JSON integers as Integer or Long — cast Long to int via .intValue() when mapping to SqlTypeName.INTEGER
 - hr.json dataset: employees (id, name, age, department, salary) × 4 rows; departments (id, name, budget) × 3 rows
+- Query execution flow: UnifiedQueryContext.builder().language(QueryType).catalog(name, schema).defaultNamespace(name).build() → new UnifiedQueryPlanner(ctx).plan(query) → new UnifiedQueryCompiler(ctx).compile(plan) → stmt.executeQuery()
+- SyntaxCheckException is at org.opensearch.sql.common.antlr.SyntaxCheckException — catch it for user-friendly syntax error messages
+- UnifiedQueryContext is AutoCloseable — always close before rebuilding or on exit
+- For testing CLI classes that need real query execution, use SampleDataLoader.loadFromClasspath("data/hr.json") to get tables, then construct the context/planner/compiler directly
+- Package-private methods (loop, dispatch, prompt) enable unit testing of REPL logic without a real JLine terminal
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -73,4 +78,43 @@
   - ASCII table format: "| col1 | col2 |" header, "+-....-+-....-+" separator, same format for data rows
   - Mockito's when().thenReturn(val1, val2, ...) varargs works well for simulating multiple rs.next()/rs.getObject() calls
   - ByteArrayOutputStream + PrintStream is the standard pattern for capturing output in tests
+---
+
+## 2026-03-26T23:45 - US-005
+- Implemented QueryRepl.java — JLine3-based interactive REPL with meta-commands and query execution
+- Meta-commands: .quit/.exit, .help, .language sql|ppl, .tables, .schema <table>, .load <path>
+- Query execution: plan() → compile() → executeQuery() → ResultSetFormatter pipeline
+- Error handling: SyntaxCheckException shows "Syntax error: ...", other exceptions show cause message
+- Ctrl+C continues loop, Ctrl+D exits, .quit/.exit throws EndOfFileException to exit loop
+- Created QueryReplTest with 13 tests covering all meta-commands, query execution, and error cases
+- Files changed:
+  - NEW: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/QueryReplTest.java
+- **Learnings for future iterations:**
+  - QueryRepl exposes loop(LineReader) and dispatch(String) as package-private for unit testing without a real terminal
+  - rebuildContext() closes old context before creating new one — called on construction, language switch, and data load
+  - UnifiedQueryContext is AutoCloseable — must close on REPL exit and before rebuilding
+  - AbstractSchema anonymous class wrapping the mutable tables map allows .load to swap data at runtime
+  - .quit/.exit throw EndOfFileException (JLine3 convention) to break the loop
+  - prompt() returns "ppl> " or "sql> " based on current language
+  - Default catalog name "catalog" — tables are referenced as catalog.tablename in queries
+  - JavaTypeFactoryImpl() needed for getRowType() calls on Table instances (for .tables and .schema commands)
+---
+
+## 2026-03-26T23:55 - US-006
+- Implemented Main.java with PicoCLI @Command, Callable<Integer> interface
+- Added @Option flags: --data/-d (JSON file path), --language/-l (sql|ppl, default ppl), --execute/-e (single query mode), --help/-h (via mixinStandardHelpOptions)
+- Non-interactive mode (-e): loads data, dispatches query via QueryRepl, exits 0 on success / 1 on error
+- Interactive mode: prints welcome banner with table names and row counts, enters QueryRepl.run() loop
+- Row counting via ScannableTable.scan(null).enumerator() iteration
+- Created MainTest with 4 tests: testNonInteractivePpl, testNonInteractiveSql, testNonInteractiveBadQuery, testHelpFlag
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/Main.java (full rewrite with PicoCLI)
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/MainTest.java
+- **Learnings for future iterations:**
+  - PicoCLI mixinStandardHelpOptions = true adds --help and --version automatically
+  - System.out/System.err capture in tests: save originals, set ByteArrayOutputStream wrappers in @Before, restore in @After
+  - CommandLine(new Main()).execute(args) returns exit code directly — good for test assertions
+  - ScannableTable.scan(null) works for SimpleTable (DataContext not needed) — use enumerator() to count rows
+  - QueryRepl.dispatch() is package-private but accessible from MainTest in same package — useful for non-interactive mode
 ---
