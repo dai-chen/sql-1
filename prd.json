@@ -1,0 +1,179 @@
+{
+  "project": "Unified Query CLI",
+  "branchName": "poc/unified-query-cli",
+  "description": "Add a JLine3-based CLI playground to the unified query library so users can try SQL/PPL queries against example data instantly. The CLI calls UnifiedQueryPlanner/UnifiedQueryCompiler directly, supports language switching, sample data loading from JSON, tab completion, syntax highlighting, and ASCII table output.",
+  "buildCommand": "./gradlew :api:build :cli:build",
+  "testCommand": "./gradlew :api:test :cli:test",
+  "verifyCommand": "",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Promote SimpleTable to api main source set",
+      "description": "As a unified query API consumer, I want SimpleTable available as a public class in the api module's main source set so that I can create in-memory tables without depending on testFixtures.",
+      "acceptanceCriteria": [
+        "SimpleTable.java exists at api/src/main/java/org/opensearch/sql/api/SimpleTable.java as a public class",
+        "SimpleTable has the same @Builder API: .col(name, SqlTypeName), .row(Object[]), .build()",
+        "SimpleTable implements ScannableTable with scan(), getRowType(), getStatistic(), getJdbcTableType()",
+        "UnifiedQueryTestBase in testFixtures imports and uses the promoted SimpleTable (no duplication)",
+        "Existing api module tests pass without modification",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Create cli Gradle module with dependencies",
+      "description": "As a developer, I want a new cli/ Gradle module registered in the project so that CLI code has a proper build home with JLine3 and PicoCLI dependencies.",
+      "acceptanceCriteria": [
+        "settings.gradle includes 'cli'",
+        "cli/build.gradle exists with plugins: java-library, io.freefair.lombok, jacoco, com.diffplug.spotless, application",
+        "cli/build.gradle has mainClass set to org.opensearch.sql.cli.Main",
+        "cli/build.gradle depends on project(':api'), org.jline:jline:3.28.0, info.picocli:picocli:4.7.6",
+        "cli/build.gradle has spotless config matching api/build.gradle",
+        "A minimal Main.java exists at cli/src/main/java/org/opensearch/sql/cli/Main.java with a main method that prints 'OpenSearch Unified Query Shell' and exits",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Implement SampleDataLoader",
+      "description": "As a CLI user, I want to load sample data from a JSON file where each top-level key becomes a table so that I can query example data immediately.",
+      "acceptanceCriteria": [
+        "SampleDataLoader.java exists at cli/src/main/java/org/opensearch/sql/cli/SampleDataLoader.java",
+        "SampleDataLoader.load(InputStream) returns Map<String, Table> where keys are table names",
+        "JSON format: top-level object with keys mapping to arrays of objects, each object is a row",
+        "Type inference from first row: JSON integer->INTEGER, float->DOUBLE, string->VARCHAR, boolean->BOOLEAN, null->VARCHAR",
+        "Each table is a SimpleTable instance with inferred schema and all rows",
+        "SampleDataLoader.loadFromClasspath(String resourcePath) loads from classpath resources",
+        "Default dataset hr.json exists at cli/src/main/resources/data/hr.json with employees (4+ rows) and departments (3+ rows) tables",
+        "Example dataset cli/examples/hr.json exists with same content",
+        "Unit test SampleDataLoaderTest verifies loading hr.json produces correct table names, column types, and row counts",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Use Jackson for JSON parsing (already available transitively via Calcite). Nested objects/arrays: skip column and log warning."
+    },
+    {
+      "id": "US-004",
+      "title": "Implement ResultSetFormatter",
+      "description": "As a CLI user, I want query results displayed as a formatted ASCII table so that I can read the output easily.",
+      "acceptanceCriteria": [
+        "ResultSetFormatter.java exists at cli/src/main/java/org/opensearch/sql/cli/ResultSetFormatter.java",
+        "ResultSetFormatter.format(ResultSet, PrintStream) prints an ASCII table with column headers, separator lines, data rows, and row count",
+        "Column widths are computed from max of header length and data length",
+        "NULL values display as 'NULL'",
+        "Row count line shows 'N row(s) returned'",
+        "Unit test ResultSetFormatterTest verifies formatted output with mock ResultSet",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Follow the iteration pattern from ResultSetAssertion.ResultSetVerifier in api testFixtures."
+    },
+    {
+      "id": "US-005",
+      "title": "Implement QueryRepl core loop with meta-commands",
+      "description": "As a CLI user, I want an interactive REPL that accepts SQL/PPL queries and meta-commands so that I can explore data interactively.",
+      "acceptanceCriteria": [
+        "QueryRepl.java exists at cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java",
+        "QueryRepl creates UnifiedQueryContext, UnifiedQueryPlanner, UnifiedQueryCompiler from loaded tables and language",
+        "REPL loop reads input via JLine3 LineReader with persistent history file",
+        "Prompt shows current language: 'ppl> ' or 'sql> '",
+        "Meta-commands supported: .quit/.exit (exit), .help (print help), .language sql/.language ppl (switch language), .tables (list tables and columns), .schema <table> (show column details), .load <path> (load new JSON data file)",
+        ".language rebuilds context with new QueryType while retaining loaded tables",
+        ".load reads a new JSON file via SampleDataLoader and rebuilds context",
+        "Non-meta-command input is executed as query: plan() -> compile() -> executeQuery() -> ResultSetFormatter",
+        "Errors print a clean message (not stack trace): SyntaxCheckException shows syntax error, other exceptions show cause message",
+        "Ctrl+C interrupts current input, Ctrl+D exits REPL",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Use JLine3 TerminalBuilder.builder().system(true).build() and LineReaderBuilder. History file at ~/.opensearch-query-history. Default catalog name: 'catalog'."
+    },
+    {
+      "id": "US-006",
+      "title": "Implement Main entry point with PicoCLI",
+      "description": "As a CLI user, I want command-line flags to configure the CLI (data file, language, single query execution) so that I can use it in both interactive and non-interactive modes.",
+      "acceptanceCriteria": [
+        "Main.java at cli/src/main/java/org/opensearch/sql/cli/Main.java uses PicoCLI @Command annotation",
+        "Supports --data/-d <path> flag to specify JSON data file (default: built-in hr.json from classpath)",
+        "Supports --language/-l <sql|ppl> flag to set initial language (default: ppl)",
+        "Supports --execute/-e <query> flag for non-interactive single query execution",
+        "Supports --help/-h flag for usage info",
+        "Non-interactive mode (-e): loads data, executes query, prints result, exits with 0 on success or 1 on error",
+        "Interactive mode (no -e): prints welcome banner with loaded table names, enters QueryRepl loop",
+        "Welcome banner shows: shell name, loaded dataset info (table names and row counts)",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add tab completion for SQL/PPL keywords and table/column names",
+      "description": "As a CLI user, I want tab completion for keywords and table/column names so that I can type queries faster.",
+      "acceptanceCriteria": [
+        "QueryCompleter.java exists at cli/src/main/java/org/opensearch/sql/cli/QueryCompleter.java",
+        "SQL mode: completes SQL keywords (SELECT, FROM, WHERE, GROUP, BY, ORDER, JOIN, HAVING, LIMIT, AS, ON, AND, OR, NOT, IN, BETWEEN, LIKE, IS, NULL, etc.)",
+        "PPL mode: completes PPL keywords (source, where, fields, stats, sort, eval, head, tail, top, rare, dedup, rename, parse, grok, patterns, lookup, join, etc.)",
+        "Both modes: completes loaded table names and column names",
+        "Completer is wired into JLine3 LineReader via LineReaderBuilder.completer()",
+        "Completer updates when language switches or new data is loaded",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Use JLine3 AggregateCompleter with StringsCompleter for keywords and a custom Completer for table/column names from the loaded schema."
+    },
+    {
+      "id": "US-008",
+      "title": "Add syntax highlighting for SQL/PPL",
+      "description": "As a CLI user, I want syntax highlighting in the REPL so that I can visually distinguish keywords, strings, and numbers while typing.",
+      "acceptanceCriteria": [
+        "QueryHighlighter.java exists at cli/src/main/java/org/opensearch/sql/cli/QueryHighlighter.java implementing JLine3 Highlighter interface",
+        "SQL/PPL keywords are highlighted in bold or a distinct color",
+        "String literals (single-quoted) are highlighted in a different color",
+        "Numbers are highlighted",
+        "Meta-commands (. prefix) are highlighted",
+        "Highlighter is wired into JLine3 LineReader via LineReaderBuilder.highlighter()",
+        "Highlighter updates keyword set when language switches",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Implement JLine3 Highlighter.highlight(LineReader, String) returning AttributedString. Use AttributedStringBuilder with AttributedStyle for coloring. Borrow keyword detection pattern from SQLLine's SqlLineHighlighter."
+    },
+    {
+      "id": "US-009",
+      "title": "Add ecommerce example dataset and end-to-end verification",
+      "description": "As a CLI user, I want a richer example dataset for JOIN demos and I want confidence the full flow works end-to-end.",
+      "acceptanceCriteria": [
+        "cli/examples/ecommerce.json exists with orders (5+ rows), products (5+ rows), customers (3+ rows) tables",
+        "Non-interactive PPL works: ./gradlew :cli:run --args=\"-e 'source = catalog.employees | where age > 30'\" prints correct ASCII table",
+        "Non-interactive SQL works: ./gradlew :cli:run --args=\"-l sql -e 'SELECT * FROM catalog.employees WHERE age > 30'\" prints correct ASCII table",
+        "Custom data file works: ./gradlew :cli:run --args=\"-d cli/examples/ecommerce.json -l sql -e 'SELECT * FROM catalog.customers'\" prints correct ASCII table",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "This is the final verification story. Fix any integration issues discovered during end-to-end testing."
+    }
+  ]
+}
