@@ -5,6 +5,10 @@
 
 package org.opensearch.sql.expression.function.udf.datetime;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import org.apache.calcite.adapter.enumerable.NotNullImplementor;
 import org.apache.calcite.adapter.enumerable.NullPolicy;
@@ -76,6 +80,19 @@ public class DatetimeFunction extends ImplementorUDF {
       ExprValue datetimeExpr =
           DateTimeFunctions.exprDateTime(properties, timestampExpr, new ExprStringValue(timezone));
       return (long) datetimeExpr.valueForCalcite();
+    }
+
+    public static long datetime(FunctionProperties properties, long timestamp) {
+      return datetime(properties, epochMillisToString(timestamp));
+    }
+
+    public static long datetime(FunctionProperties properties, long timestamp, String timezone) {
+      return datetime(properties, epochMillisToString(timestamp), timezone);
+    }
+
+    private static String epochMillisToString(long epochMillis) {
+      return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneOffset.UTC)
+          .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
   }
 }

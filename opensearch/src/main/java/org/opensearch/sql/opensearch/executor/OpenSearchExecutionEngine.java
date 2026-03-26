@@ -229,6 +229,32 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
   }
 
   /**
+   * Retrieves a column value from the ResultSet, using raw int/long for datetime types to avoid
+   * timezone-dependent conversion. Calcite's JDBC layer internally stores datetime values as
+   * int/long (epoch-based) but converts them to java.sql types using the JVM's default timezone.
+   * Retrieving the raw numeric values and using the type-aware fromObjectValue preserves UTC.
+   */
+  private static Object getColumnValue(ResultSet resultSet, int columnIndex, RelDataType type)
+      throws SQLException {
+    SqlTypeName typeName = type.getSqlTypeName();
+    switch (typeName) {
+      case TIMESTAMP:
+      case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+        long tsVal = resultSet.getLong(columnIndex);
+        return resultSet.wasNull() ? null : tsVal;
+      case DATE:
+        int dateVal = resultSet.getInt(columnIndex);
+        return resultSet.wasNull() ? null : dateVal;
+      case TIME:
+      case TIME_WITH_LOCAL_TIME_ZONE:
+        int timeVal = resultSet.getInt(columnIndex);
+        return resultSet.wasNull() ? null : timeVal;
+      default:
+        return resultSet.getObject(columnIndex);
+    }
+  }
+
+  /**
    * Process values recursively, handling geo points, nested maps, structs and arrays. When a {@link
    * RelDataType} is provided, struct values (StructImpl) are converted to Maps keyed by field
    * names, preserving field-name information in the JSON output.
@@ -292,9 +318,14 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       // Loop through each column
       for (int i = 1; i <= columnCount; i++) {
         String columnName = metaData.getColumnName(i);
-        Object value = resultSet.getObject(columnName);
-        Object converted = processValue(value, fieldTypes.get(i - 1));
-        ExprValue exprValue = ExprValueUtils.fromObjectValue(converted);
+        RelDataType fieldType = fieldTypes.get(i - 1);
+        Object value = getColumnValue(resultSet, i, fieldType);
+        Object converted = processValue(value, fieldType);
+        ExprType exprType = OpenSearchTypeFactory.convertRelDataTypeToExprType(fieldType);
+        ExprValue exprValue =
+            (converted != null && SqlTypeName.DATETIME_TYPES.contains(fieldType.getSqlTypeName()))
+                ? ExprValueUtils.fromObjectValue(converted, exprType)
+                : ExprValueUtils.fromObjectValue(converted);
         row.put(columnName, exprValue);
       }
       values.add(ExprTupleValue.fromExprValueMap(row));

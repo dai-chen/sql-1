@@ -950,7 +950,7 @@ public class PPLFuncImpTable {
       registerOperator(CURRENT_TIMESTAMP, SqlStdOperatorTable.CURRENT_TIMESTAMP);
       registerOperator(NOW, SqlStdOperatorTable.CURRENT_TIMESTAMP);
       registerOperator(LOCALTIMESTAMP, SqlStdOperatorTable.LOCALTIMESTAMP);
-      registerOperator(LOCALTIME, PPLBuiltinOperators.NOW);
+      registerOperator(LOCALTIME, SqlStdOperatorTable.LOCALTIMESTAMP);
       registerOperator(CURTIME, SqlStdOperatorTable.CURRENT_TIME);
       registerOperator(CURRENT_TIME, SqlStdOperatorTable.CURRENT_TIME);
       registerOperator(CURRENT_DATE, SqlStdOperatorTable.CURRENT_DATE);

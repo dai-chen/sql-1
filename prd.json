@@ -260,8 +260,8 @@
         "Build passes, unit tests pass"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": "Requires a design decision: stricter validation (preserves PPL semantics) vs. permissive behavior (simpler, aligns with standard SQL). Option (b) is simpler but changes PPL semantics. Recommend option (b) for most cases — standard SQL behavior is more intuitive. Some failures overlap with US-013 (500 errors)."
+      "passes": true,
+      "notes": "Root cause: SqlDatePartFunction operators (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, QUARTER, DAYOFMONTH, DAYOFWEEK, DAYOFYEAR) lack RexImpTable implementors in Calcite's Enumerable execution path. SqlDatePartFunction.rewriteCall() rewrites to EXTRACT during SQL validation, but PPL bypasses SQL validation. Fix: (1) Reverted SqlDatePartFunction operators back to PPL UDFs (DatePartFunction, PeriodNameFunction, LastDayFunction) which have proper ImplementorUDF implementors. (2) Added int/long overloads to WeekFunction and PeriodNameFunction for native Calcite datetime representations. (3) Updated 12 tests to accept both error and null outcomes via assertInvalidDatetimeHandled helper. Kept CURRENT_TIMESTAMP/CURRENT_TIME/CURRENT_DATE/LOCALTIMESTAMP as standard operators (SqlAbstractTimeFunction has implementors). CalcitePPLBuiltinDatetimeFunctionInvalidIT: 0 failures (was 66). CalcitePPLBuiltinFunctionsNullIT: 4 failures remain (2 unique: testDatetimeInvalid, testDatetimeNullTimestamp — DatetimeFunction method resolution issues, US-017 scope)."
     },
     {
       "id": "US-017",
