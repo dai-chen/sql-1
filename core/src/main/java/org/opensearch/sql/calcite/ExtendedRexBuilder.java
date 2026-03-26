@@ -173,6 +173,17 @@ public class ExtendedRexBuilder extends RexBuilder {
                 String.format(Locale.ROOT, "Cannot cast from %s to %s", argExprType, udt.name()));
       };
     }
+    // Use PPL UDFs for character-to-datetime CAST to support format-aware parsing with proper
+    // error messages. Standard Calcite CAST uses strict SQL literal format that doesn't handle
+    // all PPL-supported formats and loses sub-second precision.
+    else if (SqlTypeUtil.isCharacter(sourceType) && SqlTypeUtil.isDatetime(type)) {
+      return switch (sqlType) {
+        case DATE -> makeCall(type, PPLBuiltinOperators.DATE, List.of(exp));
+        case TIME -> makeCall(type, PPLBuiltinOperators.TIME, List.of(exp));
+        case TIMESTAMP -> makeCall(type, PPLBuiltinOperators.TIMESTAMP, List.of(exp));
+        default -> super.makeCast(pos, type, exp, matchNullability, safe, format);
+      };
+    }
     // Use a custom operator when casting floating point or decimal number to a character type.
     // This patch is necessary because in Calcite, 0.0F is cast to 0E0, decimal 0.x to x
     else if ((SqlTypeUtil.isApproximateNumeric(sourceType) || SqlTypeUtil.isDecimal(sourceType))
