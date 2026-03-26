@@ -1,0 +1,13 @@
+{
+  "employees": [
+    {"id": 1, "name": "Alice", "age": 25, "department": "Engineering", "salary": 85000.00},
+    {"id": 2, "name": "Bob", "age": 35, "department": "Sales", "salary": 72000.00},
+    {"id": 3, "name": "Charlie", "age": 45, "department": "Engineering", "salary": 110000.00},
+    {"id": 4, "name": "Diana", "age": 28, "department": "Marketing", "salary": 68000.00}
+  ],
+  "departments": [
+    {"id": 1, "name": "Engineering", "budget": 500000.00},
+    {"id": 2, "name": "Sales", "budget": 300000.00},
+    {"id": 3, "name": "Marketing", "budget": 250000.00}
+  ]
+}
