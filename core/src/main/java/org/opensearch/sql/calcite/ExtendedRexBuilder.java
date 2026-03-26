@@ -19,6 +19,9 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
+import org.apache.calcite.util.DateString;
+import org.apache.calcite.util.TimeString;
+import org.apache.calcite.util.TimestampString;
 import org.opensearch.sql.ast.expression.SpanUnit;
 import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
@@ -176,7 +179,28 @@ public class ExtendedRexBuilder extends RexBuilder {
     // Use PPL UDFs for character-to-datetime CAST to support format-aware parsing with proper
     // error messages. Standard Calcite CAST uses strict SQL literal format that doesn't handle
     // all PPL-supported formats and loses sub-second precision.
+    // For string literals, try to create proper datetime literals first to enable Sarg optimization
+    // (range pushdown). Fall back to UDF calls for non-literals or unparseable strings.
     else if (SqlTypeUtil.isCharacter(sourceType) && SqlTypeUtil.isDatetime(type)) {
+      if (exp instanceof RexLiteral) {
+        String strVal = RexLiteral.stringValue(exp);
+        if (strVal != null) {
+          try {
+            return switch (sqlType) {
+              case DATE -> makeDateLiteral(new DateString(strVal));
+              case TIME ->
+                  makeTimeLiteral(new TimeString(strVal), RelDataType.PRECISION_NOT_SPECIFIED);
+              case TIMESTAMP ->
+                  makeTimestampLiteral(
+                      new TimestampString(normalizeTimestamp(strVal)),
+                      RelDataType.PRECISION_NOT_SPECIFIED);
+              default -> super.makeCast(pos, type, exp, matchNullability, safe, format);
+            };
+          } catch (Exception e) {
+            // Fall through to UDF call for unparseable strings
+          }
+        }
+      }
       return switch (sqlType) {
         case DATE -> makeCall(type, PPLBuiltinOperators.DATE, List.of(exp));
         case TIME -> makeCall(type, PPLBuiltinOperators.TIME, List.of(exp));
@@ -192,5 +216,27 @@ public class ExtendedRexBuilder extends RexBuilder {
       return makeCall(type, PPLBuiltinOperators.NUMBER_TO_STRING, List.of(exp));
     }
     return super.makeCast(pos, type, exp, matchNullability, safe, format);
+  }
+
+  /**
+   * Normalize a timestamp string for Calcite's TimestampString constructor. Strips trailing zeros
+   * from fractional seconds (and the dot if all fractional digits are zero), because
+   * TimestampString rejects strings like "2018-11-09 00:00:00.000000000" after its own
+   * normalization leaves a trailing dot.
+   */
+  private static String normalizeTimestamp(String s) {
+    int dotIdx = s.indexOf('.');
+    if (dotIdx < 0) {
+      return s;
+    }
+    int end = s.length();
+    while (end > dotIdx + 1 && s.charAt(end - 1) == '0') {
+      end--;
+    }
+    // If only the dot remains, remove it too
+    if (end == dotIdx + 1) {
+      end = dotIdx;
+    }
+    return s.substring(0, end);
   }
 }
