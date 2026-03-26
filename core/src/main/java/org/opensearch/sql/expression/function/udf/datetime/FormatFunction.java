@@ -24,7 +24,6 @@ import org.opensearch.sql.calcite.utils.PPLReturnTypes;
 import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.data.model.ExprStringValue;
 import org.opensearch.sql.data.model.ExprValue;
-import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.expression.function.FunctionProperties;
@@ -74,12 +73,7 @@ public class FormatFunction extends ImplementorUDF {
       Expression functionProperties =
           Expressions.call(
               UserDefinedFunctionUtils.class, "restoreFunctionProperties", translator.getRoot());
-      Expression datetime =
-          Expressions.call(
-              ExprValueUtils.class,
-              "fromObjectValue",
-              translatedOperands.get(0),
-              Expressions.constant(type));
+      Expression datetime = UserDefinedFunctionUtils.toExprValue(translatedOperands.get(0), type);
       Expression format = Expressions.new_(ExprStringValue.class, translatedOperands.get(1));
 
       if (ExprCoreType.TIME.equals(functionType)) {

@@ -194,6 +194,88 @@
       "priority": 12,
       "passes": true,
       "notes": "Integration tests ran successfully (cluster spun up). 12 test classes had failures, ~250 total test failures documented in progress.txt. Major categories: (1) 500 errors from datetime functions on null/standard types, (2) plan assertion mismatches from UDT→standard type changes, (3) CAST precision loss, (4) standalone datetime function failures."
+    },
+    {
+      "id": "US-013",
+      "title": "Fix runtime 500 errors from standard Calcite datetime operators",
+      "description": "As a developer, I want to fix the ~150 runtime 500 Internal Server Error failures caused by standard Calcite datetime operators (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, WEEK, QUARTER, etc.) failing at execution time after UDT removal.",
+      "acceptanceCriteria": [
+        "Run a single failing test (e.g., CalcitePPLTpchIT) with --info to capture the full server-side stack trace and identify the exact failure point",
+        "Fix the execution path so standard Calcite operators correctly handle int/long datetime values through CalciteExpressionScript and/or the Enumerable execution path",
+        "CalcitePPLTpchIT: all 44 tests pass (was 23 failures)",
+        "CalcitePPLTpchPaginatingIT: all 22 tests pass (was 11 failures)",
+        "CalcitePPLAggregationIT: testStatsGroupByDate and testStatsCountOnFunctionsWithUDTArg pass (was 3 failures)",
+        "CalcitePPLAggregationPaginatingIT: 0 failures (was 2 failures)",
+        "CalcitePPLBasicIT: testDateBetween passes (was 2 failures)",
+        "CalcitePPLConditionBuiltinFunctionIT: testLatest and testEarliest pass (was 2 failures)",
+        "CalcitePPLBuiltinFunctionsNullIT: 500-error subset resolved (was 78 failures, some overlap with US-016)",
+        "Build passes, unit tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Highest priority — largest failure batch (~150 tests). Likely a single root cause in the value boundary: standard Calcite operators expect int/long datetime values but the execution path may not be fully wired. Key files: CalciteExpressionScript, OpenSearchIndexEnumerator, UserDefinedFunctionUtils (valueForCalcite). May share root cause with US-017 (standalone failures)."
+    },
+    {
+      "id": "US-014",
+      "title": "Fix CAST precision loss for datetime types",
+      "description": "As a developer, I want CAST(string AS DATE/TIME/TIMESTAMP) to work correctly — CAST to DATE should not return null, and CAST to TIMESTAMP/TIME should preserve sub-second precision.",
+      "acceptanceCriteria": [
+        "CAST('1984-04-12' AS DATE) returns '1984-04-12' instead of null",
+        "CAST('2023-10-01 12:00:00.123456' AS TIMESTAMP) preserves sub-second precision",
+        "CAST('12:30:45.123' AS TIME) preserves sub-second precision",
+        "CalcitePPLCastFunctionIT: all 42 tests pass (was 6 failures)",
+        "Implement format-aware datetime CAST in ExtendedRexBuilder.makeCast() or add custom CAST handling for datetime string parsing",
+        "Build passes, unit tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Standard Calcite CAST uses a fixed format that truncates fractional seconds and may fail for DATE parsing. May need custom CAST implementation or format-aware parsing in ExtendedRexBuilder.makeCast(). Only 6 failures but correctness-critical."
+    },
+    {
+      "id": "US-015",
+      "title": "Fix plan assertion mismatches from standard type rendering",
+      "description": "As a developer, I want Big5IT and ClickBenchIT plan assertion tests to pass after standard types render differently than UDTs in logical plan YAML.",
+      "acceptanceCriteria": [
+        "Update expected plan YAML files in integ-test/src/test/resources/ to match new standard type rendering",
+        "TIMESTAMP literals now render as `TIMESTAMP '...'` (SQL standard literal syntax) instead of `TIMESTAMP('...')` (UDF function call syntax)",
+        "SAFE_CAST renders instead of UDF calls for implicit type coercion",
+        "CalcitePPLBig5IT: all 54 tests pass (was 14 failures)",
+        "CalcitePPLClickBenchIT: 1 test passes (was 1 failure)",
+        "Build passes, unit tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Low risk — mostly updating expected plan strings. ~15 failures. Verify the new plan representations are semantically correct before updating expected files."
+    },
+    {
+      "id": "US-016",
+      "title": "Fix invalid input handling for standard datetime operators",
+      "description": "As a developer, I want to decide and implement a strategy for the ~30 test failures where standard Calcite operators accept inputs that UDFs previously rejected (DAYNAME, MONTHNAME, ADDTIME, SUBTIME, LAST_DAY, DATEDIFF, YEARWEEK, etc.).",
+      "acceptanceCriteria": [
+        "Investigate each failing test in CalcitePPLBuiltinDatetimeFunctionInvalidIT (90 tests, 68 failures) and CalcitePPLBuiltinFunctionsNullIT (142 tests, 78 failures — overlap with US-013 for 500 errors)",
+        "For tests expecting ResponseException that now pass silently: decide whether to (a) add input validation wrappers around standard operators, or (b) update tests to accept the more permissive behavior",
+        "Document the decision rationale in progress.txt",
+        "CalcitePPLBuiltinDatetimeFunctionInvalidIT: 0 failures (was 68 failures)",
+        "CalcitePPLBuiltinFunctionsNullIT: 0 failures (was 78 failures, after US-013 fixes 500 errors)",
+        "Build passes, unit tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Requires a design decision: stricter validation (preserves PPL semantics) vs. permissive behavior (simpler, aligns with standard SQL). Option (b) is simpler but changes PPL semantics. Recommend option (b) for most cases — standard SQL behavior is more intuitive. Some failures overlap with US-013 (500 errors)."
+    },
+    {
+      "id": "US-017",
+      "title": "Fix standalone execution engine datetime function failures",
+      "description": "As a developer, I want CalcitePPLDateTimeBuiltinFunctionIT (standalone, no OpenSearch) to pass — all 41 datetime function failures with IllegalStateException need to be resolved.",
+      "acceptanceCriteria": [
+        "Investigate the IllegalStateException root cause in the standalone Calcite execution engine (CalciteExpressionScript or Enumerable execution path)",
+        "Fix the standalone execution path to handle standard Calcite datetime types",
+        "CalcitePPLDateTimeBuiltinFunctionIT: all 51 tests pass (was 41 failures)",
+        "Build passes, unit tests pass"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "May share root cause with US-013 (runtime 500 errors). If US-013 fix resolves the execution path for standard datetime types, this may be partially or fully resolved. Tackle after US-013 to see how many failures remain."
     }
   ]
 }

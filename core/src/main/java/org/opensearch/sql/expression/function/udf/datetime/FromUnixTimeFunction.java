@@ -65,12 +65,12 @@ public class FromUnixTimeFunction extends ImplementorUDF {
       return Expressions.call(FromUnixTimeImplementor.class, "fromUnixTime", translatedOperands);
     }
 
-    public static String fromUnixTime(double unixTime) {
-      return (String) exprFromUnixTime(new ExprDoubleValue(unixTime)).valueForCalcite();
+    public static long fromUnixTime(double unixTime) {
+      return (long) exprFromUnixTime(new ExprDoubleValue(unixTime)).valueForCalcite();
     }
 
-    public static String fromUnixTime(BigDecimal unixTime) {
-      return (String) exprFromUnixTime(new ExprDoubleValue(unixTime)).valueForCalcite();
+    public static long fromUnixTime(BigDecimal unixTime) {
+      return (long) exprFromUnixTime(new ExprDoubleValue(unixTime)).valueForCalcite();
     }
 
     public static String fromUnixTime(double unixTime, String format) {

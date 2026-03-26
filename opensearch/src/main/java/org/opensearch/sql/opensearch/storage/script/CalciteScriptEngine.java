@@ -77,7 +77,6 @@ import org.opensearch.script.ScriptContext;
 import org.opensearch.script.ScriptEngine;
 import org.opensearch.script.StringSortScript;
 import org.opensearch.search.lookup.SourceLookup;
-import org.opensearch.sql.data.model.ExprTimestampValue;
 import org.opensearch.sql.opensearch.storage.script.aggregation.CalciteAggregationScriptFactory;
 import org.opensearch.sql.opensearch.storage.script.field.CalciteFieldScriptFactory;
 import org.opensearch.sql.opensearch.storage.script.filter.CalciteFilterScriptFactory;
@@ -228,10 +227,8 @@ public class CalciteScriptEngine implements ScriptEngine {
 
       Object value = docValue.get(0);
       if (value instanceof ChronoZonedDateTime) {
-        // We store timestamp as string in the current implementation with Calcite.
-        // And the string should have the format defined in ExprTimestampValue
-        // TODO: should we change to store timestamp as Instant in the future.
-        return new ExprTimestampValue(((ChronoZonedDateTime<?>) value).toInstant()).value();
+        // Standard Calcite TIMESTAMP is represented as long (epoch millis)
+        return ((ChronoZonedDateTime<?>) value).toInstant().toEpochMilli();
       }
       return value;
     }

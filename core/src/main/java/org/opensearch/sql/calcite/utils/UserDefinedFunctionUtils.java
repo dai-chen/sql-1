@@ -143,6 +143,20 @@ public class UserDefinedFunctionUtils {
   }
 
   /**
+   * Create a code-generation expression that calls {@code ExprValueUtils.fromObjectValue(Object,
+   * ExprType)} with proper boxing. Standard Calcite types use primitives (int for DATE/TIME, long
+   * for TIMESTAMP), so the operand must be boxed before passing to fromObjectValue(Object,
+   * ExprType) to avoid NoSuchMethodException at runtime.
+   */
+  public static Expression toExprValue(Expression operand, ExprType exprType) {
+    return Expressions.call(
+        ExprValueUtils.class,
+        "fromObjectValue",
+        Expressions.convert_(Expressions.box(operand), Object.class),
+        Expressions.constant(exprType));
+  }
+
+  /**
    * Convert java objects to ExprValue, so that the parameters fit the expr function signature. It
    * invokes ExprValueUtils.fromObjectValue to convert the java objects to ExprValue. Note that
    * date/time/timestamp strings will be converted to strings instead of ExprDateValue, etc.
@@ -170,20 +184,7 @@ public class UserDefinedFunctionUtils {
         types.stream().map(OpenSearchTypeFactory::convertRelDataTypeToExprType).toList();
     List<Expression> exprValues = new ArrayList<>();
     for (int i = 0; i < operands.size(); i++) {
-      // TODO a workaround of Apache Calcite bug in 1.41.0:
-      // If you call Expressions.convert_(expr, Number.class) or
-      // Expressions.convert_(expr, Object.class),
-      // you must change to Expressions.convert_(Expressions.box(expr), Number.class/Object.class).
-      // Because the codegen in Janino.UnitCompiler, "(Object) -1" will be mistakenly treated to
-      // "Object subtracting one" instead of "type casting on native one".
-      Expression operand = Expressions.convert_(Expressions.box(operands.get(i)), Object.class);
-      exprValues.add(
-          i,
-          Expressions.call(
-              ExprValueUtils.class,
-              "fromObjectValue",
-              operand,
-              Expressions.constant(exprTypes.get(i))));
+      exprValues.add(i, toExprValue(operands.get(i), exprTypes.get(i)));
     }
     return exprValues;
   }

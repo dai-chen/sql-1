@@ -31,7 +31,6 @@ import org.opensearch.sql.calcite.utils.datetime.DateTimeConversionUtils;
 import org.opensearch.sql.data.model.ExprDateValue;
 import org.opensearch.sql.data.model.ExprTimestampValue;
 import org.opensearch.sql.data.model.ExprValue;
-import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.expression.function.FunctionProperties;
 import org.opensearch.sql.expression.function.ImplementorUDF;
@@ -93,12 +92,8 @@ public class AddSubDateFunction extends ImplementorUDF {
       RelDataType temporalDeltaType = call.getOperands().get(1).getType();
 
       Expression base =
-          Expressions.call(
-              ExprValueUtils.class,
-              "fromObjectValue",
-              temporal,
-              Expressions.constant(
-                  OpenSearchTypeFactory.convertRelDataTypeToExprType(temporalType)));
+          UserDefinedFunctionUtils.toExprValue(
+              temporal, OpenSearchTypeFactory.convertRelDataTypeToExprType(temporalType));
 
       Expression properties =
           Expressions.call(
@@ -138,38 +133,36 @@ public class AddSubDateFunction extends ImplementorUDF {
       }
     }
 
-    public static String dateAddDaysOnDate(
-        FunctionProperties ignored, ExprValue datetime, long days) {
-      return (String) new ExprDateValue(datetime.dateValue().plusDays(days)).valueForCalcite();
+    public static int dateAddDaysOnDate(FunctionProperties ignored, ExprValue datetime, long days) {
+      return (int) new ExprDateValue(datetime.dateValue().plusDays(days)).valueForCalcite();
     }
 
-    public static String dateSubDaysOnDate(
-        FunctionProperties ignored, ExprValue datetime, long days) {
-      return (String) new ExprDateValue(datetime.dateValue().minusDays(days)).valueForCalcite();
+    public static int dateSubDaysOnDate(FunctionProperties ignored, ExprValue datetime, long days) {
+      return (int) new ExprDateValue(datetime.dateValue().minusDays(days)).valueForCalcite();
     }
 
-    public static String dateAddDaysOnTimestamp(
+    public static long dateAddDaysOnTimestamp(
         FunctionProperties properties, ExprValue datetime, long days) {
       var dt = extractTimestamp(datetime, properties).atZone(ZoneOffset.UTC).toLocalDateTime();
-      return (String) new ExprTimestampValue(dt.plusDays(days)).valueForCalcite();
+      return (long) new ExprTimestampValue(dt.plusDays(days)).valueForCalcite();
     }
 
-    public static String dateSubDaysOnTimestamp(
+    public static long dateSubDaysOnTimestamp(
         FunctionProperties properties, ExprValue datetime, long days) {
       var dt = extractTimestamp(datetime, properties).atZone(ZoneOffset.UTC).toLocalDateTime();
-      return (String) new ExprTimestampValue(dt.minusDays(days)).valueForCalcite();
+      return (long) new ExprTimestampValue(dt.minusDays(days)).valueForCalcite();
     }
 
-    public static String dateAddInterval(
+    public static long dateAddInterval(
         FunctionProperties properties, ExprValue datetime, TemporalAmount interval) {
       var dt = extractTimestamp(datetime, properties).atZone(ZoneOffset.UTC).toLocalDateTime();
-      return (String) new ExprTimestampValue(dt.plus(interval)).valueForCalcite();
+      return (long) new ExprTimestampValue(dt.plus(interval)).valueForCalcite();
     }
 
-    public static String dateSubInterval(
+    public static long dateSubInterval(
         FunctionProperties properties, ExprValue datetime, TemporalAmount interval) {
       var dt = extractTimestamp(datetime, properties).atZone(ZoneOffset.UTC).toLocalDateTime();
-      return (String) new ExprTimestampValue(dt.minus(interval)).valueForCalcite();
+      return (long) new ExprTimestampValue(dt.minus(interval)).valueForCalcite();
     }
   }
 }

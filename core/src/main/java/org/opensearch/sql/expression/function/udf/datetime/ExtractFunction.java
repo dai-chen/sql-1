@@ -19,7 +19,6 @@ import org.opensearch.sql.calcite.utils.PPLOperandTypes;
 import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.data.model.ExprStringValue;
 import org.opensearch.sql.data.model.ExprValue;
-import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.expression.datetime.DateTimeFunctions;
@@ -65,12 +64,7 @@ public class ExtractFunction extends ImplementorUDF {
           Expressions.call(
               UserDefinedFunctionUtils.class, "restoreFunctionProperties", translator.getRoot());
 
-      Expression exprDatetimeValue =
-          Expressions.call(
-              ExprValueUtils.class,
-              "fromObjectValue",
-              datetime,
-              Expressions.constant(datetimeType));
+      Expression exprDatetimeValue = UserDefinedFunctionUtils.toExprValue(datetime, datetimeType);
 
       Expression part = Expressions.new_(ExprStringValue.class, unit);
 

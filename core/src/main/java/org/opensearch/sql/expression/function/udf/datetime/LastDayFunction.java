@@ -74,13 +74,13 @@ public class LastDayFunction extends ImplementorUDF {
       return Expressions.call(LastDayImplementor.class, "lastDay", dateValue);
     }
 
-    public static String lastDayToday(FunctionProperties properties) {
-      return (String)
+    public static int lastDayToday(FunctionProperties properties) {
+      return (int)
           DateTimeFunctions.exprLastDayToday(properties.getQueryStartClock()).valueForCalcite();
     }
 
-    public static String lastDay(ExprValue dateValue) {
-      return (String) DateTimeFunctions.exprLastDay(dateValue).valueForCalcite();
+    public static int lastDay(ExprValue dateValue) {
+      return (int) DateTimeFunctions.exprLastDay(dateValue).valueForCalcite();
     }
   }
 }

@@ -64,19 +64,18 @@ public class DatetimeFunction extends ImplementorUDF {
       return Expressions.call(DatetimeImplementor.class, "datetime", operandsWithProperties);
     }
 
-    public static String datetime(FunctionProperties properties, String timestamp) {
+    public static long datetime(FunctionProperties properties, String timestamp) {
       ExprValue argTimestampExpr = new ExprStringValue(timestamp);
       ExprValue datetimeExpr;
       datetimeExpr = DateTimeFunctions.exprDateTimeNoTimezone(properties, argTimestampExpr);
-      return (String) datetimeExpr.valueForCalcite();
+      return (long) datetimeExpr.valueForCalcite();
     }
 
-    public static String datetime(
-        FunctionProperties properties, String timestamp, String timezone) {
+    public static long datetime(FunctionProperties properties, String timestamp, String timezone) {
       ExprValue timestampExpr = new ExprStringValue(timestamp);
       ExprValue datetimeExpr =
           DateTimeFunctions.exprDateTime(properties, timestampExpr, new ExprStringValue(timezone));
-      return (String) datetimeExpr.valueForCalcite();
+      return (long) datetimeExpr.valueForCalcite();
     }
   }
 }

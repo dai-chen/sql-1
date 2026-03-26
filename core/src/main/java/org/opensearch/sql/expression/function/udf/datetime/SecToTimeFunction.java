@@ -60,7 +60,7 @@ public class SecToTimeFunction extends ImplementorUDF {
           Expressions.convert_(Expressions.box(translatedOperands.getFirst()), Number.class));
     }
 
-    public static String secToTime(Number seconds) {
+    public static int secToTime(Number seconds) {
       ExprValue returnTimeValue;
       ExprValue transferredValue = ExprValueUtils.fromObjectValue(seconds);
       if (MathUtils.isIntegral(seconds)) {
@@ -68,7 +68,7 @@ public class SecToTimeFunction extends ImplementorUDF {
       } else {
         returnTimeValue = exprSecToTimeWithNanos(transferredValue);
       }
-      return (String) returnTimeValue.valueForCalcite();
+      return (int) returnTimeValue.valueForCalcite();
     }
   }
 }

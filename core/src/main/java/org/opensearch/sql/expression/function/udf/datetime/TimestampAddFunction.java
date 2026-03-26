@@ -24,7 +24,6 @@ import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.data.model.ExprLongValue;
 import org.opensearch.sql.data.model.ExprStringValue;
 import org.opensearch.sql.data.model.ExprValue;
-import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.expression.function.FunctionProperties;
@@ -66,11 +65,7 @@ public class TimestampAddFunction extends ImplementorUDF {
       ExprType timestampBaseType =
           OpenSearchTypeFactory.convertRelDataTypeToExprType(call.getOperands().get(2).getType());
       Expression timestampBase =
-          Expressions.call(
-              ExprValueUtils.class,
-              "fromObjectValue",
-              translatedOperands.get(2),
-              Expressions.constant(timestampBaseType));
+          UserDefinedFunctionUtils.toExprValue(translatedOperands.get(2), timestampBaseType);
       if (ExprCoreType.TIME.equals(timestampBaseType)) {
         return Expressions.call(
             TimestampAddImplementor.class,
@@ -89,12 +84,12 @@ public class TimestampAddFunction extends ImplementorUDF {
       }
     }
 
-    public static String timestampAddForTimeType(
+    public static long timestampAddForTimeType(
         String addUnit, long amount, ExprValue timestampBase, DataContext propertyContext) {
       FunctionProperties restored =
           UserDefinedFunctionUtils.restoreFunctionProperties(propertyContext);
 
-      return (String)
+      return (long)
           exprTimestampAddForTimeType(
                   restored.getQueryStartClock(),
                   new ExprStringValue(addUnit),
@@ -103,10 +98,10 @@ public class TimestampAddFunction extends ImplementorUDF {
               .valueForCalcite();
     }
 
-    public static String timestampAdd(String addUnit, long amount, ExprValue timestampBase) {
+    public static long timestampAdd(String addUnit, long amount, ExprValue timestampBase) {
       ExprValue returnValue =
           exprTimestampAdd(new ExprStringValue(addUnit), new ExprLongValue(amount), timestampBase);
-      return (String) returnValue.valueForCalcite();
+      return (long) returnValue.valueForCalcite();
     }
   }
 }

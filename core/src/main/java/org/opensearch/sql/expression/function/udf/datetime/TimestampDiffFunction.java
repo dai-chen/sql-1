@@ -22,7 +22,6 @@ import org.opensearch.sql.calcite.utils.PPLOperandTypes;
 import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.data.model.ExprStringValue;
 import org.opensearch.sql.data.model.ExprValue;
-import org.opensearch.sql.data.model.ExprValueUtils;
 import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.expression.function.FunctionProperties;
 import org.opensearch.sql.expression.function.ImplementorUDF;
@@ -75,17 +74,9 @@ public class TimestampDiffFunction extends ImplementorUDF {
               UserDefinedFunctionUtils.class, "restoreFunctionProperties", translator.getRoot());
       Expression unit = Expressions.new_(ExprStringValue.class, translatedOperands.getFirst());
       Expression start =
-          Expressions.call(
-              ExprValueUtils.class,
-              "fromObjectValue",
-              translatedOperands.get(startIndex),
-              Expressions.constant(startType));
+          UserDefinedFunctionUtils.toExprValue(translatedOperands.get(startIndex), startType);
       Expression end =
-          Expressions.call(
-              ExprValueUtils.class,
-              "fromObjectValue",
-              translatedOperands.get(endIndex),
-              Expressions.constant(endType));
+          UserDefinedFunctionUtils.toExprValue(translatedOperands.get(endIndex), endType);
 
       if (ExprCoreType.TIME.equals(startType) || ExprCoreType.TIME.equals(endType)) {
         return Expressions.call(
