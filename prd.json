@@ -228,8 +228,8 @@
         "Build passes, unit tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": "Standard Calcite CAST uses a fixed format that truncates fractional seconds and may fail for DATE parsing. May need custom CAST implementation or format-aware parsing in ExtendedRexBuilder.makeCast(). Only 6 failures but correctness-critical."
+      "passes": true,
+      "notes": "Fixed by dispatching character-to-datetime CAST to PPL UDFs (PPLBuiltinOperators.DATE/TIME/TIMESTAMP) in ExtendedRexBuilder.makeCast(). Standard Calcite CAST uses strict SQL literal format that doesn't handle PPL-supported formats and loses sub-second precision. The PPL UDFs handle format-aware parsing with proper error messages. Updated CalcitePPLMultisearchTest plan assertion to match new UDF rendering."
     },
     {
       "id": "US-015",

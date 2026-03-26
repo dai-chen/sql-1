@@ -291,3 +291,19 @@
   - `CurrentFunction` and `WeekFunction` were already fixed in US-009 — they had correct `(int)`/`(long)` casts.
   - Remaining TpchIT failures (BETWEEN type mismatch, YEAR translation) are separate issues not caused by the valueForCalcite type change.
 ---
+
+
+## 2026-03-26T03:16 - US-014
+- Fixed CAST precision loss for datetime types by dispatching character-to-datetime CAST to PPL UDFs in `ExtendedRexBuilder.makeCast()`.
+- Root cause: After US-006 removed UDT-based datetime dispatch from `makeCast()`, all CAST(string AS DATE/TIME/TIMESTAMP) fell through to `super.makeCast()` which uses standard Calcite CAST. Standard Calcite CAST uses strict SQL literal format parsing that: (1) returns null for `CAST('1984-04-12' AS DATE)`, (2) truncates sub-second precision for TIME/TIMESTAMP, (3) doesn't produce PPL-specific error messages for invalid formats.
+- Fix: Added a new condition in `makeCast()` — when `SqlTypeUtil.isCharacter(sourceType) && SqlTypeUtil.isDatetime(type)`, dispatch to `PPLBuiltinOperators.DATE/TIME/TIMESTAMP` UDFs which handle format-aware parsing with proper error messages.
+- Updated `CalcitePPLMultisearchTest.testMultisearchWithTimestampFiltering` plan assertions: implicit string-to-TIMESTAMP coercion now renders as `TIMESTAMP('...')` (UDF call) instead of bare literal in logical plan, and `TIMESTAMP('...')` instead of `TIMESTAMP '...'` in Spark SQL.
+- Files changed:
+  - `core/src/main/java/org/opensearch/sql/calcite/ExtendedRexBuilder.java`
+  - `ppl/src/test/java/org/opensearch/sql/ppl/calcite/CalcitePPLMultisearchTest.java`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - Implicit type coercion (e.g., comparing TIMESTAMP column with string literal) also goes through `makeCast()`, so the character-to-datetime dispatch affects both explicit CAST and implicit coercion.
+  - Plan rendering changes: UDF calls render as `FUNC_NAME(arg)` in both logical plan and Spark SQL, while standard Calcite literals render as `TYPE 'value'` (SQL standard literal syntax). Tests asserting plan strings need updating when switching between UDF and standard CAST.
+  - The fix is minimal (8 lines of new code) because the PPL UDFs (`PPLBuiltinOperators.DATE/TIME/TIMESTAMP`) already handle all the format-aware parsing logic — we just needed to route to them.
+---
