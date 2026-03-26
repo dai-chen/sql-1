@@ -244,8 +244,8 @@
         "Build passes, unit tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": "Low risk — mostly updating expected plan strings. ~15 failures. Verify the new plan representations are semantically correct before updating expected files."
+      "passes": true,
+      "notes": "Fixed by creating proper datetime literals from string literals in makeCast() instead of always dispatching to UDF calls. For string literals that can be parsed as TimestampString/DateString/TimeString, creates native Calcite datetime literals that enable Sarg optimization (range pushdown). Falls back to UDF calls for non-literals, unparseable strings, or date-only strings. Added normalizeTimestamp() to strip trailing zeros from fractional seconds. Updated 25 files: ExtendedRexBuilder.java, CalcitePPLMultisearchTest.java, and 23 YAML plan assertion files (13 big5, 7 clickbench, 3 explain)."
     },
     {
       "id": "US-016",

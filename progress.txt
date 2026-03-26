@@ -3,6 +3,8 @@
 - **Build/test/verify cycle**: `./gradlew build -x integTest -x doctest -x yamlRestTest` → `./gradlew test` → `./gradlew spotlessCheck`. All three must pass before committing.
 - **yamlRestTest** is a separate Gradle task from `integTest` and requires a running cluster — must be excluded in the build command.
 - **convertRelDataTypeToExprType** already handles standard `SqlTypeName.DATE/TIME/TIMESTAMP` → `ExprCoreType` mapping, so code that checks `ExprCoreType` after conversion works with both UDT and standard types.
+- **Datetime literal creation in makeCast**: For string literals being cast to datetime, create proper Calcite datetime literals (`makeDateLiteral`/`makeTimeLiteral`/`makeTimestampLiteral`) to enable Sarg optimization. Fall back to UDF calls for non-literals or unparseable strings. Pre-normalize timestamps to strip trailing zeros from fractional seconds before constructing `TimestampString`.
+- **Sarg rendering for datetime types**: Bare values with no type suffix (e.g., `Sarg[[2023-01-01 00:00:00..2023-01-03 00:00:00)]`), unlike VARCHAR Sargs which have `:VARCHAR` suffix.
 
 # Iteration Log
 
@@ -306,4 +308,28 @@
   - Implicit type coercion (e.g., comparing TIMESTAMP column with string literal) also goes through `makeCast()`, so the character-to-datetime dispatch affects both explicit CAST and implicit coercion.
   - Plan rendering changes: UDF calls render as `FUNC_NAME(arg)` in both logical plan and Spark SQL, while standard Calcite literals render as `TYPE 'value'` (SQL standard literal syntax). Tests asserting plan strings need updating when switching between UDF and standard CAST.
   - The fix is minimal (8 lines of new code) because the PPL UDFs (`PPLBuiltinOperators.DATE/TIME/TIMESTAMP`) already handle all the format-aware parsing logic — we just needed to route to them.
+---
+
+
+## 2026-03-26T03:33 - US-015
+- Fixed plan assertion mismatches by creating proper datetime literals from string literals in `makeCast()`.
+- Root cause: After US-014 dispatched all character-to-datetime CAST to PPL UDFs, string literals like `'2023-01-01 00:00:00'` became UDF calls `TIMESTAMP('...')` which are opaque to Calcite's optimizer. This prevented Sarg merging (range pushdown) and changed plan rendering.
+- Fix: In `ExtendedRexBuilder.makeCast()`, when the source is a `RexLiteral` string, try to create a proper Calcite datetime literal (`makeDateLiteral`/`makeTimeLiteral`/`makeTimestampLiteral`) first. If parsing succeeds, the literal enables Sarg optimization. If parsing fails (e.g., non-standard format, date-only string like `'2024-12-10'`), fall back to UDF call.
+- Added `normalizeTimestamp()` helper to strip trailing zeros from fractional seconds (e.g., `2018-11-09 00:00:00.000000000` → `2018-11-09 00:00:00`) because Calcite's `TimestampString` rejects all-zero fractional parts after its own normalization.
+- Updated 23 YAML plan assertion files:
+  - 13 big5 files: `TIMESTAMP('...':VARCHAR)` → bare timestamp literal in logical plan; `Sarg[['...':VARCHAR...'...':VARCHAR)]:VARCHAR` → `Sarg[[...)]` in physical plan
+  - 7 clickbench files: same pattern
+  - 3 explain files: `explain_filter_with_search.yaml`, `explain_filter_push_compare_timestamp_string.yaml`, `explain_sarg_filter_push_time_range.yaml`
+- Updated `CalcitePPLMultisearchTest.testMultisearchWithTimestampFiltering`: plan assertions changed from UDF call syntax to bare literal syntax
+- Files changed:
+  - `core/src/main/java/org/opensearch/sql/calcite/ExtendedRexBuilder.java`
+  - `ppl/src/test/java/org/opensearch/sql/ppl/calcite/CalcitePPLMultisearchTest.java`
+  - 23 YAML files in `integ-test/src/test/resources/expectedOutput/calcite/`
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - `TimestampString` normalizes by stripping trailing zeros from fractional seconds, but rejects strings where all fractional digits are zero (e.g., `.000000000` → `.` which doesn't match PATTERN). Must pre-normalize before constructing.
+  - `TimestampString` only accepts `yyyy-MM-dd HH:mm:ss` format (with optional fractional seconds). Date-only strings like `'2024-12-10'` fail to parse and correctly fall back to UDF calls.
+  - Sarg rendering for datetime types: bare values with no type suffix (e.g., `Sarg[[2023-01-01 00:00:00..2023-01-03 00:00:00)]`), unlike VARCHAR Sargs which have `:VARCHAR` suffix.
+  - Creating proper datetime literals (instead of UDF calls) is critical for Sarg optimization — Calcite can only merge `RexLiteral` values into Sargs, not `RexCall` (UDF) values.
+  - The `explain_week_argument_coercion.json` file was NOT changed because `WEEK(TIMESTAMP('2024-12-10'))` uses a date-only string that fails TimestampString parsing, correctly falling back to UDF call.
 ---
