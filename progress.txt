@@ -390,3 +390,49 @@
   - The remaining 11 failures are all precision-related: `valueForCalcite()` returns `long` (epoch millis) which only has millisecond precision. Nanosecond values like `13:49:00.123456789` become `13:49:00.123`. Fixing this requires either TIMESTAMP(9) with nanosecond-precision value representation, or accepting millis precision.
   - `java.sql.Time.toLocalTime()` uses deprecated `getHours()`/`getMinutes()`/`getSeconds()` which return values in the JVM's default timezone — NOT UTC.
 ---
+
+
+## Round Summary (max iterations reached, iteration 51)
+
+### Progress
+- **Completed this round**: All 17 user stories (US-001 through US-017) passed.
+  - US-001–US-009: Core UDT removal — type system, value boundary, cast handling, OpenSearch adapter, UDF replacement, infrastructure cleanup
+  - US-010: N/A (files never existed on this branch)
+  - US-011: All unit tests pass (no additional fixes needed)
+  - US-012: Integration tests ran, ~250 failures documented across 12 test classes
+  - US-013: Fixed ~150 runtime 500 errors — root cause was `ClassCastException: Long→String` in 8 UDF files after valueForCalcite() changed return types. CalcitePPLTpchIT went from 23→7 failures.
+  - US-014: Fixed CAST precision loss — dispatched character-to-datetime CAST to PPL UDFs for format-aware parsing. All 42 CalcitePPLCastFunctionIT tests pass.
+  - US-015: Fixed plan assertion mismatches — created proper datetime literals from string literals to enable Sarg optimization. Updated 23 YAML files. CalcitePPLBig5IT (54/54) and CalcitePPLClickBenchIT (1/1) pass.
+  - US-016: Fixed invalid input handling — reverted SqlDatePartFunction operators back to PPL UDFs (they lack RexImpTable implementors). CalcitePPLBuiltinDatetimeFunctionInvalidIT: 0 failures (was 66). CalcitePPLBuiltinFunctionsNullIT: 4 remaining (DatetimeFunction scope).
+  - US-017: Fixed standalone execution engine — bypassed timezone-dependent JDBC ResultSet conversion using getLong()/getInt(). 18→11 failures; remaining 11 are pre-existing millis precision loss (not execution engine issues).
+- **Remaining**: No PRD stories remain incomplete. All 17 stories have `passes: true`.
+- **Blockers**:
+  - 11 remaining CalcitePPLDateTimeBuiltinFunctionIT failures are precision loss (nanosecond values truncated to milliseconds by long epoch millis representation). Fixing requires TIMESTAMP(9) with nanosecond-precision internal representation — a separate effort.
+  - 4 remaining CalcitePPLBuiltinFunctionsNullIT failures (testDatetimeInvalid, testDatetimeNullTimestamp) are DatetimeFunction method resolution edge cases.
+  - 7 remaining CalcitePPLTpchIT failures: BETWEEN type incompatibility (TIMESTAMP vs DATE), YEAR translation in non-pushdown path, precision assertion mismatches.
+
+### PoC Direction Check
+- **Approach validation**: The approach is fully viable and proven. Standard Calcite DATE/TIME/TIMESTAMP types work correctly throughout the stack: type system, value boundary (int/long), cast handling, OpenSearch adapter pushdown, plan serialization, and both pushdown and standalone execution paths. All unit tests pass, build is green, and the vast majority of integration tests pass.
+- **Surprises**:
+  - Harder than expected: SqlDatePartFunction operators (YEAR, MONTH, DAY, etc.) cannot be used directly in PPL because `rewriteCall()` only runs during SQL validation which PPL bypasses. Had to revert these back to PPL UDFs — the "replace 17 UDFs with standard operators" goal (US-008) was partially rolled back in US-016.
+  - Harder than expected: Calcite's JDBC layer applies JVM timezone when converting int/long to java.sql datetime types. Even `getTimestamp(col, UTC_CALENDAR)` doesn't fix it because `java.sql.Timestamp.toInstant()` uses JVM timezone internally. Required bypassing java.sql types entirely.
+  - Easier than expected: The value boundary changes (US-004/US-005) caused zero unit test failures despite predictions of widespread breakage — prior stories had already aligned the type system.
+  - Discovered: `RexLiteral.stringValue()` and `getValueAs(String.class)` both fail for standard TIMESTAMP literals. Must use `getValueAs(TimestampString.class).toString()`.
+- **Alternative approaches**: None needed. The standard Calcite type approach is clean and well-validated by the Flink precedent. The key insight is that PPL UDFs with int/long overloads are the right abstraction for datetime extraction functions, while standard operators work for CURRENT_TIMESTAMP/CURRENT_TIME/CURRENT_DATE.
+- **Risk areas**:
+  - Nanosecond precision: The long epoch millis representation only supports millisecond precision. Full TIMESTAMP(9) support requires a different internal representation (e.g., two fields: seconds + nanos). This is a known limitation, not a design flaw.
+  - BETWEEN with mixed datetime types (TIMESTAMP vs DATE) returns 400 errors — may need implicit coercion in the BETWEEN operator.
+  - Any new PPL datetime functions must provide int/long overloads for native Calcite representations, not just String overloads.
+- **Open questions**:
+  - Should the 11 precision-loss failures be accepted as-is (millis precision is sufficient for most use cases), or should TIMESTAMP(9) nanosecond representation be pursued as a follow-up?
+  - Should BETWEEN be enhanced to handle mixed TIMESTAMP/DATE operands via implicit coercion?
+  - The 4 DatetimeFunction failures (testDatetimeInvalid, testDatetimeNullTimestamp) — are these worth fixing or are they edge cases that can be deferred?
+
+### Recommended Next Steps
+1. **Create a CR** from the `ralph/datetime-udt-rewrite-v2` branch for code review. The core UDT removal is complete and all unit tests pass.
+2. **Fix remaining integration test failures** (22 total across 3 categories) as a follow-up PR or within the same CR:
+   - 11 precision-loss failures in CalcitePPLDateTimeBuiltinFunctionIT — decide accept-or-fix
+   - 7 TpchIT failures — BETWEEN coercion and YEAR translation edge cases
+   - 4 NullIT failures — DatetimeFunction method resolution
+3. **Run the full integration test suite** one more time to get a clean baseline count before CR submission.
+4. **Update the design doc** (`~/.kiro/plans/opensearch-sql/2026-03-24-remove-datetime-udt-plan.md`) with lessons learned, especially the SqlDatePartFunction limitation and JDBC timezone bypass pattern.
