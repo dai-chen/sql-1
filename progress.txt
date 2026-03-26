@@ -11,6 +11,9 @@
 - JaCoCo enforces 90% coverage on api module — new main source code needs tests or must be covered by existing tests
 - Same-package classes in testFixtures can reference main source set classes without explicit imports (both are `org.opensearch.sql.api`)
 - Build command: `./gradlew :api:build` runs compile + test + jacoco + spotless check
+- Jackson (ObjectMapper, databind) is available transitively in cli via cli → api → ppl → core — no explicit dependency needed
+- Jackson deserializes JSON integers as Integer or Long — cast Long to int via .intValue() when mapping to SqlTypeName.INTEGER
+- hr.json dataset: employees (id, name, age, department, salary) × 4 rows; departments (id, name, budget) × 3 rows
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -37,4 +40,37 @@
   - The `application` plugin provides `mainClass` config and `:cli:run` task for running the CLI
   - cli module is NOT in publishedModules list (it's a tool, not a library)
   - JUnit 4 is the default test framework (matching api module pattern); core uses JUnit 5
+---
+
+## 2026-03-26T23:35 - US-003
+- Implemented SampleDataLoader with load(InputStream) and loadFromClasspath(String) static methods
+- Created hr.json dataset with 4 employees and 3 departments at both cli/src/main/resources/data/hr.json and cli/examples/hr.json
+- Created SampleDataLoaderTest with 3 tests: testLoadHrDataset, testLoadFromInputStream, testTypeInference
+- Files changed:
+  - NEW: cli/src/main/java/org/opensearch/sql/cli/SampleDataLoader.java
+  - NEW: cli/src/main/resources/data/hr.json
+  - NEW: cli/examples/hr.json
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/SampleDataLoaderTest.java
+- **Learnings for future iterations:**
+  - Jackson ObjectMapper is available transitively via cli -> api -> ppl -> core (core declares jackson-core, jackson-databind, jackson-annotations as 'api' scope) — no need to add explicit Jackson dependency to cli/build.gradle
+  - Jackson deserializes JSON integers as Integer or Long depending on magnitude — for INTEGER SqlTypeName columns, must handle Long→Integer conversion via .intValue()
+  - Type inference from first row: Integer→INTEGER, Long (fits int)→INTEGER, Long→BIGINT, Double→DOUBLE, Boolean→BOOLEAN, String/null→VARCHAR, nested objects/arrays→skip column with stderr warning
+  - SampleDataLoader uses private constructor pattern (not @UtilityClass) for utility class
+  - hr.json employees have fields: id(int), name(string), age(int), department(string), salary(double)
+  - hr.json departments have fields: id(int), name(string), budget(double)
+---
+
+## 2026-03-26T23:41 - US-004
+- Implemented ResultSetFormatter utility class with format(ResultSet, PrintStream) method
+- ASCII table output: header row, separator line, data rows, row count
+- Column widths computed from max of header and data value lengths; NULL displayed as "NULL"
+- Created ResultSetFormatterTest with 3 tests: basic table, null values, empty result set (all using Mockito mocks)
+- Files changed:
+  - NEW: cli/src/main/java/org/opensearch/sql/cli/ResultSetFormatter.java
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/ResultSetFormatterTest.java
+- **Learnings for future iterations:**
+  - ResultSetFormatter follows same utility class pattern as SampleDataLoader (private constructor, static methods)
+  - ASCII table format: "| col1 | col2 |" header, "+-....-+-....-+" separator, same format for data rows
+  - Mockito's when().thenReturn(val1, val2, ...) varargs works well for simulating multiple rs.next()/rs.getObject() calls
+  - ByteArrayOutputStream + PrintStream is the standard pattern for capturing output in tests
 ---

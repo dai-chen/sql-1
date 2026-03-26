@@ -59,7 +59,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Use Jackson for JSON parsing (already available transitively via Calcite). Nested objects/arrays: skip column and log warning."
     },
     {
@@ -77,7 +77,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Follow the iteration pattern from ResultSetAssertion.ResultSetVerifier in api testFixtures."
     },
     {
