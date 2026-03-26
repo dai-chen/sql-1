@@ -77,7 +77,23 @@ public class PeriodNameFunction extends ImplementorUDF {
 
     public static String name(String date, TimeUnit periodUnit) {
       LocalDate localDate = new ExprDateValue(date).dateValue();
+      return nameFromLocalDate(localDate, periodUnit);
+    }
 
+    public static String name(int epochDays, TimeUnit periodUnit) {
+      LocalDate localDate = LocalDate.ofEpochDay(epochDays);
+      return nameFromLocalDate(localDate, periodUnit);
+    }
+
+    public static String name(long epochMillis, TimeUnit periodUnit) {
+      LocalDate localDate =
+          java.time.Instant.ofEpochMilli(epochMillis)
+              .atZone(java.time.ZoneOffset.UTC)
+              .toLocalDate();
+      return nameFromLocalDate(localDate, periodUnit);
+    }
+
+    private static String nameFromLocalDate(LocalDate localDate, TimeUnit periodUnit) {
       if (periodUnit.equals(TimeUnit.MONTH)) {
         return localDate.getMonth().getDisplayName(TextStyle.FULL, Locale.getDefault());
       } else if (periodUnit.equals(TimeUnit.DAY)) {

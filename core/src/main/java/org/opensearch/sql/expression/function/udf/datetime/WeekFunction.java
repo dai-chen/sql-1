@@ -18,6 +18,7 @@ import org.apache.calcite.sql.type.SqlReturnTypeInference;
 import org.opensearch.sql.calcite.utils.PPLOperandTypes;
 import org.opensearch.sql.data.model.ExprDateValue;
 import org.opensearch.sql.data.model.ExprIntegerValue;
+import org.opensearch.sql.data.model.ExprTimestampValue;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.expression.datetime.DateTimeFunctions;
 import org.opensearch.sql.expression.function.ImplementorUDF;
@@ -65,11 +66,33 @@ public class WeekFunction extends ImplementorUDF {
       return (int) DateTimeFunctions.exprWeekWithoutMode(dateValue).valueForCalcite();
     }
 
+    public static int week(long epochMillis) {
+      ExprValue dateValue = new ExprTimestampValue(java.time.Instant.ofEpochMilli(epochMillis));
+      return (int) DateTimeFunctions.exprWeekWithoutMode(dateValue).valueForCalcite();
+    }
+
+    public static int week(int epochDays) {
+      ExprValue dateValue = new ExprDateValue(java.time.LocalDate.ofEpochDay(epochDays));
+      return (int) DateTimeFunctions.exprWeekWithoutMode(dateValue).valueForCalcite();
+    }
+
     public static int week(String date, int mode) {
       ExprValue dateValue = new ExprDateValue(date);
       ExprValue modeValue = new ExprIntegerValue(mode);
       ExprValue woyExpr = DateTimeFunctions.exprWeek(dateValue, modeValue);
       return (int) woyExpr.valueForCalcite();
+    }
+
+    public static int week(long epochMillis, int mode) {
+      ExprValue dateValue = new ExprTimestampValue(java.time.Instant.ofEpochMilli(epochMillis));
+      ExprValue modeValue = new ExprIntegerValue(mode);
+      return (int) DateTimeFunctions.exprWeek(dateValue, modeValue).valueForCalcite();
+    }
+
+    public static int week(int epochDays, int mode) {
+      ExprValue dateValue = new ExprDateValue(java.time.LocalDate.ofEpochDay(epochDays));
+      ExprValue modeValue = new ExprIntegerValue(mode);
+      return (int) DateTimeFunctions.exprWeek(dateValue, modeValue).valueForCalcite();
     }
   }
 }
