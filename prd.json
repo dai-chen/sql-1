@@ -212,8 +212,8 @@
         "Build passes, unit tests pass"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": "Highest priority — largest failure batch (~150 tests). Likely a single root cause in the value boundary: standard Calcite operators expect int/long datetime values but the execution path may not be fully wired. Key files: CalciteExpressionScript, OpenSearchIndexEnumerator, UserDefinedFunctionUtils (valueForCalcite). May share root cause with US-017 (standalone failures)."
+      "passes": true,
+      "notes": "Fixed the root cause: ClassCastException (Long→String) in 8 UDF datetime functions where valueForCalcite() return type changed from String to int/long after US-005. Files fixed: AddSubDateFunction (6 methods), TimestampFunction (2), SysdateFunction (2), DatetimeFunction (2), FromUnixTimeFunction (2 of 3 — format variant stays String), SecToTimeFunction (1), TimestampAddFunction (2), LastDayFunction (2). CalcitePPLTpchIT went from 23→7 failures; remaining 7 are different root causes: BETWEEN type incompatibility (400, not 500), YEAR translation failure, precision assertion mismatch. Zero Long→String ClassCastExceptions remain."
     },
     {
       "id": "US-014",

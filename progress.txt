@@ -265,3 +265,29 @@
    - **P5**: Standalone execution failures (41 failures) — investigate CalcitePPLDateTimeBuiltinFunctionIT
 2. Start with P1 since fixing the runtime 500 errors will likely resolve the largest batch and may also fix some P5 failures.
 3. Before starting fixes, run a single failing integration test with `--info` to get the full stack trace and identify the exact failure point in the execution path.
+
+
+## 2026-03-26T02:49 - US-013
+- Fixed runtime 500 errors caused by `ClassCastException: Long cannot be cast to String` in 8 UDF datetime function files.
+- Root cause: After US-005 changed `valueForCalcite()` to return `int` (DATE/TIME) and `long` (TIMESTAMP) instead of `String`, all UDF datetime functions that cast `valueForCalcite()` to `(String)` threw ClassCastException at runtime.
+- Files changed (return type fixes):
+  - `AddSubDateFunction.java`: 6 methods — `dateAddDaysOnDate`/`dateSubDaysOnDate` → `int`, 4 timestamp methods → `long`
+  - `TimestampFunction.java`: 2 methods → `long`
+  - `SysdateFunction.java`: 2 methods → `long`
+  - `DatetimeFunction.java`: 2 methods → `long`
+  - `FromUnixTimeFunction.java`: 2 of 3 methods → `long` (format variant stays `String` since `getFormattedDate` returns `ExprStringValue`)
+  - `SecToTimeFunction.java`: 1 method → `int`
+  - `TimestampAddFunction.java`: 2 methods → `long`
+  - `LastDayFunction.java`: 2 methods → `int`
+- Integration test results (CalcitePPLTpchIT): 23 failures → 7 failures. Remaining 7 are different root causes:
+  - BETWEEN type incompatibility: `[TIMESTAMP, DATE, DATE]` (400 Bad Request, not 500)
+  - YEAR translation: `cannot translate call YEAR($t0)` (different 500 error)
+  - Precision assertion mismatch (not a 500 error)
+- Zero `Long→String` ClassCastExceptions remain in server logs.
+- Build: PASS, Tests: PASS, SpotlessCheck: PASS
+- **Learnings for future iterations:**
+  - The `(String)` cast pattern on `valueForCalcite()` was the single root cause for ~150 integration test failures across multiple test classes.
+  - `FromUnixTimeFunction.fromUnixTime(double, String)` (format variant) correctly stays `String` because `DateTimeFormatterUtil.getFormattedDate()` returns `ExprStringValue` whose `valueForCalcite()` returns `String`.
+  - `CurrentFunction` and `WeekFunction` were already fixed in US-009 — they had correct `(int)`/`(long)` casts.
+  - Remaining TpchIT failures (BETWEEN type mismatch, YEAR translation) are separate issues not caused by the valueForCalcite type change.
+---
