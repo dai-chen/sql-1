@@ -4,3 +4,37 @@
 # Iteration Log
 
 <!-- Round summaries and human intervention notes will be appended here automatically -->
+
+## Codebase Patterns
+- SimpleTable is now a public top-level class at `api/src/main/java/org/opensearch/sql/api/SimpleTable.java` — use it directly, no testFixtures dependency needed
+- Spotless uses Google Java Format 1.32.0 with Apache 2.0 license header — run `./gradlew :api:spotlessApply` before build
+- JaCoCo enforces 90% coverage on api module — new main source code needs tests or must be covered by existing tests
+- Same-package classes in testFixtures can reference main source set classes without explicit imports (both are `org.opensearch.sql.api`)
+- Build command: `./gradlew :api:build` runs compile + test + jacoco + spotless check
+
+## 2026-03-26T23:25 - US-001
+- Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
+- Files changed:
+  - NEW: api/src/main/java/org/opensearch/sql/api/SimpleTable.java
+  - MODIFIED: api/src/testFixtures/java/org/opensearch/sql/api/UnifiedQueryTestBase.java (removed inner class + unused imports)
+- **Learnings for future iterations:**
+  - SimpleTable was the only inner class in UnifiedQueryTestBase; all test subclasses use it indirectly via createEmployeesTable()
+  - No test files needed modification — same-package resolution handles the import automatically
+  - The `Schema` import was only needed for `Schema.TableType` in SimpleTable, not in UnifiedQueryTestBase itself
+  - 13 imports were removed from UnifiedQueryTestBase (lombok, calcite types only used by SimpleTable)
+---
+
+## 2026-03-26T23:31 - US-002
+- Created cli Gradle module with JLine3 and PicoCLI dependencies
+- Files changed:
+  - MODIFIED: settings.gradle (added `include 'cli'`)
+  - NEW: cli/build.gradle (java-library, lombok, jacoco, spotless, application plugins; depends on :api, jline 3.28.0, picocli 4.7.6)
+  - NEW: cli/src/main/java/org/opensearch/sql/cli/Main.java (minimal entry point printing "OpenSearch Unified Query Shell")
+- **Learnings for future iterations:**
+  - Plugin versions are NOT specified in subproject build.gradle — they come from root buildscript
+  - Version variables like `${hamcrest_version}` and `${mockito_version}` are defined in root build.gradle buildscript.ext and available to all subprojects
+  - JaCoCo minimum set to 0.0 for cli since no tests exist yet — increase when tests are added
+  - The `application` plugin provides `mainClass` config and `:cli:run` task for running the CLI
+  - cli module is NOT in publishedModules list (it's a tool, not a library)
+  - JUnit 4 is the default test framework (matching api module pattern); core uses JUnit 5
+---
