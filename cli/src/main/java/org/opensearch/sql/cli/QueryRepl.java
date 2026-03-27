@@ -35,6 +35,7 @@ public class QueryRepl {
 
   private final PrintStream out;
   private final QueryCompleter completer;
+  private final QueryHighlighter highlighter;
   private Map<String, Table> tables;
   private QueryType language;
   private UnifiedQueryContext context;
@@ -46,6 +47,7 @@ public class QueryRepl {
     this.language = language;
     this.out = out;
     this.completer = new QueryCompleter(tables, language);
+    this.highlighter = new QueryHighlighter(tables, language);
     rebuildContext();
   }
 
@@ -56,6 +58,7 @@ public class QueryRepl {
           LineReaderBuilder.builder()
               .terminal(terminal)
               .completer(completer)
+              .highlighter(highlighter)
               .variable(
                   LineReader.HISTORY_FILE, Paths.get(System.getProperty("user.home"), HISTORY_FILE))
               .build();
@@ -144,6 +147,7 @@ public class QueryRepl {
     }
     rebuildContext();
     completer.updateLanguage(language);
+    highlighter.updateLanguage(language);
     out.println("Switched to " + language.name() + " mode.");
   }
 
@@ -189,6 +193,7 @@ public class QueryRepl {
       tables = SampleDataLoader.load(fis);
       rebuildContext();
       completer.updateTables(tables);
+      highlighter.updateTables(tables);
       out.println("Loaded tables: " + String.join(", ", tables.keySet()));
     } catch (IOException e) {
       out.println("Error loading file: " + e.getMessage());
