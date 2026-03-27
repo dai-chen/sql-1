@@ -19,6 +19,7 @@
 - UnifiedQueryContext is AutoCloseable — always close before rebuilding or on exit
 - For testing CLI classes that need real query execution, use SampleDataLoader.loadFromClasspath("data/hr.json") to get tables, then construct the context/planner/compiler directly
 - Package-private methods (loop, dispatch, prompt) enable unit testing of REPL logic without a real JLine terminal
+- Gradle `application` plugin `run` task defaults workingDir to subproject dir — use `run { workingDir = rootProject.projectDir }` for root-relative paths
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -154,4 +155,20 @@
   - Character-by-character scanning handles edge cases (adjacent tokens, strings with spaces) better than regex tokenization
   - For testing styles, create a reference AttributedString with known style and compare styleAt().getStyle() values
   - JLine3 Highlighter interface also requires setErrorPattern(Pattern) and setErrorIndex(int) — implement as no-ops
+---
+
+## 2026-03-27T00:12 - US-009
+- Created cli/examples/ecommerce.json with orders (5 rows), products (5 rows), customers (3 rows)
+- Fixed Gradle `run` task working directory — added `workingDir = rootProject.projectDir` to cli/build.gradle so relative paths like `cli/examples/ecommerce.json` resolve correctly from project root
+- Verified all 4 acceptance criteria end-to-end:
+  - PPL non-interactive: `source = catalog.employees | where age > 30` → Bob (35), Charlie (45) ✓
+  - SQL non-interactive: `SELECT * FROM catalog.employees WHERE age > 30` → Bob (35), Charlie (45) ✓
+  - Custom data file: `-d cli/examples/ecommerce.json -l sql -e 'SELECT * FROM catalog.customers'` → Alice, Bob, Charlie ✓
+  - Build and tests pass ✓
+- Files changed:
+  - NEW: cli/examples/ecommerce.json
+  - MODIFIED: cli/build.gradle (added `run { workingDir = rootProject.projectDir }`)
+- **Learnings for future iterations:**
+  - Gradle `application` plugin's `run` task defaults working directory to the subproject directory (e.g., `cli/`), not the root project — add `run { workingDir = rootProject.projectDir }` to fix relative path resolution
+  - ecommerce.json uses boolean type (in_stock) which exercises BOOLEAN type inference in SampleDataLoader
 ---
