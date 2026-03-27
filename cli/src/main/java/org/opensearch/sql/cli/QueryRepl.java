@@ -34,6 +34,7 @@ public class QueryRepl {
   private static final String HISTORY_FILE = ".opensearch-query-history";
 
   private final PrintStream out;
+  private final QueryCompleter completer;
   private Map<String, Table> tables;
   private QueryType language;
   private UnifiedQueryContext context;
@@ -44,6 +45,7 @@ public class QueryRepl {
     this.tables = tables;
     this.language = language;
     this.out = out;
+    this.completer = new QueryCompleter(tables, language);
     rebuildContext();
   }
 
@@ -53,6 +55,7 @@ public class QueryRepl {
       LineReader reader =
           LineReaderBuilder.builder()
               .terminal(terminal)
+              .completer(completer)
               .variable(
                   LineReader.HISTORY_FILE, Paths.get(System.getProperty("user.home"), HISTORY_FILE))
               .build();
@@ -140,6 +143,7 @@ public class QueryRepl {
       return;
     }
     rebuildContext();
+    completer.updateLanguage(language);
     out.println("Switched to " + language.name() + " mode.");
   }
 
@@ -184,6 +188,7 @@ public class QueryRepl {
     try (FileInputStream fis = new FileInputStream(path)) {
       tables = SampleDataLoader.load(fis);
       rebuildContext();
+      completer.updateTables(tables);
       out.println("Loaded tables: " + String.join(", ", tables.keySet()));
     } catch (IOException e) {
       out.println("Error loading file: " + e.getMessage());
