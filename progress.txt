@@ -172,3 +172,41 @@
   - Gradle `application` plugin's `run` task defaults working directory to the subproject directory (e.g., `cli/`), not the root project — add `run { workingDir = rootProject.projectDir }` to fix relative path resolution
   - ecommerce.json uses boolean type (in_stock) which exercises BOOLEAN type inference in SampleDataLoader
 ---
+
+## Round Summary (max iterations reached, iteration 31)
+
+### Progress
+- **Completed this round**: All 9 user stories passed (US-001 through US-009)
+  - US-001: Promoted SimpleTable to api main source set as public class
+  - US-002: Created cli Gradle module with JLine3, PicoCLI, application plugin
+  - US-003: Implemented SampleDataLoader with JSON→Table mapping, type inference, hr.json dataset
+  - US-004: Implemented ResultSetFormatter with ASCII table output, NULL handling, row counts
+  - US-005: Implemented QueryRepl with JLine3 REPL loop, 6 meta-commands, query execution pipeline
+  - US-006: Implemented Main entry point with PicoCLI flags (--data, --language, --execute, --help), interactive + non-interactive modes
+  - US-007: Added QueryCompleter with SQL/PPL keyword + table/column name tab completion
+  - US-008: Added QueryHighlighter with keyword/string/number/meta-command syntax highlighting
+  - US-009: Created ecommerce.json dataset, verified all 4 end-to-end acceptance criteria
+- **Remaining**: None — all stories complete and passing
+- **Blockers**: None. The loop used 31 iterations for 9 stories (~3.4 iterations per story average), suggesting some stories required retry cycles for spotless/build fixes but nothing was fundamentally blocked.
+
+### PoC Direction Check
+- **Approach validation**: The approach is fully viable. Calling UnifiedQueryPlanner/UnifiedQueryCompiler directly from a JLine3 REPL works cleanly. The plan→compile→executeQuery→format pipeline is straightforward and the Calcite-backed engine handles both SQL and PPL without issues. SimpleTable as a public API class is a clean abstraction for in-memory data.
+- **Surprises**: 
+  - Easier than expected: Jackson being transitively available via Calcite eliminated a dependency concern. Same-package resolution between testFixtures and main source set meant US-001 required zero test modifications.
+  - Harder than expected: Gradle `application` plugin defaults `workingDir` to the subproject directory, not root — caused relative path issues in US-009 that needed a build.gradle fix. Spotless formatting likely caused retry cycles across multiple stories.
+- **Alternative approaches**: None surfaced. The JLine3 + PicoCLI + direct API call approach proved clean. No indication that an alternative architecture would be better for this PoC scope.
+- **Risk areas**: 
+  - JaCoCo coverage threshold is 0.0 for cli module — if this moves beyond PoC, coverage enforcement should be raised.
+  - The highlighter and completer maintain their own keyword lists separate from the actual parser grammars — these will drift as SQL/PPL syntax evolves.
+  - No integration test for the interactive REPL path (only unit tests with mocked LineReader) — terminal-dependent behavior could have edge cases.
+- **Open questions**: 
+  - Should SimpleTable remain in the api module long-term, or should it move to a shared module if other consumers emerge?
+  - Should the CLI be distributed as a fat JAR / native image for easier end-user consumption?
+  - Should keyword lists be extracted from the ANTLR grammars rather than hardcoded?
+
+### Recommended Next Steps
+- Raise JaCoCo coverage threshold for cli module from 0.0 to a reasonable level (e.g., 80%)
+- Consider extracting SQL/PPL keyword lists from ANTLR grammar files to keep completer/highlighter in sync with parser
+- If shipping beyond PoC: add shadow/fat JAR task or GraalVM native-image build for standalone distribution
+- Add a brief README.md to cli/ with usage examples and screenshots
+- Consider adding multi-line query support (semicolon-terminated) to the REPL
