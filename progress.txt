@@ -136,3 +136,22 @@
   - Table/column names extracted via table.getRowType(new JavaTypeFactoryImpl()).getFieldNames()
   - Mockito mock of ParsedLine: mock word() and wordCursor() for testing complete()
 ---
+
+## 2026-03-27T00:06 - US-008
+- Implemented QueryHighlighter.java implementing JLine3 Highlighter interface with character-by-character scanning
+- Highlighting rules: SQL/PPL keywords → bold+blue, string literals (single-quoted) → green, numbers → magenta, meta-commands (.prefix) → cyan
+- Contains same SQL_KEYWORDS (50) and PPL_KEYWORDS (37) lists as QueryCompleter
+- Has updateLanguage() and updateTables() methods for dynamic updates; setErrorPattern/setErrorIndex are no-ops
+- Wired into QueryRepl: added highlighter field, .highlighter(highlighter) in LineReaderBuilder, update calls in switchLanguage() and loadData()
+- Created QueryHighlighterTest with 7 tests: SQL keyword highlighting, PPL keyword highlighting, string literal highlighting, number highlighting, meta-command highlighting, language switching, output length preservation
+- Files changed:
+  - NEW: cli/src/main/java/org/opensearch/sql/cli/QueryHighlighter.java
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (added highlighter field + wiring)
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/QueryHighlighterTest.java
+- **Learnings for future iterations:**
+  - JLine3 Highlighter.highlight() must return AttributedString with EXACT same length as input buffer — critical for cursor positioning
+  - AttributedStringBuilder.styled(style, text) is the cleanest way to append styled segments
+  - Character-by-character scanning handles edge cases (adjacent tokens, strings with spaces) better than regex tokenization
+  - For testing styles, create a reference AttributedString with known style and compare styleAt().getStyle() values
+  - JLine3 Highlighter interface also requires setErrorPattern(Pattern) and setErrorIndex(int) — implement as no-ops
+---

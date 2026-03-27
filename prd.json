@@ -156,7 +156,7 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Implement JLine3 Highlighter.highlight(LineReader, String) returning AttributedString. Use AttributedStringBuilder with AttributedStyle for coloring. Borrow keyword detection pattern from SQLLine's SqlLineHighlighter."
     },
     {
