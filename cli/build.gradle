@@ -15,6 +15,10 @@ application {
     mainClass = 'org.opensearch.sql.cli.Main'
 }
 
+run {
+    workingDir = rootProject.projectDir
+}
+
 dependencies {
     implementation project(':api')
     implementation 'org.jline:jline:3.28.0'

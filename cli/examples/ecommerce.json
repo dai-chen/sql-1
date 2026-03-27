@@ -1,0 +1,21 @@
+{
+  "orders": [
+    {"id": 1, "customer_id": 1, "product_id": 1, "quantity": 2, "total": 1999.98},
+    {"id": 2, "customer_id": 2, "product_id": 3, "quantity": 1, "total": 49.99},
+    {"id": 3, "customer_id": 1, "product_id": 2, "quantity": 1, "total": 299.99},
+    {"id": 4, "customer_id": 3, "product_id": 4, "quantity": 3, "total": 89.97},
+    {"id": 5, "customer_id": 2, "product_id": 5, "quantity": 1, "total": 149.99}
+  ],
+  "products": [
+    {"id": 1, "name": "Laptop", "category": "Electronics", "price": 999.99, "in_stock": true},
+    {"id": 2, "name": "Headphones", "category": "Electronics", "price": 299.99, "in_stock": true},
+    {"id": 3, "name": "T-Shirt", "category": "Clothing", "price": 49.99, "in_stock": true},
+    {"id": 4, "name": "Coffee Mug", "category": "Kitchen", "price": 29.99, "in_stock": false},
+    {"id": 5, "name": "Backpack", "category": "Accessories", "price": 149.99, "in_stock": true}
+  ],
+  "customers": [
+    {"id": 1, "name": "Alice", "email": "alice@example.com", "city": "Seattle"},
+    {"id": 2, "name": "Bob", "email": "bob@example.com", "city": "Portland"},
+    {"id": 3, "name": "Charlie", "email": "charlie@example.com", "city": "Denver"}
+  ]
+}
