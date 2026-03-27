@@ -118,3 +118,21 @@
   - ScannableTable.scan(null) works for SimpleTable (DataContext not needed) — use enumerator() to count rows
   - QueryRepl.dispatch() is package-private but accessible from MainTest in same package — useful for non-interactive mode
 ---
+
+## 2026-03-26T23:59 - US-007
+- Implemented QueryCompleter.java implementing JLine3 Completer interface with SQL/PPL keyword completion and table/column name completion
+- Wired QueryCompleter into QueryRepl.java's LineReader via LineReaderBuilder.completer()
+- Added updateLanguage() and updateTables() methods called from switchLanguage() and loadData() in QueryRepl
+- Created QueryCompleterTest.java with 10 tests covering SQL/PPL keywords, table/column names, language switching, table updates, case-insensitive matching
+- Files changed:
+  - NEW: cli/src/main/java/org/opensearch/sql/cli/QueryCompleter.java
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (added completer field, wired into LineReader, update calls in switchLanguage/loadData)
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/QueryCompleterTest.java
+- **Learnings for future iterations:**
+  - JLine3 Completer.complete() receives LineReader, ParsedLine, and List<Candidate> — add matching Candidate objects to the list
+  - ParsedLine.word() gives the current word being typed, use it for prefix matching
+  - Case-insensitive prefix matching: candidate.toLowerCase().startsWith(prefix.toLowerCase())
+  - QueryCompleter stores keyword sets as List<String> and rebuilds them on updateLanguage()
+  - Table/column names extracted via table.getRowType(new JavaTypeFactoryImpl()).getFieldNames()
+  - Mockito mock of ParsedLine: mock word() and wordCursor() for testing complete()
+---

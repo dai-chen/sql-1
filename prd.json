@@ -137,7 +137,7 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Use JLine3 AggregateCompleter with StringsCompleter for keywords and a custom Completer for table/column names from the loaded schema."
     },
     {
