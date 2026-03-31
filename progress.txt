@@ -491,3 +491,46 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - EndOfFileException from .quit/.exit must be caught in the script loop to break gracefully (not crash)
   - Script mode always returns exit code 0 — individual command errors are reported inline (NDJSON error objects), not via exit code
 ---
+
+## Round Summary (max iterations reached, iteration 31)
+
+### Progress
+- **Completed this round**: All 11 new user stories passed (US-010 through US-020)
+  - US-010: Text file loading as line-per-row tables with `.load <path> as <name>` syntax
+  - US-011: Multi-line log joining for .log files (stack traces joined to previous entry)
+  - US-012: CSV file support with header-based schema inference and type detection
+  - US-013: Validated grok command end-to-end through Calcite (TIMESTAMP_ISO8601 limitation documented)
+  - US-014: Validated patterns command end-to-end through Calcite (simple_pattern via REGEXP_REPLACE_3)
+  - US-015: Pre-built opensearch-log format with LogFormat registry, structured column extraction at load time
+  - US-016: Context-aware tab completion (table names after FROM/source=, column names after WHERE/pipe commands)
+  - US-017: Query timing display — `N row(s) returned (Xms)` after every result
+  - US-018: Inline Unicode bar charts for numeric aggregations with `.chart on/off` toggle
+  - US-019: Machine-readable JSON output (`--output json`), structured error objects, exit codes 0/1/2
+  - US-020: Script mode (`--script` / piped stdin) with NDJSON output, error resilience, Jackson AUTO_CLOSE_TARGET fix
+- **Remaining**: None — all 20 user stories (US-001 through US-020) are complete and passing
+- **Blockers**: None. 31 iterations for 11 stories (~2.8 iterations per story). Some retry cycles were spent on spotless formatting, Gradle workingDir issues, and the Jackson AUTO_CLOSE_TARGET bug, but nothing was fundamentally blocked.
+
+### PoC Direction Check
+- **Approach validation**: Fully viable. The Calcite-backed engine handles all features cleanly — grok, patterns, CSV, text files, JSON output all work through the same plan→compile→execute pipeline. The CLI is a thin orchestration layer over the Unified Query API, which is exactly the right architecture for a PoC.
+- **Surprises**:
+  - Harder than expected: TIMESTAMP_ISO8601 grok pattern is broken due to duplicate named group keys in ParseFunction.ParseImplementor — this is a real engine bug, not a CLI issue. Workaround (%{DATA:ts}) is fine for PoC but should be fixed upstream. Jackson's AUTO_CLOSE_TARGET default silently closing PrintStream after first write was a subtle NDJSON-breaking bug.
+  - Easier than expected: Patterns command worked out of the box through Calcite. CSV loading was straightforward with simple string-based type inference. Context-aware completion via regex was simpler than expected (7 patterns cover the main cases).
+- **Alternative approaches**: The LogFormat registry (Java regex at load time) proved cleaner than applying grok at query time for pre-built formats. This avoids the TIMESTAMP_ISO8601 limitation and is faster for repeated queries. Could consider making this the default approach for all structured log formats.
+- **Risk areas**:
+  - CSV parser is naive (comma-split) — quoted fields with embedded commas will break. A real CSV parser (Jackson CsvMapper or Apache Commons CSV) would be needed for production.
+  - Keyword lists in QueryCompleter and QueryHighlighter are hardcoded — they'll drift from the ANTLR grammars as SQL/PPL syntax evolves.
+  - JaCoCo threshold for cli module is still 0.0 — 77 tests exist but coverage enforcement is off.
+  - The TIMESTAMP_ISO8601 grok bug in ParseFunction is a real engine limitation that will surface in the intern project if not fixed.
+- **Open questions**:
+  - Should the TIMESTAMP_ISO8601 duplicate key bug be fixed in ParseFunction before the intern starts, or is the %{DATA:ts} workaround acceptable?
+  - Distribution format: fat JAR, native image, or just `./gradlew :cli:run`?
+  - Should the CLI support connecting to a live OpenSearch cluster (not just local files) as a stretch goal?
+  - Should keyword lists be auto-generated from ANTLR grammars at build time?
+
+### Recommended Next Steps
+- Fix the TIMESTAMP_ISO8601 duplicate key bug in ParseFunction.ParseImplementor (core module) — use `toMap(merge)` instead of `toMap()` to handle duplicate keys from expanded grok sub-patterns
+- Raise JaCoCo coverage threshold for cli module from 0.0 to 80%+
+- Replace naive CSV comma-split with Jackson CsvMapper for proper quoted field handling
+- Add a cli/README.md with usage examples, screenshots, and demo commands for the intern onboarding
+- Consider adding `--format` auto-detection (sniff first few lines) instead of requiring explicit format flag
+- Create a shadow/fat JAR task for standalone distribution
