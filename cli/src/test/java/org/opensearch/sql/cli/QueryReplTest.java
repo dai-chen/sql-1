@@ -170,4 +170,16 @@ public class QueryReplTest {
     assertThat(output, containsString("node"));
     assertThat(output, containsString("message"));
   }
+
+  @Test
+  public void testChartMetaCommand() {
+    repl.dispatch(".chart off");
+    assertThat(baos.toString(), containsString("Chart display disabled"));
+    baos.reset();
+    repl.dispatch(".chart on");
+    assertThat(baos.toString(), containsString("Chart display enabled"));
+    baos.reset();
+    repl.dispatch(".chart");
+    assertThat(baos.toString(), containsString("Usage: .chart on|off"));
+  }
 }

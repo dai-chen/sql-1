@@ -38,6 +38,7 @@ public class QueryRepl {
   private final QueryHighlighter highlighter;
   private Map<String, Table> tables;
   private QueryType language;
+  private boolean chartEnabled = true;
   private UnifiedQueryContext context;
   private UnifiedQueryPlanner planner;
   private UnifiedQueryCompiler compiler;
@@ -135,6 +136,17 @@ public class QueryRepl {
         }
         loadData(path, alias, format);
         break;
+      case ".chart":
+        if (arg.equalsIgnoreCase("on")) {
+          chartEnabled = true;
+          out.println("Chart display enabled.");
+        } else if (arg.equalsIgnoreCase("off")) {
+          chartEnabled = false;
+          out.println("Chart display disabled.");
+        } else {
+          out.println("Usage: .chart on|off");
+        }
+        break;
       default:
         out.println("Unknown command: " + cmd + ". Type .help for available commands.");
     }
@@ -148,6 +160,7 @@ public class QueryRepl {
     out.println("  .tables              List loaded tables and columns");
     out.println("  .schema <table>      Show column details for a table");
     out.println("  .load <path> [as <name>] [--format <format>]  Load a data file");
+    out.println("  .chart on|off        Toggle inline bar chart display");
     out.println();
     out.println("Enter any other input to execute as a query.");
   }
@@ -257,7 +270,7 @@ public class QueryRepl {
       PreparedStatement stmt = compiler.compile(plan);
       try (ResultSet rs = stmt.executeQuery()) {
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
-        ResultSetFormatter.format(rs, out, elapsedMs);
+        ResultSetFormatter.format(rs, out, elapsedMs, chartEnabled);
       }
     } catch (SyntaxCheckException e) {
       out.println("Syntax error: " + e.getMessage());
