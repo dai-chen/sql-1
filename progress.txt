@@ -20,6 +20,9 @@
 - For testing CLI classes that need real query execution, use SampleDataLoader.loadFromClasspath("data/hr.json") to get tables, then construct the context/planner/compiler directly
 - Package-private methods (loop, dispatch, prompt) enable unit testing of REPL logic without a real JLine terminal
 - Gradle `application` plugin `run` task defaults workingDir to subproject dir — use `run { workingDir = rootProject.projectDir }` for root-relative paths
+- Gradle `test` task also defaults workingDir to subproject dir — add `workingDir = rootProject.projectDir` to test block if tests use root-relative paths
+- SampleDataLoader.loadFile(String) is the unified entry point for file loading — detects .json vs text by extension, derives table name from filename stem
+- `.load <path> as <name>` syntax in QueryRepl only affects non-JSON files; JSON files use their own top-level keys as table names
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -250,3 +253,28 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
 **Test data needed:**
 - Create a sample opensearch.log file at cli/examples/opensearch.log with realistic Log4j2 format lines including at least one multi-line stack trace
 - Create a sample CSV at cli/examples/orders.csv for US-012
+
+## 2026-03-31T01:00 - US-010
+- Implemented text file loading as line-per-row tables with single VARCHAR 'line' column
+- Added SampleDataLoader.loadTextFile(InputStream, String) and loadFile(String) with file extension detection
+- Updated QueryRepl .load command to support `.load <path> as <name>` syntax for explicit table naming
+- Updated Main.java to use SampleDataLoader.loadFile() for --data/-d flag (auto-detects file type)
+- Created cli/examples/opensearch.log with realistic Log4j2 format lines including multi-line stack trace
+- Fixed test working directory: added `workingDir = rootProject.projectDir` to cli/build.gradle test block (tests using relative paths like `cli/examples/...` were failing because Gradle test task defaults to subproject dir)
+- Added 4 new tests: testLoadTextFile, testLoadTextFileEmptyLines, testLoadFileDetectsJson, testLoadFileDetectsText
+- Added 2 new QueryReplTest tests: testLoadTextFile, testLoadTextFileWithAlias
+- Verified end-to-end: `-d cli/examples/opensearch.log -e 'source = catalog.opensearch | head 5'` shows 5 log lines
+- Files changed:
+  - MODIFIED: cli/build.gradle (added workingDir to test block)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/SampleDataLoader.java (added loadTextFile, loadFile, deriveTableName)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (added .load as <name> parsing, loadData with alias)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/Main.java (use loadFile instead of load)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/SampleDataLoaderTest.java (4 new tests)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/QueryReplTest.java (2 new tests)
+  - NEW: cli/examples/opensearch.log
+- **Learnings for future iterations:**
+  - Gradle test task defaults workingDir to subproject dir (e.g., cli/) — must add `workingDir = rootProject.projectDir` to test block if tests use root-relative paths like `cli/examples/...`
+  - SampleDataLoader.loadFile(String) is the unified entry point for file loading — detects .json vs everything else by extension
+  - deriveTableName() extracts filename stem (e.g., "opensearch" from "opensearch.log") for auto-naming text tables
+  - The `.load <path> as <name>` syntax only affects non-JSON files (JSON files have their own table names from top-level keys)
+---

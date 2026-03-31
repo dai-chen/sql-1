@@ -189,7 +189,7 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Foundation for all log analysis features. The .load meta-command should accept 'as <tablename>' syntax to name the table. File type detection: .json -> JSON loader, .csv -> CSV loader (future), everything else -> line-per-row."
     },
     {
