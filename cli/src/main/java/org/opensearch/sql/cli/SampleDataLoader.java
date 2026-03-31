@@ -164,6 +164,59 @@ public class SampleDataLoader {
     }
   }
 
+  /** Load a log file with multi-line joining and structured parsing using a LogFormat. */
+  public static Map<String, Table> loadFormattedLogFile(
+      InputStream inputStream, String tableName, LogFormat format) throws IOException {
+    List<String> lines =
+        new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
+            .lines()
+            .collect(Collectors.toList());
+    List<String> entries = new ArrayList<>();
+    for (String line : lines) {
+      if (entries.isEmpty() || line.startsWith("[")) {
+        entries.add(line);
+      } else {
+        entries.set(entries.size() - 1, entries.get(entries.size() - 1) + "\n" + line);
+      }
+    }
+    String[] columns = format.getColumns();
+    SimpleTable.SimpleTableBuilder builder = SimpleTable.builder();
+    for (String col : columns) {
+      builder.col(col, SqlTypeName.VARCHAR);
+    }
+    java.util.regex.Pattern pattern = format.getPattern();
+    for (String entry : entries) {
+      java.util.regex.Matcher m = pattern.matcher(entry);
+      if (m.matches()) {
+        Object[] row = new Object[columns.length];
+        for (int i = 0; i < columns.length; i++) {
+          row[i] = m.group(i + 1).trim();
+        }
+        builder.row(row);
+      } else {
+        Object[] row = new Object[columns.length];
+        row[columns.length - 1] = entry;
+        builder.row(row);
+      }
+    }
+    return Map.of(tableName, builder.build());
+  }
+
+  /** Load a file with optional format hint. */
+  public static Map<String, Table> loadFile(String path, String format) throws IOException {
+    if (format != null) {
+      LogFormat logFormat = LogFormat.get(format);
+      if (logFormat == null) {
+        throw new IOException("Unknown format: " + format);
+      }
+      String tableName = deriveTableName(path);
+      try (FileInputStream fis = new FileInputStream(path)) {
+        return loadFormattedLogFile(fis, tableName, logFormat);
+      }
+    }
+    return loadFile(path);
+  }
+
   /** Load a file, detecting type by extension. .json uses JSON loader, others use line-per-row. */
   public static Map<String, Table> loadFile(String path) throws IOException {
     String lower = path.toLowerCase();

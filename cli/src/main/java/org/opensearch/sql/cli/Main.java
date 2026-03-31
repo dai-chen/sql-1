@@ -38,6 +38,11 @@ public class Main implements Callable<Integer> {
       description = "Execute a single query and exit")
   String query;
 
+  @Option(
+      names = {"-f", "--format"},
+      description = "Log format for structured parsing (e.g., opensearch-log)")
+  String format;
+
   public static void main(String[] args) {
     System.exit(new CommandLine(new Main()).execute(args));
   }
@@ -46,7 +51,7 @@ public class Main implements Callable<Integer> {
   public Integer call() throws Exception {
     Map<String, Table> tables =
         dataFile != null
-            ? SampleDataLoader.loadFile(dataFile)
+            ? SampleDataLoader.loadFile(dataFile, format)
             : SampleDataLoader.loadFromClasspath("data/hr.json");
 
     QueryType queryType = "sql".equalsIgnoreCase(language) ? QueryType.SQL : QueryType.PPL;

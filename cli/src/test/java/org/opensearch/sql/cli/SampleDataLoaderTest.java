@@ -14,12 +14,14 @@ import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
 import java.io.ByteArrayInputStream;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.Test;
@@ -132,5 +134,52 @@ public class SampleDataLoaderTest {
     RelDataType rowType = tables.get("orders").getRowType(new JavaTypeFactoryImpl());
     assertThat(rowType.getFieldNames(), hasItem("customer"));
     assertThat(rowType.getFieldNames(), hasItem("price"));
+  }
+
+  @Test
+  public void testLoadFormattedLogFile() throws Exception {
+    LogFormat format = LogFormat.get("opensearch-log");
+    try (InputStream is = new FileInputStream("cli/examples/opensearch.log")) {
+      Map<String, Table> tables = SampleDataLoader.loadFormattedLogFile(is, "logs", format);
+      Table table = tables.get("logs");
+      assertThat(table, is(org.hamcrest.Matchers.notNullValue()));
+      RelDataType rowType = table.getRowType(new JavaTypeFactoryImpl());
+      assertThat(
+          rowType.getFieldNames(), contains("timestamp", "level", "component", "node", "message"));
+      int count = 0;
+      var enumerator = ((ScannableTable) table).scan(null).enumerator();
+      while (enumerator.moveNext()) {
+        count++;
+      }
+      assertThat(count, is(9));
+    }
+  }
+
+  @Test
+  public void testLoadFormattedLogFileExtractsFields() throws Exception {
+    LogFormat format = LogFormat.get("opensearch-log");
+    try (InputStream is = new FileInputStream("cli/examples/opensearch.log")) {
+      Map<String, Table> tables = SampleDataLoader.loadFormattedLogFile(is, "logs", format);
+      Table table = tables.get("logs");
+      var enumerator = ((ScannableTable) table).scan(null).enumerator();
+      assertThat(enumerator.moveNext(), is(true));
+      Object[] row = enumerator.current();
+      assertThat(row[0], is("2024-01-15T10:30:00,123"));
+      assertThat(row[1], is("INFO"));
+      assertThat(row[2], is("o.o.n.Node"));
+      assertThat(row[3], is("node-1"));
+      assertThat(row[4], is("initializing ..."));
+    }
+  }
+
+  @Test
+  public void testLoadFileWithFormat() throws Exception {
+    Map<String, Table> tables =
+        SampleDataLoader.loadFile("cli/examples/opensearch.log", "opensearch-log");
+    Table table = tables.get("opensearch");
+    assertThat(table, is(org.hamcrest.Matchers.notNullValue()));
+    RelDataType rowType = table.getRowType(new JavaTypeFactoryImpl());
+    assertThat(rowType.getFieldCount(), is(5));
+    assertThat(rowType.getFieldNames().get(0), is("timestamp"));
   }
 }

@@ -155,4 +155,19 @@ public class QueryReplTest {
     repl.dispatch(".schema");
     assertThat(baos.toString(), containsString("Usage: .schema"));
   }
+
+  @Test
+  public void testLoadWithFormat() {
+    repl.dispatch(".load cli/examples/opensearch.log as logs --format opensearch-log");
+    String output = baos.toString();
+    assertThat(output, containsString("Loaded tables: logs"));
+    baos.reset();
+    repl.dispatch(".schema logs");
+    output = baos.toString();
+    assertThat(output, containsString("timestamp"));
+    assertThat(output, containsString("level"));
+    assertThat(output, containsString("component"));
+    assertThat(output, containsString("node"));
+    assertThat(output, containsString("message"));
+  }
 }

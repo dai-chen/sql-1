@@ -120,6 +120,12 @@ public class QueryRepl {
         String rest = arg;
         String path;
         String alias = null;
+        String format = null;
+        int fmtIdx = rest.toLowerCase().indexOf("--format ");
+        if (fmtIdx >= 0) {
+          format = rest.substring(fmtIdx + 9).trim().split("\\s+")[0];
+          rest = rest.substring(0, fmtIdx).trim();
+        }
         int asIdx = rest.toLowerCase().indexOf(" as ");
         if (asIdx >= 0) {
           path = rest.substring(0, asIdx).trim();
@@ -127,7 +133,7 @@ public class QueryRepl {
         } else {
           path = rest;
         }
-        loadData(path, alias);
+        loadData(path, alias, format);
         break;
       default:
         out.println("Unknown command: " + cmd + ". Type .help for available commands.");
@@ -141,7 +147,7 @@ public class QueryRepl {
     out.println("  .language sql|ppl    Switch query language");
     out.println("  .tables              List loaded tables and columns");
     out.println("  .schema <table>      Show column details for a table");
-    out.println("  .load <path> [as <name>]  Load a data file (JSON or text)");
+    out.println("  .load <path> [as <name>] [--format <format>]  Load a data file");
     out.println();
     out.println("Enter any other input to execute as a query.");
   }
@@ -195,17 +201,27 @@ public class QueryRepl {
   }
 
   private void loadData(String path) {
-    loadData(path, null);
+    loadData(path, null, null);
   }
 
-  private void loadData(String path, String alias) {
+  private void loadData(String path, String alias, String format) {
     if (path.isEmpty()) {
-      out.println("Usage: .load <path> [as <name>]");
+      out.println("Usage: .load <path> [as <name>] [--format <format>]");
       return;
     }
     try {
       Map<String, Table> loaded;
-      if (!path.toLowerCase().endsWith(".json") && alias != null) {
+      if (format != null) {
+        LogFormat logFormat = LogFormat.get(format);
+        if (logFormat == null) {
+          out.println("Unknown format: " + format);
+          return;
+        }
+        String tableName = alias != null ? alias : deriveTableName(path);
+        try (FileInputStream fis = new FileInputStream(path)) {
+          loaded = SampleDataLoader.loadFormattedLogFile(fis, tableName, logFormat);
+        }
+      } else if (!path.toLowerCase().endsWith(".json") && alias != null) {
         try (FileInputStream fis = new FileInputStream(path)) {
           if (path.toLowerCase().endsWith(".csv")) {
             loaded = SampleDataLoader.loadCsvFile(fis, alias);
@@ -226,6 +242,12 @@ public class QueryRepl {
     } catch (IOException e) {
       out.println("Error loading file: " + e.getMessage());
     }
+  }
+
+  private String deriveTableName(String path) {
+    String fileName = java.nio.file.Path.of(path).getFileName().toString();
+    int dot = fileName.lastIndexOf('.');
+    return dot > 0 ? fileName.substring(0, dot) : fileName;
   }
 
   private void executeQuery(String query) {
