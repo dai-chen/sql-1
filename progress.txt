@@ -210,3 +210,43 @@
 - If shipping beyond PoC: add shadow/fat JAR task or GraalVM native-image build for standalone distribution
 - Add a brief README.md to cli/ with usage examples and screenshots
 - Consider adding multi-line query support (semicolon-terminated) to the REPL
+
+---
+
+## Human Intervention (2026-03-30)
+
+### New User Stories Added: US-010 through US-020
+
+Added 11 new user stories to prd.json for pre-intern PoC validation. These extend the CLI to support local file analysis, log parsing, visualization, and AI agent cooperation.
+
+**Priority order (do P0 first, then P1, then P2):**
+
+| Priority | Story | Title |
+|---|---|---|
+| P0 | US-010 | Load raw text files as line-per-row tables |
+| P0 | US-011 | Multi-line log joining for stack traces |
+| P0 | US-013 | Validate grok command through Unified Query API |
+| P1 | US-012 | CSV file support via Calcite CsvSchema |
+| P1 | US-014 | Validate patterns command through Unified Query API |
+| P1 | US-017 | Query timing and row count display |
+| P1 | US-018 | Inline bar chart display for numeric aggregations |
+| P1 | US-019 | Machine-readable JSON output for agent cooperation |
+| P2 | US-015 | Pre-built format support for opensearch-log |
+| P2 | US-016 | Context-aware tab completion from Calcite schema |
+| P2 | US-020 | Script mode for multi-command agent pipelines |
+
+**Key context for implementation:**
+- US-010/011 are foundation — all log analysis features depend on loading text files
+- US-013 is CRITICAL validation — if grok doesn't work through UnifiedQueryPlanner/Compiler, it's a blocker. GrokExpression is in core/, grok patterns in common/src/main/resources/patterns/
+- US-015 depends on US-010 + US-011 + US-013
+- US-019/020 are for AI agent cooperation — JSON output must be clean (no banners/noise)
+- US-018 uses Unicode block chars (█ U+2588) for bar charts in ResultSetFormatter
+
+**Reference docs (on local machine, not in repo):**
+- `~/.kiro/plans/opensearch-sql/2026-03-26-cli-implementation-plan.md` — full implementation details for Steps 10-20
+- `~/.kiro/plans/opensearch-sql/2026-03-30-intern-cli-playground-plan.md` — intern project plan with demos
+- `~/.kiro/plans/opensearch-sql/2026-03-30-cli-feature-gap-analysis.md` — feature gap analysis across 11 CLIs
+
+**Test data needed:**
+- Create a sample opensearch.log file at cli/examples/opensearch.log with realistic Log4j2 format lines including at least one multi-line stack trace
+- Create a sample CSV at cli/examples/orders.csv for US-012

@@ -1,7 +1,7 @@
 {
   "project": "Unified Query CLI",
   "branchName": "poc/unified-query-cli",
-  "description": "Add a JLine3-based CLI playground to the unified query library so users can try SQL/PPL queries against example data instantly. The CLI calls UnifiedQueryPlanner/UnifiedQueryCompiler directly, supports language switching, sample data loading from JSON, tab completion, syntax highlighting, and ASCII table output.",
+  "description": "Extend the unified query CLI playground with local file support (text/CSV/JSON), PPL grok/patterns validation, pre-built log format parsing, context-aware completion, inline bar charts, machine-readable JSON output for AI agent cooperation, and script mode. Building on the existing JLine3 REPL (US-001 to US-009) to validate features for the intern project: OpenSearch PPL/SQL Interactive Playground CLI.",
   "buildCommand": "./gradlew :api:build :cli:build",
   "testCommand": "./gradlew :api:test :cli:test",
   "verifyCommand": "",
@@ -174,6 +174,188 @@
       "priority": 9,
       "passes": true,
       "notes": "This is the final verification story. Fix any integration issues discovered during end-to-end testing."
+    },
+    {
+      "id": "US-010",
+      "title": "Load raw text files as line-per-row tables",
+      "description": "As a CLI user, I want to .load a raw text file (like opensearch.log) so that each line becomes a row with a single 'line' column, enabling PPL analysis of semi-structured logs.",
+      "acceptanceCriteria": [
+        "SampleDataLoader (or new TextFileLoader) detects file type by extension: .json uses existing JSON loading, .csv/.log/.txt uses line-per-row loading",
+        ".load <path> as <name> meta-command works in QueryRepl for text files",
+        "Each line of the text file becomes a row in a SimpleTable with one VARCHAR column named 'line'",
+        "Empty lines are preserved as empty string rows",
+        "Non-interactive mode works: -d opensearch.log -e 'source = catalog.logs | head 5' shows 5 log lines",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Foundation for all log analysis features. The .load meta-command should accept 'as <tablename>' syntax to name the table. File type detection: .json -> JSON loader, .csv -> CSV loader (future), everything else -> line-per-row."
+    },
+    {
+      "id": "US-011",
+      "title": "Multi-line log joining for stack traces",
+      "description": "As a CLI user loading opensearch.log, I want continuation lines (Java stack traces) joined to the previous log entry so that each row represents a complete log event.",
+      "acceptanceCriteria": [
+        "When loading .log files, lines NOT starting with '[' are appended to the previous row's 'line' value with newline separator",
+        "A log entry with a stack trace becomes a single row containing the full multi-line text",
+        "First line of file always starts a new row regardless of format",
+        "Multiline joining is ON by default for .log extension",
+        "Unit test verifies: loading a file with ERROR + 3-line stack trace produces one row containing all 4 lines",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Pattern: line starts with '[' = new log entry. Anything else = continuation of previous entry. This matches opensearch.log Log4j2 format: [timestamp][level][component] [node] message."
+    },
+    {
+      "id": "US-012",
+      "title": "CSV file support via Calcite CsvSchema",
+      "description": "As a CLI user, I want to .load a CSV file so that it becomes a queryable table with columns inferred from the header row.",
+      "acceptanceCriteria": [
+        ".load <path>.csv as <name> registers the CSV file as a Calcite table",
+        "Column names are inferred from the first (header) row",
+        "Column types are inferred from data sampling (string, integer, double)",
+        "Queries work: source = catalog.<name> | stats count() by <column>",
+        "A sample CSV file exists at cli/examples/orders.csv for testing",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Use Calcite's built-in CsvSchema or implement a simple CSV parser that creates SimpleTable. Add calcite-csv dependency if using CsvSchema, or use Jackson CsvMapper."
+    },
+    {
+      "id": "US-013",
+      "title": "Validate grok command through Unified Query API",
+      "description": "As a CLI user, I want to use PPL grok command on loaded text data to extract structured fields from semi-structured log lines.",
+      "acceptanceCriteria": [
+        "PPL grok command works end-to-end: source = catalog.logs | grok line pattern | where extracted_field = 'value'",
+        "Test with opensearch.log format: grok line '[%{TIMESTAMP_ISO8601:ts}][%{LOGLEVEL:level}%{SPACE}][%{DATA:component}] [%{DATA:node}] %{GREEDYDATA:msg}'",
+        "Extracted fields (ts, level, component, node, msg) are usable in subsequent where/stats/sort commands",
+        "If grok does NOT work through Calcite-backed engine, document the specific gap in notes field",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "CRITICAL validation. If grok doesn't work through UnifiedQueryPlanner/Compiler, this is a blocker for the intern project. The grok patterns (TIMESTAMP_ISO8601, LOGLEVEL, DATA, GREEDYDATA) are defined in common/src/main/resources/patterns/patterns. GrokExpression is in core/src/main/java/org/opensearch/sql/expression/parse/GrokExpression.java."
+    },
+    {
+      "id": "US-014",
+      "title": "Validate patterns command through Unified Query API",
+      "description": "As a CLI user, I want to use PPL patterns command to automatically discover and group similar log messages.",
+      "acceptanceCriteria": [
+        "PPL patterns command works: source = catalog.logs | grok line '...' | patterns msg method=simple_pattern",
+        "If method=brain is available, test that too",
+        "If patterns does NOT work through Calcite-backed engine, document the specific gap in notes field",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Lower priority than grok validation. PatternsExpression is in core/src/main/java/org/opensearch/sql/expression/parse/PatternsExpression.java."
+    },
+    {
+      "id": "US-015",
+      "title": "Pre-built format support for opensearch-log",
+      "description": "As a CLI user, I want .load file --format opensearch-log to auto-parse OpenSearch application logs into structured columns (timestamp, level, component, node, message) without writing grok patterns.",
+      "acceptanceCriteria": [
+        ".load opensearch.log as logs --format opensearch-log produces a table with columns: timestamp, level, component, node, message",
+        "The grok pattern is applied during loading, not at query time",
+        "Multiline joining is applied before grok parsing",
+        "Queries work directly on structured columns: source = catalog.logs | where level = 'ERROR' | stats count() by component",
+        "Format registry exists as a map of format name to grok pattern + config",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Depends on US-010 (text loading), US-011 (multiline), and US-013 (grok validation). If grok doesn't work at query time, this becomes the alternative: parse during load into SimpleTable columns."
+    },
+    {
+      "id": "US-016",
+      "title": "Context-aware tab completion from Calcite schema",
+      "description": "As a CLI user, I want tab completion to suggest table names after 'source =' and column names after 'where'/'stats'/'fields' based on the actual loaded schema.",
+      "acceptanceCriteria": [
+        "After 'source =' or 'FROM ', tab suggests loaded table names",
+        "After '| where ', '| eval ', '| fields ', '| stats ... by ', tab suggests column names from the most recently referenced table",
+        "Column suggestions update when new data is loaded via .load",
+        "Existing keyword completion still works alongside schema completion",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Extend QueryCompleter to query UnifiedQueryContext catalog metadata for table/column names. Use JLine3 Completer interface with context-aware logic based on cursor position and preceding tokens."
+    },
+    {
+      "id": "US-017",
+      "title": "Query timing and row count display",
+      "description": "As a CLI user, I want to see execution time and row count after every query result.",
+      "acceptanceCriteria": [
+        "Every query result shows 'N row(s) returned (Xms)' after the ASCII table",
+        "Timing measures the full plan() -> compile() -> executeQuery() -> format pipeline",
+        "Zero-row results show '0 row(s) returned (Xms)'",
+        "Non-interactive mode (-e) also shows timing",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Wrap query execution in System.nanoTime() timing. Update ResultSetFormatter to accept and display timing."
+    },
+    {
+      "id": "US-018",
+      "title": "Inline bar chart display for numeric aggregations",
+      "description": "As a CLI user, I want inline ASCII bar charts next to numeric columns so I can visually see the distribution of values like error counts by component.",
+      "acceptanceCriteria": [
+        "When query result has a numeric column, an optional bar column is appended showing proportional Unicode block bars",
+        "Bar width = (value / max_value) * max_bar_width using Unicode block chars",
+        ".chart on/off meta-command toggles bar chart display (default: on)",
+        "Works for stats count() by X, stats avg() by X, and similar aggregation results",
+        "Time-series detection: if group-by column looks like timestamp pattern, label bar column as 'trend'",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Extend ResultSetFormatter. Detect numeric columns from ResultSetMetaData. Use Unicode block elements: full block U+2588, left one-eighth block U+258F. Max bar width ~30 chars."
+    },
+    {
+      "id": "US-019",
+      "title": "Machine-readable JSON output for agent cooperation",
+      "description": "As an AI agent using the CLI as a tool, I want --output json to produce clean parseable JSON with no banners or noise, so I can programmatically query OpenSearch data.",
+      "acceptanceCriteria": [
+        "--output json flag produces JSON array output for query results",
+        "Non-interactive mode (-e) + --output json: no ASCII banner, no 'Loaded' messages, ONLY JSON to stdout",
+        ".tables and .describe output structured JSON when --output json is active",
+        "Errors output as JSON: {error:true, type:string, message:string}",
+        "Exit codes: 0=success, 1=query error, 2=load/file error",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Critical for agent cooperation story. The CLI becomes an MCP tool server for AI agents. JSON output must be deterministic and parseable by json.loads()."
+    },
+    {
+      "id": "US-020",
+      "title": "Script mode for multi-command agent pipelines",
+      "description": "As an AI agent, I want to send multiple commands (load + query) in one CLI invocation via --script or stdin so I can do multi-step investigation efficiently.",
+      "acceptanceCriteria": [
+        "--script flag or stdin pipe accepts multiple commands, one per line",
+        "Commands execute sequentially; each produces output",
+        "With --output json, each command's output is a separate JSON line (NDJSON)",
+        ".load commands produce status JSON; queries produce result arrays",
+        "Errors in one command don't abort the script (continue to next command)",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Depends on US-019 (JSON output). Enables AI agents to do: load file -> inspect schema -> run query in one call."
     }
   ]
 }
