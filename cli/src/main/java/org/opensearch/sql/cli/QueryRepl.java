@@ -207,7 +207,13 @@ public class QueryRepl {
       Map<String, Table> loaded;
       if (!path.toLowerCase().endsWith(".json") && alias != null) {
         try (FileInputStream fis = new FileInputStream(path)) {
-          loaded = SampleDataLoader.loadTextFile(fis, alias);
+          if (path.toLowerCase().endsWith(".csv")) {
+            loaded = SampleDataLoader.loadCsvFile(fis, alias);
+          } else if (path.toLowerCase().endsWith(".log")) {
+            loaded = SampleDataLoader.loadLogFile(fis, alias);
+          } else {
+            loaded = SampleDataLoader.loadTextFile(fis, alias);
+          }
         }
       } else {
         loaded = SampleDataLoader.loadFile(path);

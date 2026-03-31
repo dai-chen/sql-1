@@ -75,6 +75,95 @@ public class SampleDataLoader {
     return Map.of(tableName, builder.build());
   }
 
+  /** Load a CSV file with header-based schema and type inference. */
+  public static Map<String, Table> loadCsvFile(InputStream inputStream, String tableName)
+      throws IOException {
+    List<String> lines =
+        new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
+            .lines()
+            .filter(l -> !l.isEmpty())
+            .collect(Collectors.toList());
+    if (lines.isEmpty()) {
+      return Map.of(tableName, SimpleTable.builder().build());
+    }
+    String[] headers = lines.get(0).split(",", -1);
+    for (int i = 0; i < headers.length; i++) {
+      headers[i] = stripQuotes(headers[i].trim());
+    }
+    // Infer types from first data row
+    SqlTypeName[] types = new SqlTypeName[headers.length];
+    if (lines.size() > 1) {
+      String[] firstRow = lines.get(1).split(",", -1);
+      for (int i = 0; i < headers.length; i++) {
+        String val = i < firstRow.length ? stripQuotes(firstRow[i].trim()) : "";
+        types[i] = inferCsvType(val);
+      }
+    } else {
+      for (int i = 0; i < headers.length; i++) {
+        types[i] = SqlTypeName.VARCHAR;
+      }
+    }
+    SimpleTable.SimpleTableBuilder builder = SimpleTable.builder();
+    for (int i = 0; i < headers.length; i++) {
+      builder.col(headers[i], types[i]);
+    }
+    for (int r = 1; r < lines.size(); r++) {
+      String[] parts = lines.get(r).split(",", -1);
+      Object[] row = new Object[headers.length];
+      for (int i = 0; i < headers.length; i++) {
+        String val = i < parts.length ? stripQuotes(parts[i].trim()) : null;
+        row[i] = convertCsvValue(val, types[i]);
+      }
+      builder.row(row);
+    }
+    return Map.of(tableName, builder.build());
+  }
+
+  private static String stripQuotes(String value) {
+    if (value != null && value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+      return value.substring(1, value.length() - 1);
+    }
+    return value;
+  }
+
+  private static SqlTypeName inferCsvType(String value) {
+    if (value == null || value.isEmpty()) {
+      return SqlTypeName.VARCHAR;
+    }
+    try {
+      Integer.parseInt(value);
+      return SqlTypeName.INTEGER;
+    } catch (NumberFormatException e) {
+      // not an integer
+    }
+    try {
+      Double.parseDouble(value);
+      return SqlTypeName.DOUBLE;
+    } catch (NumberFormatException e) {
+      // not a double
+    }
+    if (value.equalsIgnoreCase("true") || value.equalsIgnoreCase("false")) {
+      return SqlTypeName.BOOLEAN;
+    }
+    return SqlTypeName.VARCHAR;
+  }
+
+  private static Object convertCsvValue(String value, SqlTypeName type) {
+    if (value == null || value.isEmpty()) {
+      return null;
+    }
+    switch (type) {
+      case INTEGER:
+        return Integer.parseInt(value);
+      case DOUBLE:
+        return Double.parseDouble(value);
+      case BOOLEAN:
+        return Boolean.parseBoolean(value);
+      default:
+        return value;
+    }
+  }
+
   /** Load a file, detecting type by extension. .json uses JSON loader, others use line-per-row. */
   public static Map<String, Table> loadFile(String path) throws IOException {
     String lower = path.toLowerCase();
@@ -82,6 +171,10 @@ public class SampleDataLoader {
     if (lower.endsWith(".json")) {
       try (FileInputStream fis = new FileInputStream(path)) {
         return load(fis);
+      }
+    } else if (lower.endsWith(".csv")) {
+      try (FileInputStream fis = new FileInputStream(path)) {
+        return loadCsvFile(fis, tableName);
       }
     } else if (lower.endsWith(".log")) {
       try (FileInputStream fis = new FileInputStream(path)) {

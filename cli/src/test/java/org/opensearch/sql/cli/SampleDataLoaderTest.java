@@ -6,7 +6,9 @@
 package org.opensearch.sql.cli;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
@@ -16,7 +18,10 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
+import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.schema.Table;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.Test;
 import org.opensearch.sql.api.SimpleTable;
 
@@ -94,5 +99,38 @@ public class SampleDataLoaderTest {
     Map<String, Table> tables = SampleDataLoader.load(is);
     assertThat(tables, hasKey("mixed"));
     assertThat(tables.get("mixed"), instanceOf(SimpleTable.class));
+  }
+
+  @Test
+  public void testLoadCsvFile() throws Exception {
+    String csv = "id,name,age\n1,Alice,30\n2,Bob,25\n";
+    InputStream is = new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8));
+    Map<String, Table> tables = SampleDataLoader.loadCsvFile(is, "people");
+    assertThat(tables, hasKey("people"));
+    RelDataType rowType = tables.get("people").getRowType(new JavaTypeFactoryImpl());
+    assertThat(rowType.getFieldNames(), contains("id", "name", "age"));
+    assertThat(rowType.getFieldList().get(0).getType().getSqlTypeName(), is(SqlTypeName.INTEGER));
+    assertThat(rowType.getFieldList().get(1).getType().getSqlTypeName(), is(SqlTypeName.VARCHAR));
+    assertThat(rowType.getFieldList().get(2).getType().getSqlTypeName(), is(SqlTypeName.INTEGER));
+  }
+
+  @Test
+  public void testLoadCsvFileTypeInference() throws Exception {
+    String csv = "name,price,active\nWidget,9.99,true\nGadget,19.99,false\n";
+    InputStream is = new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8));
+    Map<String, Table> tables = SampleDataLoader.loadCsvFile(is, "items");
+    RelDataType rowType = tables.get("items").getRowType(new JavaTypeFactoryImpl());
+    assertThat(rowType.getFieldList().get(0).getType().getSqlTypeName(), is(SqlTypeName.VARCHAR));
+    assertThat(rowType.getFieldList().get(1).getType().getSqlTypeName(), is(SqlTypeName.DOUBLE));
+    assertThat(rowType.getFieldList().get(2).getType().getSqlTypeName(), is(SqlTypeName.BOOLEAN));
+  }
+
+  @Test
+  public void testLoadFileDetectsCsv() throws Exception {
+    Map<String, Table> tables = SampleDataLoader.loadFile("cli/examples/orders.csv");
+    assertThat(tables, hasKey("orders"));
+    RelDataType rowType = tables.get("orders").getRowType(new JavaTypeFactoryImpl());
+    assertThat(rowType.getFieldNames(), hasItem("customer"));
+    assertThat(rowType.getFieldNames(), hasItem("price"));
   }
 }

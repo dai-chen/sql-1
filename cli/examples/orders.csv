@@ -1,0 +1,7 @@
+id,customer,product,quantity,price,shipped
+1,Alice,Laptop,1,999.99,true
+2,Bob,Mouse,3,29.99,true
+3,Alice,Keyboard,1,79.99,false
+4,Charlie,Monitor,2,349.99,true
+5,Bob,Headphones,1,149.99,false
+6,Alice,USB Cable,5,9.99,true
