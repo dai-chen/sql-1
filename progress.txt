@@ -28,6 +28,9 @@
 - Grok works end-to-end through Calcite: plan() → compile() → executeQuery() — extracted fields usable in where/stats/sort
 - Patterns command works end-to-end through Calcite: uses REGEXP_REPLACE_3 (not ParseFunction UDF), default field `patterns_field`, configurable via `new_field='name'`
 - UnifiedQueryContext.Builder.setting(key, value) configures PPL settings — use full key strings like "plugins.ppl.pattern.method"
+- LogFormat registry at cli/src/main/java/org/opensearch/sql/cli/LogFormat.java — extensible via LogFormat.register(). Built-in: "opensearch-log" with 5 columns (timestamp, level, component, node, message)
+- SampleDataLoader.loadFile(path, format) overload accepts optional format name for structured parsing during load time
+- QueryRepl .load supports `--format <name>` flag: `.load <path> [as <name>] [--format <format>]`
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -352,4 +355,31 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - For simple_pattern method, visitPatterns internally creates a Parse node and delegates to buildParseRelNode
   - UnifiedQueryContext.Builder.setting() accepts full key strings like "plugins.ppl.pattern.method" for configuring pattern settings
   - Chaining grok → patterns works: extract fields with grok, then apply patterns to an extracted field
+---
+
+## 2026-03-31T01:58 - US-015
+- Implemented pre-built format support for opensearch-log with structured column extraction during load time
+- Created LogFormat.java: format registry mapping format names to regex Pattern + column definitions
+- Added SampleDataLoader.loadFormattedLogFile(): multiline joining → regex parsing → SimpleTable with structured columns
+- Added SampleDataLoader.loadFile(path, format) overload for format-aware file loading
+- Updated QueryRepl .load command: `.load <path> [as <name>] [--format <format>]` syntax
+- Updated Main.java: added `--format/-f` PicoCLI option, passed to SampleDataLoader.loadFile()
+- opensearch-log format extracts 5 VARCHAR columns: timestamp, level, component, node, message
+- Regex pattern uses DOTALL flag for multiline messages (stack traces joined by US-011)
+- Non-matching entries get raw text in message column only (graceful degradation)
+- End-to-end verified: `-d cli/examples/opensearch.log --format opensearch-log -e 'source = catalog.opensearch | where level = "ERROR" | stats count() by component'` → 1 row with o.o.a.b.TransportBulkAction
+- Files changed:
+  - NEW: cli/src/main/java/org/opensearch/sql/cli/LogFormat.java
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/SampleDataLoader.java (loadFormattedLogFile, loadFile overload)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (--format parsing in .load, 3-arg loadData)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/Main.java (--format/-f option)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/SampleDataLoaderTest.java (3 new tests)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/QueryReplTest.java (1 new test)
+- **Learnings for future iterations:**
+  - LogFormat registry is extensible: LogFormat.register(new LogFormat(name, pattern, columns)) adds new formats
+  - opensearch-log regex: `\[([^\]]+)\]` captures bracket-delimited fields, `\s*` trims trailing spaces in level/component/node
+  - Pattern.DOTALL is essential for multiline-joined entries (stack traces contain \n in message field)
+  - loadFormattedLogFile reuses the same multiline joining logic as loadLogFile (lines not starting with '[' are continuations)
+  - QueryRepl.deriveTableName() duplicates SampleDataLoader's private method — could be refactored to a shared utility
+  - The --format flag works in both interactive (.load command) and non-interactive (-d flag) modes
 ---

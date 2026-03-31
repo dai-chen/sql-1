@@ -271,8 +271,8 @@
         "Tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": "Depends on US-010 (text loading), US-011 (multiline), and US-013 (grok validation). If grok doesn't work at query time, this becomes the alternative: parse during load into SimpleTable columns."
+      "passes": true,
+      "notes": "Implemented using Java regex (not PPL grok) applied during load time. LogFormat registry maps format names to regex Pattern + column definitions. opensearch-log format extracts 5 columns: timestamp, level, component, node, message. Multiline joining applied before regex parsing. Pattern uses DOTALL flag for multiline messages. Non-matching entries get raw text in message column only."
     },
     {
       "id": "US-016",
