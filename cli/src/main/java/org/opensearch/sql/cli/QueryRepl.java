@@ -252,10 +252,12 @@ public class QueryRepl {
 
   private void executeQuery(String query) {
     try {
+      long start = System.nanoTime();
       RelNode plan = planner.plan(query);
       PreparedStatement stmt = compiler.compile(plan);
       try (ResultSet rs = stmt.executeQuery()) {
-        ResultSetFormatter.format(rs, out);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        ResultSetFormatter.format(rs, out, elapsedMs);
       }
     } catch (SyntaxCheckException e) {
       out.println("Syntax error: " + e.getMessage());

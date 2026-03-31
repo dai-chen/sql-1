@@ -84,4 +84,22 @@ public class ResultSetFormatterTest {
     assertTrue(output.contains("+--"));
     assertTrue(output.contains("0 row(s) returned"));
   }
+
+  @Test
+  public void testFormatWithElapsedTime() throws Exception {
+    ResultSet rs = mock(ResultSet.class);
+    ResultSetMetaData meta = mock(ResultSetMetaData.class);
+    when(rs.getMetaData()).thenReturn(meta);
+    when(meta.getColumnCount()).thenReturn(1);
+    when(meta.getColumnName(1)).thenReturn("id");
+    when(rs.next()).thenReturn(true, false);
+    when(rs.getObject(1)).thenReturn(1);
+
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    PrintStream out = new PrintStream(baos);
+    ResultSetFormatter.format(rs, out, 42);
+    String output = baos.toString();
+
+    assertTrue(output.contains("1 row(s) returned (42ms)"));
+  }
 }

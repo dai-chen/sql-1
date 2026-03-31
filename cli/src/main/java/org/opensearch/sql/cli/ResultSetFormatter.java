@@ -19,6 +19,11 @@ public class ResultSetFormatter {
 
   /** Print the ResultSet as an ASCII table to the given PrintStream. */
   public static void format(ResultSet rs, PrintStream out) throws SQLException {
+    format(rs, out, -1);
+  }
+
+  /** Print the ResultSet as an ASCII table with elapsed time in the status line. */
+  public static void format(ResultSet rs, PrintStream out, long elapsedMs) throws SQLException {
     ResultSetMetaData meta = rs.getMetaData();
     int colCount = meta.getColumnCount();
 
@@ -56,7 +61,11 @@ public class ResultSetFormatter {
       out.println(formatRow(vals, widths));
     }
     out.println();
-    out.println(rows.size() + " row(s) returned");
+    String status = rows.size() + " row(s) returned";
+    if (elapsedMs >= 0) {
+      status += " (" + elapsedMs + "ms)";
+    }
+    out.println(status);
   }
 
   private static String toStr(Object val) {
