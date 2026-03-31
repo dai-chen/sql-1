@@ -135,6 +135,22 @@ public class QueryReplTest {
   }
 
   @Test
+  public void testLoadTextFile() {
+    repl.dispatch(".load cli/examples/opensearch.log");
+    String output = baos.toString();
+    assertThat(output, containsString("Loaded tables:"));
+    assertThat(output, containsString("opensearch"));
+  }
+
+  @Test
+  public void testLoadTextFileWithAlias() {
+    repl.dispatch(".load cli/examples/opensearch.log as mylog");
+    String output = baos.toString();
+    assertThat(output, containsString("Loaded tables:"));
+    assertThat(output, containsString("mylog"));
+  }
+
+  @Test
   public void testSchemaMissingArg() {
     repl.dispatch(".schema");
     assertThat(baos.toString(), containsString("Usage: .schema"));

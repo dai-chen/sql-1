@@ -1,0 +1,12 @@
+[2024-01-15T10:30:00,123][INFO ][o.o.n.Node               ] [node-1] initializing ...
+[2024-01-15T10:30:01,456][INFO ][o.o.n.Node               ] [node-1] initialized
+[2024-01-15T10:30:02,789][INFO ][o.o.c.s.ClusterService   ] [node-1] cluster state updated
+[2024-01-15T10:30:03,012][WARN ][o.o.i.m.MapperService    ] [node-1] field [data] already exists
+[2024-01-15T10:30:04,345][ERROR][o.o.a.b.TransportBulkAction] [node-1] failed to execute bulk item
+java.lang.NullPointerException: null
+	at org.opensearch.action.bulk.TransportBulkAction.executeBulk(TransportBulkAction.java:234)
+	at org.opensearch.action.bulk.TransportBulkAction.doExecute(TransportBulkAction.java:156)
+[2024-01-15T10:30:05,678][INFO ][o.o.c.r.a.AllocationService] [node-1] cluster health changed from [YELLOW] to [GREEN]
+[2024-01-15T10:30:06,901][DEBUG][o.o.a.s.TransportSearchAction] [node-1] executing search phase [query]
+[2024-01-15T10:30:07,234][INFO ][o.o.p.PluginsService     ] [node-1] loaded plugin [opensearch-sql]
+[2024-01-15T10:30:08,567][WARN ][o.o.m.j.JvmGcMonitorService] [node-1] [gc][123] overhead, spent [500ms] collecting

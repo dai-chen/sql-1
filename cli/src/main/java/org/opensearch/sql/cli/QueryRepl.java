@@ -117,7 +117,17 @@ public class QueryRepl {
         showSchema(arg);
         break;
       case ".load":
-        loadData(arg);
+        String rest = arg;
+        String path;
+        String alias = null;
+        int asIdx = rest.toLowerCase().indexOf(" as ");
+        if (asIdx >= 0) {
+          path = rest.substring(0, asIdx).trim();
+          alias = rest.substring(asIdx + 4).trim();
+        } else {
+          path = rest;
+        }
+        loadData(path, alias);
         break;
       default:
         out.println("Unknown command: " + cmd + ". Type .help for available commands.");
@@ -131,7 +141,7 @@ public class QueryRepl {
     out.println("  .language sql|ppl    Switch query language");
     out.println("  .tables              List loaded tables and columns");
     out.println("  .schema <table>      Show column details for a table");
-    out.println("  .load <path>         Load a JSON data file");
+    out.println("  .load <path> [as <name>]  Load a data file (JSON or text)");
     out.println();
     out.println("Enter any other input to execute as a query.");
   }
@@ -185,12 +195,24 @@ public class QueryRepl {
   }
 
   private void loadData(String path) {
+    loadData(path, null);
+  }
+
+  private void loadData(String path, String alias) {
     if (path.isEmpty()) {
-      out.println("Usage: .load <path>");
+      out.println("Usage: .load <path> [as <name>]");
       return;
     }
-    try (FileInputStream fis = new FileInputStream(path)) {
-      tables = SampleDataLoader.load(fis);
+    try {
+      Map<String, Table> loaded;
+      if (!path.toLowerCase().endsWith(".json") && alias != null) {
+        try (FileInputStream fis = new FileInputStream(path)) {
+          loaded = SampleDataLoader.loadTextFile(fis, alias);
+        }
+      } else {
+        loaded = SampleDataLoader.loadFile(path);
+      }
+      tables = loaded;
       rebuildContext();
       completer.updateTables(tables);
       highlighter.updateTables(tables);

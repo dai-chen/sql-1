@@ -38,6 +38,36 @@ public class SampleDataLoaderTest {
   }
 
   @Test
+  public void testLoadTextFile() throws Exception {
+    String text = "line one\nline two\nline three";
+    InputStream is = new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
+    Map<String, Table> tables = SampleDataLoader.loadTextFile(is, "logs");
+    assertThat(tables, hasKey("logs"));
+    assertThat(tables.get("logs"), instanceOf(SimpleTable.class));
+  }
+
+  @Test
+  public void testLoadTextFileEmptyLines() throws Exception {
+    String text = "first\n\nthird";
+    InputStream is = new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
+    Map<String, Table> tables = SampleDataLoader.loadTextFile(is, "data");
+    assertThat(tables, hasKey("data"));
+  }
+
+  @Test
+  public void testLoadFileDetectsJson() throws Exception {
+    Map<String, Table> tables = SampleDataLoader.loadFile("cli/examples/hr.json");
+    assertThat(tables, hasKey("employees"));
+    assertThat(tables, hasKey("departments"));
+  }
+
+  @Test
+  public void testLoadFileDetectsText() throws Exception {
+    Map<String, Table> tables = SampleDataLoader.loadFile("cli/examples/opensearch.log");
+    assertThat(tables, hasKey("opensearch"));
+  }
+
+  @Test
   public void testTypeInference() throws Exception {
     String json = "{\"mixed\": [{\"i\": 1, \"s\": \"hello\", \"d\": 3.14, \"b\": true}]}";
     InputStream is = new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8));

@@ -7,12 +7,18 @@ package org.opensearch.sql.cli;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.opensearch.sql.api.SimpleTable;
@@ -31,6 +37,41 @@ public class SampleDataLoader {
     Map<String, Table> tables = new LinkedHashMap<>();
     dataset.forEach((tableName, rows) -> tables.put(tableName, buildTable(tableName, rows)));
     return tables;
+  }
+
+  /** Load a text file where each line becomes a row with a single 'line' VARCHAR column. */
+  public static Map<String, Table> loadTextFile(InputStream inputStream, String tableName)
+      throws IOException {
+    List<String> lines =
+        new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
+            .lines()
+            .collect(Collectors.toList());
+    SimpleTable.SimpleTableBuilder builder = SimpleTable.builder().col("line", SqlTypeName.VARCHAR);
+    for (String line : lines) {
+      builder.row(new Object[] {line});
+    }
+    return Map.of(tableName, builder.build());
+  }
+
+  /** Load a file, detecting type by extension. .json uses JSON loader, others use line-per-row. */
+  public static Map<String, Table> loadFile(String path) throws IOException {
+    String lower = path.toLowerCase();
+    String tableName = deriveTableName(path);
+    if (lower.endsWith(".json")) {
+      try (FileInputStream fis = new FileInputStream(path)) {
+        return load(fis);
+      }
+    } else {
+      try (FileInputStream fis = new FileInputStream(path)) {
+        return loadTextFile(fis, tableName);
+      }
+    }
+  }
+
+  private static String deriveTableName(String path) {
+    String fileName = Path.of(path).getFileName().toString();
+    int dot = fileName.lastIndexOf('.');
+    return dot > 0 ? fileName.substring(0, dot) : fileName;
   }
 
   /** Load tables from a classpath resource. */

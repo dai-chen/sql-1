@@ -5,7 +5,6 @@
 
 package org.opensearch.sql.cli;
 
-import java.io.FileInputStream;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import org.apache.calcite.linq4j.Enumerator;
@@ -25,7 +24,7 @@ public class Main implements Callable<Integer> {
 
   @Option(
       names = {"-d", "--data"},
-      description = "Path to JSON data file")
+      description = "Path to data file (JSON or text)")
   String dataFile;
 
   @Option(
@@ -47,7 +46,7 @@ public class Main implements Callable<Integer> {
   public Integer call() throws Exception {
     Map<String, Table> tables =
         dataFile != null
-            ? SampleDataLoader.load(new FileInputStream(dataFile))
+            ? SampleDataLoader.loadFile(dataFile)
             : SampleDataLoader.loadFromClasspath("data/hr.json");
 
     QueryType queryType = "sql".equalsIgnoreCase(language) ? QueryType.SQL : QueryType.PPL;
