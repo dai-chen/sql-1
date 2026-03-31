@@ -182,7 +182,9 @@ public class ResultSetFormatter {
       result.add(row);
     }
     try {
-      new ObjectMapper().writeValue(out, result);
+      ObjectMapper mapper = new ObjectMapper();
+      mapper.configure(com.fasterxml.jackson.core.JsonGenerator.Feature.AUTO_CLOSE_TARGET, false);
+      mapper.writeValue(out, result);
       out.println();
     } catch (Exception e) {
       throw new SQLException("Failed to write JSON", e);

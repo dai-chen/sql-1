@@ -298,9 +298,20 @@ public class QueryRepl {
       rebuildContext();
       completer.updateTables(tables);
       highlighter.updateTables(tables);
-      out.println("Loaded tables: " + String.join(", ", tables.keySet()));
+      if (jsonOutput) {
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("status", "ok");
+        status.put("tables", new ArrayList<>(tables.keySet()));
+        writeJson(status);
+      } else {
+        out.println("Loaded tables: " + String.join(", ", tables.keySet()));
+      }
     } catch (IOException e) {
-      out.println("Error loading file: " + e.getMessage());
+      if (jsonOutput) {
+        writeJsonError("IOException", e.getMessage());
+      } else {
+        out.println("Error loading file: " + e.getMessage());
+      }
     }
   }
 
@@ -348,7 +359,9 @@ public class QueryRepl {
 
   private void writeJson(Object value) {
     try {
-      new ObjectMapper().writeValue(out, value);
+      ObjectMapper mapper = new ObjectMapper();
+      mapper.configure(com.fasterxml.jackson.core.JsonGenerator.Feature.AUTO_CLOSE_TARGET, false);
+      mapper.writeValue(out, value);
       out.println();
     } catch (Exception e) {
       out.println("Error: " + e.getMessage());
@@ -394,5 +407,10 @@ public class QueryRepl {
 
   String prompt() {
     return language.name().toLowerCase() + "> ";
+  }
+
+  /** Close the underlying query context. */
+  public void close() {
+    closeContext();
   }
 }

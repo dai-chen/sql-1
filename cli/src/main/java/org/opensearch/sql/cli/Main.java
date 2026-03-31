@@ -5,11 +5,14 @@
 
 package org.opensearch.sql.cli;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.Table;
+import org.jline.reader.EndOfFileException;
 import org.opensearch.sql.executor.QueryType;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -48,6 +51,11 @@ public class Main implements Callable<Integer> {
       description = "Output format: table (default) or json",
       defaultValue = "table")
   String output;
+
+  @Option(
+      names = {"-s", "--script"},
+      description = "Read commands from stdin, one per line")
+  boolean script;
 
   public static void main(String[] args) {
     System.exit(new CommandLine(new Main()).execute(args));
@@ -96,6 +104,27 @@ public class Main implements Callable<Integer> {
         }
         return 1;
       }
+    }
+
+    if (script || System.console() == null) {
+      QueryRepl repl = new QueryRepl(tables, queryType, System.out, jsonOutput);
+      try (BufferedReader br = new BufferedReader(new InputStreamReader(System.in))) {
+        String line;
+        while ((line = br.readLine()) != null) {
+          line = line.strip();
+          if (line.isEmpty()) {
+            continue;
+          }
+          try {
+            repl.dispatch(line);
+          } catch (EndOfFileException e) {
+            break;
+          }
+        }
+      } finally {
+        repl.close();
+      }
+      return 0;
     }
 
     System.out.println("OpenSearch Unified Query Shell");

@@ -10,8 +10,11 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -21,6 +24,7 @@ public class MainTest {
 
   private final PrintStream originalOut = System.out;
   private final PrintStream originalErr = System.err;
+  private final InputStream originalIn = System.in;
   private ByteArrayOutputStream outContent;
   private ByteArrayOutputStream errContent;
 
@@ -36,6 +40,7 @@ public class MainTest {
   public void tearDown() {
     System.setOut(originalOut);
     System.setErr(originalErr);
+    System.setIn(originalIn);
   }
 
   @Test
@@ -95,5 +100,44 @@ public class MainTest {
             .execute("--output", "json", "-d", "nonexistent.json", "-e", "query");
     assertEquals(2, exitCode);
     assertThat(outContent.toString(), containsString("\"error\":true"));
+  }
+
+  @Test
+  public void testScriptMode() {
+    String input = ".tables\nsource = catalog.employees | where age > 30\n";
+    System.setIn(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
+    int exitCode = new CommandLine(new Main()).execute("--script");
+    assertEquals(0, exitCode);
+    String stdout = outContent.toString();
+    assertThat(stdout, containsString("employees"));
+    assertThat(stdout, containsString("Bob"));
+  }
+
+  @Test
+  public void testScriptModeNdjson() {
+    String input = ".tables\nsource = catalog.employees | where age > 30\n";
+    System.setIn(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
+    int exitCode = new CommandLine(new Main()).execute("--script", "--output", "json");
+    assertEquals(0, exitCode);
+    String stdout = outContent.toString();
+    String[] lines = stdout.strip().split("\n");
+    assertEquals(2, lines.length);
+    assertThat(lines[0], containsString("employees"));
+    assertThat(lines[1], containsString("Bob"));
+  }
+
+  @Test
+  public void testScriptModeErrorResilience() {
+    String input =
+        "source = catalog.employees | where age > 30\n"
+            + "INVALID QUERY\n"
+            + "source = catalog.employees | where age > 30\n";
+    System.setIn(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
+    int exitCode = new CommandLine(new Main()).execute("--script");
+    assertEquals(0, exitCode);
+    String stdout = outContent.toString();
+    // Should have output from all three commands (two good + one error)
+    assertThat(stdout, containsString("rror"));
+    assertThat(stdout, containsString("Bob"));
   }
 }
