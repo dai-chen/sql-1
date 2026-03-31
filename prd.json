@@ -320,8 +320,8 @@
         "Tests pass"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": "Extend ResultSetFormatter. Detect numeric columns from ResultSetMetaData. Use Unicode block elements: full block U+2588, left one-eighth block U+258F. Max bar width ~30 chars."
+      "passes": true,
+      "notes": "Implemented via 4-arg format() overload in ResultSetFormatter. Finds last numeric column (instanceof Number), computes max, renders Unicode █ bars (MAX_BAR_WIDTH=30). Time-series detection: 2 columns + first col values contain '-' and ':' → 'trend' header. .chart on/off meta-command in QueryRepl (default: on). Backward compatible: 3-arg format() delegates with chartEnabled=false."
     },
     {
       "id": "US-019",
@@ -337,8 +337,8 @@
         "Tests pass"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": "Critical for agent cooperation story. The CLI becomes an MCP tool server for AI agents. JSON output must be deterministic and parseable by json.loads()."
+      "passes": true,
+      "notes": "Implemented --output json flag. JSON array output for queries via ResultSetFormatter.formatJson(). JSON error objects with error/type/message keys. Exit codes: 0=success, 1=query error, 2=load/file error. .tables and .schema produce structured JSON. Backward-compatible 3-arg QueryRepl constructor preserved."
     },
     {
       "id": "US-020",

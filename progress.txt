@@ -420,3 +420,50 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - Timing wraps plan+compile+executeQuery (not format) — format is just I/O, not meaningful to time
   - Existing test assertions using contains("row(s) returned") naturally match the new "N row(s) returned (Xms)" format
 ---
+
+## 2026-03-31T02:31 - US-018
+- Implemented inline bar chart display for numeric aggregation results in ResultSetFormatter
+- Added `format(ResultSet, PrintStream, long, boolean)` 4-arg overload; 3-arg delegates with chartEnabled=false (backward compatible)
+- Bar chart logic: finds last numeric column (instanceof Number), computes max value, renders Unicode █ (U+2588) bars proportional to max, MAX_BAR_WIDTH=30
+- Time-series detection: if exactly 2 columns and all first-column values contain '-' and ':', bar header is 'trend' instead of 'chart'
+- Zero/negative/null values get empty bar string
+- Added `.chart on/off` meta-command to QueryRepl (default: on), wired chartEnabled into executeQuery() → format()
+- Added `.chart on|off` to .help output
+- Added 2 new ResultSetFormatterTest tests: testFormatWithBarChart (verifies █ and 'chart' header), testFormatWithBarChartTimeSeries (verifies 'trend' header)
+- Added 1 new QueryReplTest test: testChartMetaCommand (verifies .chart on/off/usage)
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/ResultSetFormatter.java (4-arg format overload, bar chart logic, MAX_BAR_WIDTH constant)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (chartEnabled field, .chart case in handleMeta, .help update, executeQuery passes chartEnabled)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/ResultSetFormatterTest.java (2 new tests)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/QueryReplTest.java (1 new test)
+- **Learnings for future iterations:**
+  - 4-arg overload pattern (adding boolean flag) keeps backward compatibility — 3-arg delegates with default false
+  - instanceof Number catches Integer, Long, Float, Double, BigDecimal — more robust than checking ResultSetMetaData column types
+  - Time-series detection heuristic: checking for '-' and ':' in string values is simple but effective for ISO timestamps
+  - Unicode █ (U+2588) renders well in most terminals; Math.max(1, w) ensures at least 1 block for positive values
+---
+
+## 2026-03-31T02:39 - US-019
+- Implemented machine-readable JSON output for AI agent cooperation
+- Added `--output/-o` PicoCLI option to Main.java (values: 'table' default, 'json')
+- Added `boolean jsonOutput` field to QueryRepl with backward-compatible 3-arg constructor delegate
+- Added `ResultSetFormatter.formatJson(ResultSet, PrintStream)` using Jackson ObjectMapper — outputs JSON array of row objects
+- JSON branches in QueryRepl: executeQuery → formatJson, listTables → JSON array with name/columns, showSchema → JSON array with name/type
+- Error handling: all error paths output `{"error":true,"type":"<class>","message":"<msg>"}` when jsonOutput=true
+- Exit codes: 0=success, 1=query error, 2=file load error (Main.call wraps file loading in try/catch for exit 2)
+- `lastQueryFailed` flag in QueryRepl allows Main to check query status without double-printing errors
+- Non-interactive JSON mode suppresses all banner/loaded messages — only JSON to stdout
+- Added 3 new MainTest tests: testJsonOutputPpl, testJsonOutputError, testJsonOutputFileError
+- All 73 cli tests pass, BUILD SUCCESSFUL
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/Main.java (--output/-o option, JSON error handling, exit codes)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (jsonOutput field, JSON branches, writeJson/writeJsonError helpers)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/ResultSetFormatter.java (formatJson method)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/MainTest.java (3 new tests)
+- **Learnings for future iterations:**
+  - Backward-compatible constructor pattern (3-arg delegates to 4-arg with default false) avoids updating all existing test files
+  - Jackson ObjectMapper is available transitively — no new dependency needed
+  - `lastQueryFailed` flag pattern: QueryRepl.dispatch() sets it on error, Main.call() checks it for exit code — avoids catching exceptions twice
+  - JSON error string escaping: `e.getMessage().replace("\"", "\\\"")` handles quotes in error messages
+  - Gradle build hamster banner comes from Gradle, not CLI — CLI JSON output is clean when run directly
+---
