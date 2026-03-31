@@ -278,3 +278,19 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - deriveTableName() extracts filename stem (e.g., "opensearch" from "opensearch.log") for auto-naming text tables
   - The `.load <path> as <name>` syntax only affects non-JSON files (JSON files have their own table names from top-level keys)
 ---
+
+## 2026-03-31T01:19 - US-011
+- Implemented multi-line log joining for .log files in SampleDataLoader
+- Added `loadLogFile(InputStream, String)` method: lines not starting with '[' are appended to previous entry with '\n' separator
+- Updated `loadFile` to route .log extension through `loadLogFile` (previously all non-JSON went to `loadTextFile`)
+- Added unit test `testLoadLogFileJoinsMultiLineStackTrace`: ERROR + 3 stack trace lines → 1 row containing all 4 lines
+- opensearch.log: 10 raw lines → 8 logical entries after joining
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/SampleDataLoader.java (added loadLogFile, updated loadFile routing)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/SampleDataLoaderTest.java (added testLoadLogFileJoinsMultiLineStackTrace)
+- **Learnings for future iterations:**
+  - loadFile now has 3-way routing: .json → load(), .log → loadLogFile(), everything else → loadTextFile()
+  - loadLogFile is public static like loadTextFile — can be called directly from tests or QueryRepl if needed
+  - Multi-line joining pattern: `line.startsWith("[")` detects new log entries; continuation lines get `entries.set(last, last + "\n" + line)`
+  - The existing testLoadFileDetectsText test still passes because it only checks the key exists, not row count
+---
