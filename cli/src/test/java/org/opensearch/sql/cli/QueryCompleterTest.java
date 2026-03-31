@@ -39,6 +39,19 @@ public class QueryCompleterTest {
     ParsedLine parsedLine = mock(ParsedLine.class);
     when(parsedLine.word()).thenReturn(prefix);
     when(parsedLine.wordCursor()).thenReturn(prefix.length());
+    when(parsedLine.line()).thenReturn(prefix);
+    when(parsedLine.cursor()).thenReturn(prefix.length());
+    List<Candidate> candidates = new ArrayList<>();
+    completer.complete(lineReader, parsedLine, candidates);
+    return candidates.stream().map(Candidate::value).collect(Collectors.toList());
+  }
+
+  private List<String> complete(QueryCompleter completer, String fullLine, String currentWord) {
+    ParsedLine parsedLine = mock(ParsedLine.class);
+    when(parsedLine.line()).thenReturn(fullLine);
+    when(parsedLine.cursor()).thenReturn(fullLine.length());
+    when(parsedLine.word()).thenReturn(currentWord);
+    when(parsedLine.wordCursor()).thenReturn(currentWord.length());
     List<Candidate> candidates = new ArrayList<>();
     completer.complete(lineReader, parsedLine, candidates);
     return candidates.stream().map(Candidate::value).collect(Collectors.toList());
@@ -115,5 +128,64 @@ public class QueryCompleterTest {
     QueryCompleter completer = new QueryCompleter(tables, QueryType.SQL);
     List<String> results = complete(completer, "");
     assertThat(results, not(empty()));
+  }
+
+  @Test
+  public void testSqlCompletesTableNamesAfterFrom() {
+    QueryCompleter completer = new QueryCompleter(tables, QueryType.SQL);
+    List<String> results = complete(completer, "SELECT * FROM ", "");
+    assertThat(results, hasItem("employees"));
+    assertThat(results, hasItem("departments"));
+    assertThat(results, not(hasItem("SELECT")));
+    assertThat(results, not(hasItem("name")));
+  }
+
+  @Test
+  public void testPplCompletesTableNamesAfterSource() {
+    QueryCompleter completer = new QueryCompleter(tables, QueryType.PPL);
+    List<String> results = complete(completer, "source = ", "");
+    assertThat(results, hasItem("catalog.employees"));
+    assertThat(results, hasItem("catalog.departments"));
+    assertThat(results, not(hasItem("source")));
+  }
+
+  @Test
+  public void testSqlCompletesColumnNamesAfterWhere() {
+    QueryCompleter completer = new QueryCompleter(tables, QueryType.SQL);
+    List<String> results = complete(completer, "SELECT * FROM employees WHERE ", "");
+    assertThat(results, hasItem("name"));
+    assertThat(results, hasItem("salary"));
+    assertThat(results, not(hasItem("SELECT")));
+    assertThat(results, not(hasItem("employees")));
+    assertThat(results, not(hasItem("budget")));
+  }
+
+  @Test
+  public void testPplCompletesColumnNamesAfterPipeWhere() {
+    QueryCompleter completer = new QueryCompleter(tables, QueryType.PPL);
+    List<String> results = complete(completer, "source = catalog.employees | where ", "");
+    assertThat(results, hasItem("name"));
+    assertThat(results, hasItem("salary"));
+    assertThat(results, not(hasItem("source")));
+    assertThat(results, not(hasItem("budget")));
+  }
+
+  @Test
+  public void testPplCompletesColumnNamesAfterStats() {
+    QueryCompleter completer = new QueryCompleter(tables, QueryType.PPL);
+    List<String> results =
+        complete(completer, "source = catalog.employees | stats count() by ", "");
+    assertThat(results, hasItem("department"));
+    assertThat(results, hasItem("age"));
+    assertThat(results, not(hasItem("budget")));
+  }
+
+  @Test
+  public void testPplCompletesColumnNamesAfterFields() {
+    QueryCompleter completer = new QueryCompleter(tables, QueryType.PPL);
+    List<String> results = complete(completer, "source = catalog.employees | fields ", "");
+    assertThat(results, hasItem("name"));
+    assertThat(results, hasItem("id"));
+    assertThat(results, not(hasItem("budget")));
   }
 }
