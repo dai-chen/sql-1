@@ -239,8 +239,8 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": "CRITICAL validation. If grok doesn't work through UnifiedQueryPlanner/Compiler, this is a blocker for the intern project. The grok patterns (TIMESTAMP_ISO8601, LOGLEVEL, DATA, GREEDYDATA) are defined in common/src/main/resources/patterns/patterns. GrokExpression is in core/src/main/java/org/opensearch/sql/expression/parse/GrokExpression.java."
+      "passes": true,
+      "notes": "VALIDATED: Grok works end-to-end through UnifiedQueryPlanner/Compiler. Limitation: TIMESTAMP_ISO8601 pattern causes duplicate named group key error in ParseFunction.ParseImplementor (Collectors.toMap) because it expands to sub-patterns (YEAR, MONTHNUM, etc.) with duplicate keys. Workaround: use %{DATA:ts} instead. LOGLEVEL, DATA, GREEDYDATA, SPACE all work correctly. Grok + where filter and grok + stats aggregation both validated."
     },
     {
       "id": "US-014",

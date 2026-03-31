@@ -23,6 +23,9 @@
 - Gradle `test` task also defaults workingDir to subproject dir — add `workingDir = rootProject.projectDir` to test block if tests use root-relative paths
 - SampleDataLoader.loadFile(String) is the unified entry point for file loading — detects .json vs text by extension, derives table name from filename stem
 - `.load <path> as <name>` syntax in QueryRepl only affects non-JSON files; JSON files use their own top-level keys as table names
+- TIMESTAMP_ISO8601 grok pattern causes duplicate key error in ParseFunction — use %{DATA:fieldname} for timestamps instead
+- Grok square bracket escaping: \[ and \] in grok pattern, "\\[" and "\\]" in Java strings
+- Grok works end-to-end through Calcite: plan() → compile() → executeQuery() — extracted fields usable in where/stats/sort
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -293,4 +296,22 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - loadLogFile is public static like loadTextFile — can be called directly from tests or QueryRepl if needed
   - Multi-line joining pattern: `line.startsWith("[")` detects new log entries; continuation lines get `entries.set(last, last + "\n" + line)`
   - The existing testLoadFileDetectsText test still passes because it only checks the key exists, not row count
+---
+
+## 2026-03-31T01:24 - US-013
+- VALIDATED: PPL grok command works end-to-end through UnifiedQueryPlanner → UnifiedQueryCompiler → executeQuery
+- Created GrokValidationTest.java with 3 tests:
+  - testGrokExtractsFieldsFromLogLines: loads opensearch.log, grok extracts ts/level/component/node/msg, verifies 9 rows with all fields non-null
+  - testGrokWithWhereFilter: grok + where level = 'ERROR' returns exactly 1 ERROR entry
+  - testGrokWithStatsAggregation: grok + stats count() by level verifies INFO=5 and multiple levels
+- Grok pattern used: \[%{DATA:ts}\]\[%{LOGLEVEL:level}%{SPACE}\]\[%{DATA:component}\] \[%{DATA:node}\] %{GREEDYDATA:msg}
+- Files changed:
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/GrokValidationTest.java
+- **Learnings for future iterations:**
+  - TIMESTAMP_ISO8601 grok pattern CANNOT be used — it expands to sub-patterns (YEAR, MONTHNUM, MONTHDAY, HOUR, MINUTE, SECOND) that create duplicate named group keys, causing Collectors.toMap duplicate key error in ParseFunction.ParseImplementor.parse(). Use %{DATA:ts} instead.
+  - Grok pipeline in Calcite: Parse(GROK) AST → CalciteRelNodeVisitor.visitParse() → buildParseRelNode() → GROK UDF RexCall + ITEM accessor for each named group → LogicalProject
+  - Grok is implemented as a Calcite UDF (ParseFunction) that returns Map<String,String>, with ITEM operator extracting individual fields
+  - Square brackets in grok patterns need escaping: \[ and \] (in Java string: "\\[" and "\\]")
+  - LOGLEVEL, DATA, GREEDYDATA, SPACE grok patterns all work correctly through the Calcite pipeline
+  - Grok + where filter and grok + stats aggregation both work — extracted fields are fully usable in downstream PPL commands
 ---
