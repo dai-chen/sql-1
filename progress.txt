@@ -26,6 +26,8 @@
 - TIMESTAMP_ISO8601 grok pattern causes duplicate key error in ParseFunction — use %{DATA:fieldname} for timestamps instead
 - Grok square bracket escaping: \[ and \] in grok pattern, "\\[" and "\\]" in Java strings
 - Grok works end-to-end through Calcite: plan() → compile() → executeQuery() — extracted fields usable in where/stats/sort
+- Patterns command works end-to-end through Calcite: uses REGEXP_REPLACE_3 (not ParseFunction UDF), default field `patterns_field`, configurable via `new_field='name'`
+- UnifiedQueryContext.Builder.setting(key, value) configures PPL settings — use full key strings like "plugins.ppl.pattern.method"
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -314,4 +316,40 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - Square brackets in grok patterns need escaping: \[ and \] (in Java string: "\\[" and "\\]")
   - LOGLEVEL, DATA, GREEDYDATA, SPACE grok patterns all work correctly through the Calcite pipeline
   - Grok + where filter and grok + stats aggregation both work — extracted fields are fully usable in downstream PPL commands
+---
+## 2026-03-31T01:38 - US-012
+- Implemented CSV file loading with header-based schema inference and type detection
+- Added loadCsvFile(), inferCsvType(), convertCsvValue(), stripQuotes() to SampleDataLoader
+- Updated loadFile() to dispatch .csv extension to loadCsvFile()
+- Updated QueryRepl.loadData() to handle .csv files with alias support (also fixed .log alias path)
+- Created cli/examples/orders.csv with 6 rows covering INTEGER, VARCHAR, DOUBLE, BOOLEAN types
+- Added 3 tests: testLoadCsvFile, testLoadCsvFileTypeInference, testLoadFileDetectsCsv
+- End-to-end verified: PPL stats count() by customer and SQL SUM(price) GROUP BY customer both work on CSV data
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/SampleDataLoader.java (added loadCsvFile + helpers, updated loadFile)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (updated loadData alias dispatch for .csv and .log)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/SampleDataLoaderTest.java (3 new tests)
+  - NEW: cli/examples/orders.csv
+- **Learnings for future iterations:**
+  - CSV type inference is string-based (Integer.parseInt, Double.parseDouble, Boolean check) unlike JSON type inference which uses instanceof
+  - Simple comma-split CSV parsing works for basic files; quoted fields with embedded commas would need a proper parser
+  - QueryRepl.loadData() alias path now properly dispatches .csv and .log files (previously all non-JSON aliases went to loadTextFile)
+---
+
+## 2026-03-31T01:50 - US-014
+- VALIDATED: PPL patterns command works end-to-end through UnifiedQueryPlanner → UnifiedQueryCompiler → executeQuery
+- Created PatternsValidationTest.java with 3 tests:
+  - testPatternsExtractsPatternFromLogLines: loads opensearch.log, `patterns line`, verifies patterns_field column with `<*>` replacements across 9 rows
+  - testPatternsWithCustomNewField: `patterns line new_field='log_pattern'`, verifies custom field name `log_pattern` is used
+  - testPatternsAfterGrok: chains grok → patterns on extracted msg field, verifies patterns_field produced from msg column (9 rows)
+- Settings configured via UnifiedQueryContext.Builder.setting() with full key strings (plugins.ppl.pattern.method, etc.)
+- Files changed:
+  - NEW: cli/src/test/java/org/opensearch/sql/cli/PatternsValidationTest.java
+- **Learnings for future iterations:**
+  - Patterns command uses REGEXP_REPLACE_3 in Calcite path (not ParseFunction UDF like grok) — replaces [a-zA-Z0-9]+ with `<*>`
+  - Default output field name is `patterns_field`; customizable via `new_field='name'` parameter
+  - Patterns has its own AST node (Patterns) and visitor (visitPatterns) in CalciteRelNodeVisitor, separate from Parse/visitParse
+  - For simple_pattern method, visitPatterns internally creates a Parse node and delegates to buildParseRelNode
+  - UnifiedQueryContext.Builder.setting() accepts full key strings like "plugins.ppl.pattern.method" for configuring pattern settings
+  - Chaining grok → patterns works: extract fields with grok, then apply patterns to an extracted field
 ---

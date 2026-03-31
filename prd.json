@@ -223,7 +223,7 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Use Calcite's built-in CsvSchema or implement a simple CSV parser that creates SimpleTable. Add calcite-csv dependency if using CsvSchema, or use Jackson CsvMapper."
     },
     {
@@ -254,8 +254,8 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": "Lower priority than grok validation. PatternsExpression is in core/src/main/java/org/opensearch/sql/expression/parse/PatternsExpression.java."
+      "passes": true,
+      "notes": "VALIDATED: Patterns command works end-to-end through UnifiedQueryPlanner/Compiler. For simple_pattern method, visitPatterns creates a Parse node internally and delegates to buildParseRelNode using REGEXP_REPLACE_3 (replaces [a-zA-Z0-9]+ with <*>). Default output field: patterns_field. Custom field name via new_field='name' works. Chaining grok then patterns works. Settings must be configured via UnifiedQueryContext.Builder.setting() with full key strings (e.g., plugins.ppl.pattern.method)."
     },
     {
       "id": "US-015",
