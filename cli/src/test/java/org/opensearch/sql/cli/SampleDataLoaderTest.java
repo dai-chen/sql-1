@@ -6,12 +6,15 @@
 package org.opensearch.sql.cli;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import org.apache.calcite.schema.Table;
 import org.junit.Test;
@@ -65,6 +68,23 @@ public class SampleDataLoaderTest {
   public void testLoadFileDetectsText() throws Exception {
     Map<String, Table> tables = SampleDataLoader.loadFile("cli/examples/opensearch.log");
     assertThat(tables, hasKey("opensearch"));
+  }
+
+  @Test
+  public void testLoadLogFileJoinsMultiLineStackTrace() throws Exception {
+    String log =
+        "[2024-01-15T10:30:04,345][ERROR][o.o.a.b.Action] failed\n"
+            + "java.lang.NullPointerException: null\n"
+            + "\tat org.opensearch.Foo.bar(Foo.java:10)\n"
+            + "\tat org.opensearch.Foo.baz(Foo.java:20)";
+    InputStream is = new ByteArrayInputStream(log.getBytes(StandardCharsets.UTF_8));
+    Map<String, Table> tables = SampleDataLoader.loadLogFile(is, "app");
+    SimpleTable table = (SimpleTable) tables.get("app");
+    List<Object[]> rows = table.scan(null).toList();
+    assertThat(rows.size(), is(1));
+    String line = (String) rows.get(0)[0];
+    assertThat(line, containsString("NullPointerException"));
+    assertThat(line, containsString("\n\tat org.opensearch"));
   }
 
   @Test

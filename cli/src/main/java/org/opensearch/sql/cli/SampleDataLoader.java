@@ -53,6 +53,28 @@ public class SampleDataLoader {
     return Map.of(tableName, builder.build());
   }
 
+  /** Load a log file with multi-line joining. Lines not starting with '[' are continuations. */
+  public static Map<String, Table> loadLogFile(InputStream inputStream, String tableName)
+      throws IOException {
+    List<String> lines =
+        new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
+            .lines()
+            .collect(Collectors.toList());
+    List<String> entries = new ArrayList<>();
+    for (String line : lines) {
+      if (entries.isEmpty() || line.startsWith("[")) {
+        entries.add(line);
+      } else {
+        entries.set(entries.size() - 1, entries.get(entries.size() - 1) + "\n" + line);
+      }
+    }
+    SimpleTable.SimpleTableBuilder builder = SimpleTable.builder().col("line", SqlTypeName.VARCHAR);
+    for (String entry : entries) {
+      builder.row(new Object[] {entry});
+    }
+    return Map.of(tableName, builder.build());
+  }
+
   /** Load a file, detecting type by extension. .json uses JSON loader, others use line-per-row. */
   public static Map<String, Table> loadFile(String path) throws IOException {
     String lower = path.toLowerCase();
@@ -60,6 +82,10 @@ public class SampleDataLoader {
     if (lower.endsWith(".json")) {
       try (FileInputStream fis = new FileInputStream(path)) {
         return load(fis);
+      }
+    } else if (lower.endsWith(".log")) {
+      try (FileInputStream fis = new FileInputStream(path)) {
+        return loadLogFile(fis, tableName);
       }
     } else {
       try (FileInputStream fis = new FileInputStream(path)) {
