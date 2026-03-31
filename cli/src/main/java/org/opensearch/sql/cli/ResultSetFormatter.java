@@ -5,12 +5,15 @@
 
 package org.opensearch.sql.cli;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.PrintStream;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Formats a JDBC ResultSet as an ASCII table. */
 public class ResultSetFormatter {
@@ -165,5 +168,24 @@ public class ResultSetFormatter {
     }
     sb.append("-+");
     return sb.toString();
+  }
+
+  /** Write the ResultSet as a JSON array of objects. */
+  public static void formatJson(ResultSet rs, PrintStream out) throws SQLException {
+    ResultSetMetaData meta = rs.getMetaData();
+    List<Map<String, Object>> result = new ArrayList<>();
+    while (rs.next()) {
+      Map<String, Object> row = new LinkedHashMap<>();
+      for (int i = 1; i <= meta.getColumnCount(); i++) {
+        row.put(meta.getColumnName(i), rs.getObject(i));
+      }
+      result.add(row);
+    }
+    try {
+      new ObjectMapper().writeValue(out, result);
+      out.println();
+    } catch (Exception e) {
+      throw new SQLException("Failed to write JSON", e);
+    }
   }
 }

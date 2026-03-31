@@ -5,12 +5,16 @@
 
 package org.opensearch.sql.cli;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Paths;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.Table;
@@ -36,6 +40,8 @@ public class QueryRepl {
   private final PrintStream out;
   private final QueryCompleter completer;
   private final QueryHighlighter highlighter;
+  private final boolean jsonOutput;
+  private boolean lastQueryFailed;
   private Map<String, Table> tables;
   private QueryType language;
   private boolean chartEnabled = true;
@@ -44,9 +50,15 @@ public class QueryRepl {
   private UnifiedQueryCompiler compiler;
 
   public QueryRepl(Map<String, Table> tables, QueryType language, PrintStream out) {
+    this(tables, language, out, false);
+  }
+
+  public QueryRepl(
+      Map<String, Table> tables, QueryType language, PrintStream out, boolean jsonOutput) {
     this.tables = tables;
     this.language = language;
     this.out = out;
+    this.jsonOutput = jsonOutput;
     this.completer = new QueryCompleter(tables, language);
     this.highlighter = new QueryHighlighter(tables, language);
     rebuildContext();
@@ -148,7 +160,11 @@ public class QueryRepl {
         }
         break;
       default:
-        out.println("Unknown command: " + cmd + ". Type .help for available commands.");
+        if (jsonOutput) {
+          writeJsonError("IllegalArgumentException", "Unknown command: " + cmd);
+        } else {
+          out.println("Unknown command: " + cmd + ". Type .help for available commands.");
+        }
     }
   }
 
@@ -185,6 +201,22 @@ public class QueryRepl {
       out.println("No tables loaded.");
       return;
     }
+    if (jsonOutput) {
+      List<Map<String, Object>> result = new ArrayList<>();
+      for (Map.Entry<String, Table> entry : tables.entrySet()) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("name", entry.getKey());
+        row.put(
+            "columns",
+            entry
+                .getValue()
+                .getRowType(new org.apache.calcite.jdbc.JavaTypeFactoryImpl())
+                .getFieldNames());
+        result.add(row);
+      }
+      writeJson(result);
+      return;
+    }
     for (Map.Entry<String, Table> entry : tables.entrySet()) {
       String cols =
           String.join(
@@ -204,10 +236,25 @@ public class QueryRepl {
     }
     Table table = tables.get(tableName);
     if (table == null) {
+      if (jsonOutput) {
+        writeJsonError("IllegalArgumentException", "Table not found: " + tableName);
+        return;
+      }
       out.println("Table not found: " + tableName);
       return;
     }
     var rowType = table.getRowType(new org.apache.calcite.jdbc.JavaTypeFactoryImpl());
+    if (jsonOutput) {
+      List<Map<String, Object>> result = new ArrayList<>();
+      for (var field : rowType.getFieldList()) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("name", field.getName());
+        row.put("type", field.getType().getSqlTypeName().toString());
+        result.add(row);
+      }
+      writeJson(result);
+      return;
+    }
     for (var field : rowType.getFieldList()) {
       out.println("  " + field.getName() + " " + field.getType().getSqlTypeName());
     }
@@ -264,20 +311,56 @@ public class QueryRepl {
   }
 
   private void executeQuery(String query) {
+    lastQueryFailed = false;
     try {
       long start = System.nanoTime();
       RelNode plan = planner.plan(query);
       PreparedStatement stmt = compiler.compile(plan);
       try (ResultSet rs = stmt.executeQuery()) {
-        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
-        ResultSetFormatter.format(rs, out, elapsedMs, chartEnabled);
+        if (jsonOutput) {
+          ResultSetFormatter.formatJson(rs, out);
+        } else {
+          long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+          ResultSetFormatter.format(rs, out, elapsedMs, chartEnabled);
+        }
       }
     } catch (SyntaxCheckException e) {
-      out.println("Syntax error: " + e.getMessage());
+      lastQueryFailed = true;
+      if (jsonOutput) {
+        writeJsonError(e.getClass().getSimpleName(), e.getMessage());
+      } else {
+        out.println("Syntax error: " + e.getMessage());
+      }
     } catch (Exception e) {
+      lastQueryFailed = true;
       String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-      out.println("Error: " + msg);
+      if (jsonOutput) {
+        writeJsonError(e.getClass().getSimpleName(), msg);
+      } else {
+        out.println("Error: " + msg);
+      }
     }
+  }
+
+  boolean hasLastQueryFailed() {
+    return lastQueryFailed;
+  }
+
+  private void writeJson(Object value) {
+    try {
+      new ObjectMapper().writeValue(out, value);
+      out.println();
+    } catch (Exception e) {
+      out.println("Error: " + e.getMessage());
+    }
+  }
+
+  private void writeJsonError(String type, String message) {
+    Map<String, Object> err = new LinkedHashMap<>();
+    err.put("error", true);
+    err.put("type", type);
+    err.put("message", message);
+    writeJson(err);
   }
 
   private void rebuildContext() {

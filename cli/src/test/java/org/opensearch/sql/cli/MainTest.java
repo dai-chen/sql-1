@@ -7,6 +7,7 @@ package org.opensearch.sql.cli;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
 
 import java.io.ByteArrayOutputStream;
@@ -66,5 +67,33 @@ public class MainTest {
     int exitCode = new CommandLine(new Main()).execute("--help");
     assertEquals(0, exitCode);
     assertThat(outContent.toString(), containsString("opensearch-query"));
+  }
+
+  @Test
+  public void testJsonOutputPpl() {
+    int exitCode =
+        new CommandLine(new Main())
+            .execute("--output", "json", "-e", "source = catalog.employees | where age > 30");
+    assertEquals(0, exitCode);
+    String stdout = outContent.toString();
+    assertThat(stdout, containsString("Bob"));
+    assertThat(stdout, not(containsString("row(s) returned")));
+    assertThat(stdout, not(containsString("Loaded")));
+  }
+
+  @Test
+  public void testJsonOutputError() {
+    int exitCode = new CommandLine(new Main()).execute("--output", "json", "-e", "INVALID QUERY");
+    assertEquals(1, exitCode);
+    assertThat(outContent.toString(), containsString("\"error\":true"));
+  }
+
+  @Test
+  public void testJsonOutputFileError() {
+    int exitCode =
+        new CommandLine(new Main())
+            .execute("--output", "json", "-d", "nonexistent.json", "-e", "query");
+    assertEquals(2, exitCode);
+    assertThat(outContent.toString(), containsString("\"error\":true"));
   }
 }

@@ -43,26 +43,57 @@ public class Main implements Callable<Integer> {
       description = "Log format for structured parsing (e.g., opensearch-log)")
   String format;
 
+  @Option(
+      names = {"-o", "--output"},
+      description = "Output format: table (default) or json",
+      defaultValue = "table")
+  String output;
+
   public static void main(String[] args) {
     System.exit(new CommandLine(new Main()).execute(args));
   }
 
   @Override
   public Integer call() throws Exception {
-    Map<String, Table> tables =
-        dataFile != null
-            ? SampleDataLoader.loadFile(dataFile, format)
-            : SampleDataLoader.loadFromClasspath("data/hr.json");
+    boolean jsonOutput = "json".equalsIgnoreCase(output);
+
+    Map<String, Table> tables;
+    try {
+      tables =
+          dataFile != null
+              ? SampleDataLoader.loadFile(dataFile, format)
+              : SampleDataLoader.loadFromClasspath("data/hr.json");
+    } catch (Exception e) {
+      if (jsonOutput) {
+        System.out.println(
+            "{\"error\":true,\"type\":\""
+                + e.getClass().getSimpleName()
+                + "\",\"message\":\""
+                + e.getMessage().replace("\"", "\\\"")
+                + "\"}");
+        return 2;
+      }
+      throw e;
+    }
 
     QueryType queryType = "sql".equalsIgnoreCase(language) ? QueryType.SQL : QueryType.PPL;
 
     if (query != null) {
       try {
-        QueryRepl repl = new QueryRepl(tables, queryType, System.out);
+        QueryRepl repl = new QueryRepl(tables, queryType, System.out, jsonOutput);
         repl.dispatch(query);
-        return 0;
+        return (jsonOutput && repl.hasLastQueryFailed()) ? 1 : 0;
       } catch (Exception e) {
-        System.err.println("Error: " + e.getMessage());
+        if (jsonOutput) {
+          System.out.println(
+              "{\"error\":true,\"type\":\""
+                  + e.getClass().getSimpleName()
+                  + "\",\"message\":\""
+                  + e.getMessage().replace("\"", "\\\"")
+                  + "\"}");
+        } else {
+          System.err.println("Error: " + e.getMessage());
+        }
         return 1;
       }
     }
@@ -75,7 +106,7 @@ public class Main implements Callable<Integer> {
     System.out.println();
     System.out.println("Type .help for available commands, .quit to exit.");
 
-    QueryRepl repl = new QueryRepl(tables, queryType, System.out);
+    QueryRepl repl = new QueryRepl(tables, queryType, System.out, jsonOutput);
     repl.run();
     return 0;
   }
