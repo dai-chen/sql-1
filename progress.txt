@@ -383,3 +383,40 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - QueryRepl.deriveTableName() duplicates SampleDataLoader's private method — could be refactored to a shared utility
   - The --format flag works in both interactive (.load command) and non-interactive (-d flag) modes
 ---
+
+## 2026-03-31T02:09 - US-016
+- Implemented context-aware tab completion in QueryCompleter using regex-based context detection
+- 7 precompiled regex patterns detect: SQL FROM context, PPL source= context, SQL WHERE context, PPL pipe command context (where/eval/fields), PPL stats...by context
+- Table context: suggests only table names (PPL adds 'catalog.' prefix)
+- Column context: extracts referenced table name from query, suggests only that table's columns
+- Fallback: existing keyword + table/column name completion when no specific context detected
+- Added 6 new tests: testSqlCompletesTableNamesAfterFrom, testPplCompletesTableNamesAfterSource, testSqlCompletesColumnNamesAfterWhere, testPplCompletesColumnNamesAfterPipeWhere, testPplCompletesColumnNamesAfterStats, testPplCompletesColumnNamesAfterFields
+- All 16 QueryCompleter tests pass (10 existing + 6 new)
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryCompleter.java (added context detection + table/column-specific completion)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/QueryCompleterTest.java (added 6 context-aware tests + fullLine helper overload)
+- **Learnings for future iterations:**
+  - JLine3 ParsedLine.line() gives full input, ParsedLine.cursor() gives cursor position — use substring(0, cursor) for context before cursor
+  - Regex patterns with `$` anchor at end of beforeCursor string detect what the user just typed before pressing tab
+  - SQL_FROM_TABLE and PPL_SOURCE_TABLE patterns handle both bare table names and catalog.table references
+  - PPL source completion needs 'catalog.' prefix since queries use 'source = catalog.tablename'
+  - extractTableName() uses while(m.find()) to get the LAST match — handles queries with multiple FROM clauses
+---
+
+## 2026-03-31T02:21 - US-017
+- Added query timing display: every query result now shows 'N row(s) returned (Xms)' after the ASCII table
+- Added `format(ResultSet, PrintStream, long elapsedMs)` overload to ResultSetFormatter — when elapsedMs >= 0, appends `(Xms)` to status line
+- Existing `format(ResultSet, PrintStream)` delegates to 3-arg overload with elapsedMs=-1 (backward compatible, no timing shown)
+- In QueryRepl.executeQuery(): `long start = System.nanoTime()` before plan(), `long elapsedMs = (System.nanoTime() - start) / 1_000_000` after executeQuery(), passed to format()
+- Added testFormatWithElapsedTime test asserting `1 row(s) returned (42ms)` output
+- Existing tests unchanged — 2-arg format() still works, and contains("row(s) returned") matches new format as substring
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/ResultSetFormatter.java (added 3-arg format overload with timing)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (added nanoTime timing in executeQuery)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/ResultSetFormatterTest.java (added testFormatWithElapsedTime)
+- **Learnings for future iterations:**
+  - Backward-compatible overload pattern (2-arg delegates to 3-arg with sentinel value) avoids updating all callers and tests
+  - System.nanoTime() / 1_000_000 gives millisecond precision — sufficient for query timing display
+  - Timing wraps plan+compile+executeQuery (not format) — format is just I/O, not meaningful to time
+  - Existing test assertions using contains("row(s) returned") naturally match the new "N row(s) returned (Xms)" format
+---

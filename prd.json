@@ -287,8 +287,8 @@
         "Tests pass"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": "Extend QueryCompleter to query UnifiedQueryContext catalog metadata for table/column names. Use JLine3 Completer interface with context-aware logic based on cursor position and preceding tokens."
+      "passes": true,
+      "notes": "Implemented via regex-based context detection in QueryCompleter.complete(). 7 precompiled patterns detect table context (FROM/source=) and column context (WHERE/pipe commands). Table name extracted from query to look up columns. PPL source completion adds 'catalog.' prefix. Fallback to full keyword+name completion when no context detected."
     },
     {
       "id": "US-017",
@@ -303,8 +303,8 @@
         "Tests pass"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": "Wrap query execution in System.nanoTime() timing. Update ResultSetFormatter to accept and display timing."
+      "passes": true,
+      "notes": "Added format(ResultSet, PrintStream, long elapsedMs) overload to ResultSetFormatter. QueryRepl.executeQuery() wraps plan+compile+executeQuery with System.nanoTime(). Status line: 'N row(s) returned (Xms)'. Backward-compatible: 2-arg format() delegates to 3-arg with elapsedMs=-1 (no timing shown)."
     },
     {
       "id": "US-018",
