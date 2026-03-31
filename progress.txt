@@ -31,6 +31,8 @@
 - LogFormat registry at cli/src/main/java/org/opensearch/sql/cli/LogFormat.java — extensible via LogFormat.register(). Built-in: "opensearch-log" with 5 columns (timestamp, level, component, node, message)
 - SampleDataLoader.loadFile(path, format) overload accepts optional format name for structured parsing during load time
 - QueryRepl .load supports `--format <name>` flag: `.load <path> [as <name>] [--format <format>]`
+- Jackson ObjectMapper.writeValue(OutputStream) closes the stream by default — MUST set `mapper.configure(JsonGenerator.Feature.AUTO_CLOSE_TARGET, false)` when writing multiple JSON values to the same stream (NDJSON/script mode)
+- System.console() returns null when stdin is piped — use for auto-detecting non-interactive/script mode
 
 ## 2026-03-26T23:25 - US-001
 - Promoted SimpleTable from protected static inner class in UnifiedQueryTestBase to public top-level class in api main source set
@@ -466,4 +468,26 @@ Added 11 new user stories to prd.json for pre-intern PoC validation. These exten
   - `lastQueryFailed` flag pattern: QueryRepl.dispatch() sets it on error, Main.call() checks it for exit code — avoids catching exceptions twice
   - JSON error string escaping: `e.getMessage().replace("\"", "\\\"")` handles quotes in error messages
   - Gradle build hamster banner comes from Gradle, not CLI — CLI JSON output is clean when run directly
+---
+
+## 2026-03-31T02:55 - US-020
+- Implemented script mode for multi-command agent pipelines
+- Added `--script/-s` PicoCLI boolean flag to Main.java; also auto-detects piped stdin via `System.console() == null`
+- Script mode reads lines from System.in via BufferedReader, dispatches each via repl.dispatch(), skips blank lines
+- .quit/.exit in script mode breaks loop gracefully via EndOfFileException catch
+- Added `public void close()` method to QueryRepl for cleanup after script mode
+- Updated loadData() in QueryRepl to output JSON status when jsonOutput=true: `{"status":"ok","tables":[...]}` on success, `{"error":true,...}` on failure
+- Fixed critical Jackson bug: ObjectMapper.writeValue() was closing the PrintStream (AUTO_CLOSE_TARGET default=true), breaking subsequent JSON writes in NDJSON mode. Fixed in both QueryRepl.writeJson() and ResultSetFormatter.formatJson()
+- Added 3 new MainTest tests: testScriptMode, testScriptModeNdjson, testScriptModeErrorResilience
+- All 77 cli tests pass, BUILD SUCCESSFUL
+- Files changed:
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/Main.java (--script flag, script mode branch)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/QueryRepl.java (close(), JSON loadData output, AUTO_CLOSE_TARGET fix)
+  - MODIFIED: cli/src/main/java/org/opensearch/sql/cli/ResultSetFormatter.java (AUTO_CLOSE_TARGET fix)
+  - MODIFIED: cli/src/test/java/org/opensearch/sql/cli/MainTest.java (3 new tests)
+- **Learnings for future iterations:**
+  - Jackson ObjectMapper.writeValue(OutputStream, value) closes the stream by default (AUTO_CLOSE_TARGET=true) — MUST configure `mapper.configure(JsonGenerator.Feature.AUTO_CLOSE_TARGET, false)` when writing multiple JSON values to the same stream
+  - System.console() returns null when stdin is piped — useful for auto-detecting script mode without requiring --script flag
+  - EndOfFileException from .quit/.exit must be caught in the script loop to break gracefully (not crash)
+  - Script mode always returns exit code 0 — individual command errors are reported inline (NDJSON error objects), not via exit code
 ---

@@ -354,8 +354,8 @@
         "Tests pass"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": "Depends on US-019 (JSON output). Enables AI agents to do: load file -> inspect schema -> run query in one call."
+      "passes": true,
+      "notes": "Depends on US-019 (JSON output). Enables AI agents to do: load file -> inspect schema -> run query in one call. Implemented --script flag + auto-detect piped stdin (System.console()==null). Jackson AUTO_CLOSE_TARGET=false fix was critical for NDJSON — ObjectMapper.writeValue() was closing the PrintStream after first write. .load outputs JSON status when jsonOutput=true."
     }
   ]
 }
