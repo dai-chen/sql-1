@@ -29,6 +29,7 @@ public class SQLCorrectnessIT extends CorrectnessTestBase {
   public void runAllTests() throws Exception {
     verifyQueries(EXPR_TEST_DIR, expr -> "SELECT " + expr);
     verifyQueries(QUERY_TEST_DIR, Function.identity());
+    printSummary();
   }
 
   /**
@@ -48,12 +49,14 @@ public class SQLCorrectnessIT extends CorrectnessTestBase {
   /** Comment start with # */
   private void verifyQueries(Path file, Function<String, String> converter) {
     try {
+      String label = file.getParent().getFileName() + "/" + file.getFileName();
       String[] queries =
           Files.lines(file)
               .filter(line -> !line.startsWith("#"))
+              .filter(line -> !line.trim().isEmpty())
               .map(converter)
               .toArray(String[]::new);
-      verify(queries);
+      verify(label, queries);
     } catch (IOException e) {
       throw new IllegalStateException("Failed to read file: " + file, e);
     }

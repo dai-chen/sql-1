@@ -8,6 +8,10 @@ package org.opensearch.sql.sql;
 import static java.util.Collections.emptyMap;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.json.JSONObject;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -30,8 +34,16 @@ import org.opensearch.sql.legacy.utils.StringUtils;
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public abstract class CorrectnessTestBase extends RestIntegTestCase {
 
+  private static final Logger LOG = LogManager.getLogger();
+
   /** Comparison test runner shared by all methods in this IT class. */
   private static ComparisonTest runner;
+
+  /** Accumulated per-file results for final summary. */
+  private final List<String> reportLines = new ArrayList<>();
+  private int totalQueries;
+  private int totalPassed;
+  private String firstFailureDetail;
 
   @Override
   protected void init() throws Exception {
@@ -73,13 +85,49 @@ public abstract class CorrectnessTestBase extends RestIntegTestCase {
    * considered as one test batch.
    */
   protected void verify(String... queries) {
+    verify("", queries);
+  }
+
+  /**
+   * Execute the given queries with a label for logging, and compare result with other database.
+   */
+  protected void verify(String label, String... queries) {
     TestReport result = runner.verify(new TestQuerySet(queries));
     TestSummary summary = result.getSummary();
+
+    String tag = summary.getFailure() == 0 ? "PASS" : "FAIL";
+    String line =
+        StringUtils.format("[%s] %s: %d/%d passed", tag, label, summary.getSuccess(),
+            summary.getTotal());
+    LOG.info(line);
+
+    reportLines.add(line);
+    totalQueries += summary.getTotal();
+    totalPassed += summary.getSuccess();
+
+    if (summary.getFailure() > 0 && firstFailureDetail == null) {
+      firstFailureDetail = new JSONObject(result).toString(2);
+    }
+  }
+
+  /** Log accumulated summary of all verified query files and assert no failures. */
+  protected void printSummary() {
+    int totalFailed = totalQueries - totalPassed;
+    String tag = totalFailed == 0 ? "PASS" : "FAIL";
+    StringBuilder sb = new StringBuilder(
+        StringUtils.format("\n===== SQL Correctness Test Report =====\n"
+            + "  [%s] Total: %d/%d passed (%d files)\n  ---\n",
+            tag, totalPassed, totalQueries, reportLines.size()));
+    for (String line : reportLines) {
+      sb.append("  ").append(line).append("\n");
+    }
+    sb.append("=======================================");
+    LOG.info(sb.toString());
+
     Assert.assertEquals(
-        StringUtils.format(
-            "Comparison test failed on queries: %s", new JSONObject(result).toString(2)),
+        StringUtils.format("Comparison test failed on queries: %s", firstFailureDetail),
         0,
-        summary.getFailure());
+        totalFailed);
   }
 
   /** Use OpenSearch cluster initialized by OpenSearch Gradle task. */
