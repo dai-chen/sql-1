@@ -32,6 +32,10 @@ plugins {
 
 }
 
+configurations {
+    fmpp
+}
+
 repositories {
     mavenCentral()
 }
@@ -75,7 +79,63 @@ dependencies {
     testImplementation group: 'org.hamcrest', name: 'hamcrest-library', version: "${hamcrest_version}"
     testImplementation group: 'org.mockito', name: 'mockito-core', version: "${mockito_version}"
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter', version: "${mockito_version}"
+
+    fmpp 'net.sourceforge.fmpp:fmpp:0.9.16'
+    fmpp 'org.freemarker:freemarker:2.3.31'
+    fmpp 'net.java.dev.javacc:javacc:7.0.13'
 }
+
+def fmppOutputDir = layout.buildDirectory.dir('generated/fmpp')
+def javaccOutputDir = layout.buildDirectory.dir('generated/javacc')
+
+task extractCalciteTemplates(type: Copy) {
+    from(zipTree(configurations.compileClasspath.files.find { it.name.startsWith('calcite-core') })) {
+        include 'codegen/**'
+    }
+    into layout.buildDirectory.dir('calcite-templates')
+}
+
+task copyParserTemplate(type: Copy, dependsOn: extractCalciteTemplates) {
+    from layout.buildDirectory.file('calcite-templates/codegen/templates/Parser.jj')
+    into file('src/main/codegen/templates')
+}
+
+task fmpp(type: JavaExec, dependsOn: [extractCalciteTemplates, copyParserTemplate]) {
+    mainClass = 'fmpp.tools.CommandLine'
+    classpath = configurations.fmpp
+    def defaultConfig = layout.buildDirectory.file('calcite-templates/codegen/default_config.fmpp').get().asFile
+    def calciteIncludes = layout.buildDirectory.file('calcite-templates/codegen/includes').get().asFile
+    args '-C', file('src/main/codegen/config.fmpp')
+    args '--source-root', file('src/main/codegen/templates')
+    args '--output-root', fmppOutputDir.get().asFile
+    args '--data', "default:tdd(${defaultConfig})"
+    args '--freemarker-links', "includes:${file('src/main/codegen/includes')},calciteIncludes:${calciteIncludes}"
+}
+
+task javacc(type: JavaExec, dependsOn: fmpp) {
+    mainClass = 'org.javacc.parser.Main'
+    classpath = configurations.fmpp
+    args '-OUTPUT_DIRECTORY=' + javaccOutputDir.get().asFile.path + '/org/opensearch/sql/calcite/parser/impl'
+    args fmppOutputDir.get().asFile.path + '/javacc/Parser.jj'
+    doFirst {
+        mkdir javaccOutputDir.get().asFile.path + '/org/opensearch/sql/calcite/parser/impl'
+    }
+}
+
+compileJava.dependsOn javacc
+compileJava.doFirst {
+    // Fix uninitialized variables in Calcite's generated parser code (known issue)
+    def parserFile = file("${javaccOutputDir.get().asFile}/org/opensearch/sql/calcite/parser/impl/OpenSearchSqlParserImpl.java")
+    if (parserFile.exists()) {
+        def content = parserFile.text
+        content = content.replace('final SqlLiteral startNum;', 'SqlLiteral startNum = null;')
+        content = content.replace('final SqlLiteral endNum;', 'SqlLiteral endNum = null;')
+        content = content.replace('final SqlLiteral reluctant;', 'SqlLiteral reluctant = null;')
+        content = content.replace('final SqlLiteral reluctant = null;', 'SqlLiteral reluctant = null;')
+        parserFile.text = content
+    }
+}
+sourceSets.main.java.srcDir javaccOutputDir
 
 spotless {
     java {

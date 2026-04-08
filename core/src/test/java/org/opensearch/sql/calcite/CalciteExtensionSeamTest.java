@@ -165,14 +165,82 @@ public class CalciteExtensionSeamTest {
     }
   }
 
-  // === Phase 2 placeholders (require FMPP custom grammar) ===
+  // === Phase 2: Flint DDL (Secondary Index Extension) ===
 
   @Nested
-  @DisplayName("Phase 2: Custom Grammar (TODO — requires FMPP)")
-  class CustomGrammarTests {
+  @DisplayName("Part 2: Secondary Index Extension (Flint DDL)")
+  class FlintDdlTests {
 
-    // TODO Cat 4: Named parameters — match(title, 'hello', boost=1.5)
-    // TODO Cat 9: Array literals — multi_match([title, body], 'hello')
-    // TODO Flint DDL — CREATE SKIPPING INDEX, CREATE INDEX, etc.
+    @Test
+    @DisplayName("CREATE SKIPPING INDEX parses to SqlCreateSkippingIndex")
+    void createSkippingIndex() throws SqlParseException {
+      SqlNode node = parse("CREATE SKIPPING INDEX ON my_table (col1 PARTITION, col2 VALUE_SET)");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlCreateSkippingIndex.class, node);
+    }
+
+    @Test
+    @DisplayName("CREATE INDEX parses to SqlCreateCoveringIndex")
+    void createCoveringIndex() throws SqlParseException {
+      SqlNode node = parse("CREATE INDEX my_idx ON my_table (name, age)");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlCreateCoveringIndex.class, node);
+    }
+
+    @Test
+    @DisplayName("CREATE MATERIALIZED VIEW parses to SqlCreateMaterializedView")
+    void createMaterializedView() throws SqlParseException {
+      SqlNode node = parse("CREATE MATERIALIZED VIEW my_mv AS SELECT * FROM my_table");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlCreateMaterializedView.class, node);
+    }
+
+    @Test
+    @DisplayName("DROP SKIPPING INDEX parses to SqlDropFlintIndex")
+    void dropSkippingIndex() throws SqlParseException {
+      SqlNode node = parse("DROP SKIPPING INDEX ON my_table");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlDropFlintIndex.class, node);
+    }
+
+    @Test
+    @DisplayName("DROP INDEX parses to SqlDropFlintIndex")
+    void dropCoveringIndex() throws SqlParseException {
+      SqlNode node = parse("DROP INDEX my_idx ON my_table");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlDropFlintIndex.class, node);
+    }
+
+    @Test
+    @DisplayName("DROP MATERIALIZED VIEW parses to SqlDropFlintIndex")
+    void dropMaterializedView() throws SqlParseException {
+      SqlNode node = parse("DROP MATERIALIZED VIEW my_mv");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlDropFlintIndex.class, node);
+    }
+
+    @Test
+    @DisplayName("REFRESH INDEX parses to SqlRefreshFlintIndex")
+    void refreshIndex() throws SqlParseException {
+      SqlNode node = parse("REFRESH INDEX my_idx ON my_table");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlRefreshFlintIndex.class, node);
+    }
+
+    @Test
+    @DisplayName("SHOW FLINT INDEXES parses to SqlShowFlintIndexes")
+    void showFlintIndexes() throws SqlParseException {
+      SqlNode node = parse("SHOW FLINT INDEXES IN my_catalog.my_database");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlShowFlintIndexes.class, node);
+    }
+
+    @Test
+    @DisplayName("RECOVER INDEX JOB parses to SqlRecoverIndexJob")
+    void recoverIndexJob() throws SqlParseException {
+      SqlNode node = parse("RECOVER INDEX JOB my_job_id");
+      assertInstanceOf(
+          org.opensearch.sql.calcite.parser.flint.SqlRecoverIndexJob.class, node);
+    }
   }
 }

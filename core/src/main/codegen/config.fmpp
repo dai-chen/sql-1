@@ -1,0 +1,88 @@
+data: {
+  parser: {
+    package: "org.opensearch.sql.calcite.parser.impl",
+    class: "OpenSearchSqlParserImpl",
+
+    # Custom statement methods (Flint DDL + management)
+    createStatementParserMethods: [
+      "SqlCreateSkippingIndex"
+      "SqlCreateCoveringIndex"
+      "SqlCreateMaterializedView"
+    ],
+
+    dropStatementParserMethods: [
+      "SqlDropFlintIndex"
+    ],
+
+    statementParserMethods: [
+      "SqlRefreshFlintIndex()"
+      "SqlShowFlintIndexes()"
+      "SqlRecoverIndexJob()"
+    ],
+
+    # Only NEW keywords not already in Calcite's base grammar
+    # Note: IF, INDEX, MATERIALIZED are non-reserved in Calcite (no token def)
+    # so we must add them here to use as <IF>, <INDEX>, <MATERIALIZED> in grammar
+    keywords: [
+      "IF"
+      "INDEX"
+      "MATERIALIZED"
+      "SKIPPING"
+      "COVERING"
+      "VALUE_SET"
+      "MIN_MAX"
+      "BLOOM_FILTER"
+      "REFRESH"
+      "VACUUM"
+      "RECOVER"
+      "FLINT"
+      "INDEXES"
+      "JOB"
+    ],
+
+    # Make extension keywords non-reserved so they can be used as identifiers
+    nonReservedKeywordsToAdd: [
+      "IF"
+      "INDEX"
+      "MATCH"
+      "MATERIALIZED"
+      "PARTITION"
+      "SKIPPING"
+      "COVERING"
+      "VALUE_SET"
+      "MIN_MAX"
+      "BLOOM_FILTER"
+      "REFRESH"
+      "VACUUM"
+      "RECOVER"
+      "FLINT"
+      "INDEXES"
+      "JOB"
+    ],
+
+    # Implementation files
+    implementationFiles: [
+      "parserImpls.ftl"
+    ],
+
+    # Additional imports
+    imports: [
+      "org.opensearch.sql.calcite.parser.SqlNamedArgument"
+      "org.opensearch.sql.calcite.parser.SqlArrayLiteral"
+      "org.opensearch.sql.calcite.parser.flint.SqlCreateSkippingIndex"
+      "org.opensearch.sql.calcite.parser.flint.SqlCreateCoveringIndex"
+      "org.opensearch.sql.calcite.parser.flint.SqlCreateMaterializedView"
+      "org.opensearch.sql.calcite.parser.flint.SqlDropFlintIndex"
+      "org.opensearch.sql.calcite.parser.flint.SqlRefreshFlintIndex"
+      "org.opensearch.sql.calcite.parser.flint.SqlShowFlintIndexes"
+      "org.opensearch.sql.calcite.parser.flint.SqlRecoverIndexJob"
+      "java.util.ArrayList"
+      "org.apache.calcite.sql.SqlCreate"
+      "org.apache.calcite.sql.SqlDrop"
+    ]
+  }
+}
+
+freemarkerLinks: {
+  includes: includes/
+}
