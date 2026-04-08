@@ -62,6 +62,7 @@ dependencies {
         exclude group: 'net.minidev', module: 'json-smart'
     }
     api 'org.apache.calcite:calcite-linq4j:1.41.0'
+    api 'org.apache.calcite:calcite-babel:1.41.0'
     api project(':common')
     implementation "com.github.seancfoley:ipaddress:5.4.2"
     implementation "com.jayway.jsonpath:json-path:2.9.0"
