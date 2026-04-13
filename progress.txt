@@ -19,3 +19,19 @@
   - Type convention: STRING, INTEGER, LONG, DOUBLE, BOOLEAN, TIMESTAMP, DATE
   - api/src/main/resources/ was created fresh (didn't exist before)
 ---
+
+## 2026-04-13T23:31 - US-002
+- Created unified_ip_functions.yaml with 8 complete IP function specs
+- Functions: cidrmatch, is_ipv4, is_ipv6, ip_to_int, int_to_ip, ip_version, ip_prefix, geoip
+- Each function has: name, description (>- block), metadata (null_handling: ACCEPT_NULLS, edge_cases list, ai_hints.platform_hints.datafusion with crates and notes), impls with typed args and return type
+- URN: extension:org.opensearch:unified_ip_functions
+- YAML validity verified with Python yaml.safe_load — all 8 functions parsed correctly
+- Files changed: 1 new file (unified_ip_functions.yaml, ~180 lines)
+- Commit: b5765f151 (push failed due to SSH auth — environment issue)
+- All 4 acceptance criteria verified programmatically (PASS)
+- **Learnings for future iterations:**
+  - Substrait types used: string, boolean, i32, i64 (not STRING/INTEGER — those are test_tables.yaml convention)
+  - metadata.ai_hints.platform_hints.datafusion has {crates: [...], notes: "..."} structure
+  - geoip is special — needs external maxminddb database, returns string per field lookup
+  - ip_to_int only supports IPv4 (IPv6 would overflow i64)
+---

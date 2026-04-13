@@ -32,7 +32,7 @@
         "URN is extension:org.opensearch:unified_ip_functions"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
