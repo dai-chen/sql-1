@@ -1,0 +1,224 @@
+{
+  "project": "Unified Function Spec on Substrait",
+  "branchName": "feature/unified-function-spec",
+  "description": "Define 93 PPL functions as Unified Function specs (Substrait YAML + test DSL), implement as DataFusion UDFs in Rust, verify end-to-end with PPL queries via SQL transpilation.",
+  "buildCommand": "cd unified-functions-datafusion && cargo build 2>&1 | tail -20",
+  "testCommand": "cd unified-functions-datafusion && cargo test 2>&1 | tail -40",
+  "verifyCommand": "",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create unified-functions directory structure and shared schema",
+      "description": "Create api/src/main/resources/unified-functions/ with extensions/ and tests/ subdirectories. Create test_tables.yaml with 2-3 test tables (logs, employees) including column schemas and sample data. Define the type mapping convention (STRING, INTEGER, LONG, DOUBLE, BOOLEAN, TIMESTAMP, DATE).",
+      "acceptanceCriteria": [
+        "api/src/main/resources/unified-functions/extensions/ directory exists",
+        "api/src/main/resources/unified-functions/tests/ directory exists",
+        "api/src/main/resources/unified-functions/test_tables.yaml exists with logs and employees tables",
+        "Each table has columns with name and type, plus sample_data rows",
+        "YAML is valid and parseable"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Write Unified Function YAML specs for IP functions (8 functions)",
+      "description": "Create unified_ip_functions.yaml with URN extension:org.opensearch:unified_ip_functions. Define specs for: cidrmatch, is_ipv4, is_ipv6, ip_to_int, int_to_ip, ip_version, ip_prefix, geoip. Each function must have: name, description, metadata (null_handling, edge_cases, ai_hints with platform_hints for datafusion Rust crates), and impls with typed args and return type. Follow the design doc at ~/.kiro/plans/opensearch-sql/2026-04-13-ppl-function-spec-on-substrait-design.md for the exact YAML convention.",
+      "acceptanceCriteria": [
+        "api/src/main/resources/unified-functions/extensions/unified_ip_functions.yaml exists",
+        "All 8 IP functions have complete specs with metadata and ai_hints",
+        "YAML is valid and follows Substrait extension format",
+        "URN is extension:org.opensearch:unified_ip_functions"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Write Substrait test DSL for IP functions",
+      "description": "Create unified_ip_functions.test with test cases for all 8 IP functions. Use Substrait test DSL format with header ### SUBSTRAIT_SCALAR_TEST: v1.0 and ### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_ip_functions. Each function needs >=10 test cases covering: basic happy path (>=3), null handling (all nullable args), edge cases (invalid input, boundaries, empty strings). Follow the design doc for exact DSL syntax.",
+      "acceptanceCriteria": [
+        "api/src/main/resources/unified-functions/tests/unified_ip_functions.test exists",
+        "Each of 8 IP functions has >=10 test cases",
+        "Test groups include: basic, null_handling, edge_cases",
+        "Uses correct Substrait test DSL syntax with typed literals"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Write YAML specs for JSON functions (9 functions)",
+      "description": "Create unified_json_functions.yaml for: json_extract, json_valid, json_keys, json_delete, json_set, json_append, json_extend, json_array, json_object. Follow same convention as IP functions.",
+      "acceptanceCriteria": [
+        "api/src/main/resources/unified-functions/extensions/unified_json_functions.yaml exists",
+        "All 9 JSON functions have complete specs",
+        "YAML is valid Substrait extension format"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Write Substrait test DSL for JSON functions",
+      "description": "Create unified_json_functions.test with >=10 test cases per function. Cover: basic extraction, nested paths, array access, missing keys, invalid JSON, null handling.",
+      "acceptanceCriteria": [
+        "api/src/main/resources/unified-functions/tests/unified_json_functions.test exists",
+        "Each of 9 JSON functions has >=10 test cases",
+        "Covers nested data, missing keys, invalid JSON edge cases"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Write YAML specs for datetime functions (~30 functions)",
+      "description": "Create unified_datetime_functions.yaml for all ~30 PPL-specific datetime functions that have no Calcite standard equivalent: YEARWEEK, WEEKDAY, STRFTIME, CONVERT_TZ, DAYNAME, MONTHNAME, DATE/TIME/TIMESTAMP constructors, FROM_DAYS, TO_DAYS, MAKEDATE, MAKETIME, PERIOD_ADD, PERIOD_DIFF, SEC_TO_TIME, TIME_TO_SEC, TIMEDIFF, SYSDATE, UTC_DATE/TIME/TIMESTAMP, ADDTIME, SUBTIME, ADDDATE, SUBDATE, FROM_UNIXTIME, UNIX_TIMESTAMP, DATE_FORMAT, STR_TO_DATE, GET_FORMAT, MICROSECOND, MINUTE_OF_DAY.",
+      "acceptanceCriteria": [
+        "api/src/main/resources/unified-functions/extensions/unified_datetime_functions.yaml exists",
+        "All ~30 datetime functions have complete specs",
+        "YAML is valid Substrait extension format"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Write Substrait test DSL for datetime functions",
+      "description": "Create unified_datetime_functions.test with >=10 test cases per function. Cover: basic usage, null handling, timezone edge cases, boundary dates, format strings.",
+      "acceptanceCriteria": [
+        "api/src/main/resources/unified-functions/tests/unified_datetime_functions.test exists",
+        "Each datetime function has >=10 test cases",
+        "Covers timezone, boundary dates, format string edge cases"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Write YAML specs and tests for remaining 8 categories",
+      "description": "Create YAML specs and test files for: math (8 funcs), condition (2), aggregation (7), collection (11), parse (3), type_conv (8), crypto (1), rex (3), binning (4), relevance (7). That is 8 YAML files + 8 test files. Each function needs spec + >=10 test cases. For relevance functions, note they are pushdown-only.",
+      "acceptanceCriteria": [
+        "All 8 remaining YAML extension files exist in extensions/",
+        "All 8 remaining test files exist in tests/",
+        "Every function has >=10 test cases",
+        "Relevance functions marked as pushdown-only in metadata"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "This is a large story but the pattern is established by US-002 through US-007. Batch by category."
+    },
+    {
+      "id": "US-009",
+      "title": "Scaffold unified-functions-datafusion Rust crate",
+      "description": "Create unified-functions-datafusion/ at repo root with Cargo.toml (deps: datafusion, arrow, serde_yaml, serde_json), src/lib.rs with register_all_udfs(ctx: &SessionContext) entry point, and module stubs for each category (ip.rs, json.rs, datetime.rs, collection.rs, math.rs, parse.rs, condition.rs, aggregation.rs, type_conv.rs, crypto.rs, rex.rs, binning.rs). Also create tests/spec_tests.rs stub. The crate must compile with cargo build.",
+      "acceptanceCriteria": [
+        "unified-functions-datafusion/Cargo.toml exists with correct dependencies",
+        "unified-functions-datafusion/src/lib.rs has register_all_udfs function",
+        "Module files exist for all 12 categories",
+        "tests/spec_tests.rs stub exists",
+        "cargo build succeeds"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Implement Substrait test DSL parser in Rust",
+      "description": "In tests/spec_tests.rs (or a src/test_harness.rs module), implement a parser that reads .test files and executes them against DataFusion. The parser must handle: header lines (### SUBSTRAIT_SCALAR_TEST, ### SUBSTRAIT_INCLUDE), test group comments (# group: description), scalar test lines (func(arg1::type, arg2::type) = expected::type), null literals (null::type), and boolean/string/integer/float/timestamp typed literals. For each test line, generate a SQL SELECT statement, execute via SessionContext::sql(), and compare results.",
+      "acceptanceCriteria": [
+        "Parser reads .test files and extracts test cases",
+        "Handles typed literals: str, bool, i32, i64, fp64, timestamp, date",
+        "Handles null::type literals",
+        "Generates SQL SELECT for each test case",
+        "Executes against DataFusion and compares results",
+        "cargo build succeeds",
+        "cargo test succeeds (with placeholder pass for now)"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement IP function UDFs in Rust and pass spec tests",
+      "description": "Implement all 8 IP functions as DataFusion ScalarUDFs in src/ip.rs. Register them in register_all_udfs(). Use the columnar API pattern: values_to_arrays -> iter -> collect. Use ipnetwork or similar crate for CIDR matching. Run the spec test harness against unified_ip_functions.test — all tests must pass.",
+      "acceptanceCriteria": [
+        "All 8 IP functions implemented as DataFusion ScalarUDFs",
+        "Functions registered in register_all_udfs()",
+        "cargo build succeeds",
+        "cargo test succeeds",
+        "All unified_ip_functions.test cases pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Implement JSON function UDFs in Rust and pass spec tests",
+      "description": "Implement all 9 JSON functions as DataFusion ScalarUDFs in src/json.rs. Use serde_json for parsing and jsonpath_lib or similar for path extraction. All unified_json_functions.test cases must pass.",
+      "acceptanceCriteria": [
+        "All 9 JSON functions implemented",
+        "cargo build succeeds",
+        "cargo test succeeds",
+        "All unified_json_functions.test cases pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Implement datetime function UDFs in Rust and pass spec tests",
+      "description": "Implement all ~30 datetime functions as DataFusion ScalarUDFs in src/datetime.rs. Use chrono crate for date/time operations. All unified_datetime_functions.test cases must pass.",
+      "acceptanceCriteria": [
+        "All ~30 datetime functions implemented",
+        "cargo build succeeds",
+        "cargo test succeeds",
+        "All unified_datetime_functions.test cases pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Largest category. May need to split across iterations if too big."
+    },
+    {
+      "id": "US-014",
+      "title": "Implement remaining function categories in Rust and pass all spec tests",
+      "description": "Implement UDFs for: math (8), condition (2), collection (11), parse (3), type_conv (8), crypto (1), rex (3), binning (4), aggregation (7). Register all in register_all_udfs(). All spec test files must pass. Skip relevance functions (pushdown-only, not evaluable).",
+      "acceptanceCriteria": [
+        "All remaining evaluable functions implemented",
+        "cargo build succeeds",
+        "cargo test succeeds",
+        "All spec test files pass (except relevance — pushdown-only)"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Large story. Batch by category. Relevance functions are pushdown-only and should NOT be implemented as UDFs."
+    },
+    {
+      "id": "US-015",
+      "title": "Implement shared schema loader and PPL E2E tests",
+      "description": "In the Rust crate, implement a loader that reads test_tables.yaml and creates DataFusion MemTables with sample data. Create tests/ppl_e2e_tests.rs that takes pre-transpiled SQL (representing PPL queries) and executes them against DataFusion with all UDFs registered. Include 10-20 SQL queries covering all function categories. Queries should be realistic PPL-transpiled SQL like: SELECT *, json_extract(payload, '$.status') AS j FROM logs WHERE cidrmatch(ip, '10.0.0.0/8').",
+      "acceptanceCriteria": [
+        "Schema loader reads test_tables.yaml and creates MemTables",
+        "10-20 E2E SQL queries execute successfully",
+        "Queries cover IP, JSON, datetime, math, collection, parse categories",
+        "cargo build succeeds",
+        "cargo test succeeds",
+        "All E2E tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

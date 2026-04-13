@@ -1,0 +1,6 @@
+# Codebase Patterns
+(Patterns discovered during implementation will be consolidated here)
+
+# Iteration Log
+
+<!-- Round summaries and human intervention notes will be appended here automatically -->
