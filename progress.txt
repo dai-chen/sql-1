@@ -53,3 +53,21 @@
   - Each function section separated by blank line + function name comment
   - For functions requiring external resources (like geoip with MaxMind DB), focus edge case tests on deterministic behavior (null/invalid input) and mark basic tests as placeholder
 ---
+
+## 2026-04-13T23:50 - US-004
+- Created unified_json_functions.yaml with 9 complete JSON function specs
+- Functions: json_extract, json_valid, json_keys, json_delete, json_set, json_append, json_extend, json_array, json_object
+- Each function has: name, description (>- block), metadata (null_handling: ACCEPT_NULLS, edge_cases, ai_hints.platform_hints.datafusion with crates and notes), impls with typed args and return
+- URN: extension:org.opensearch:unified_json_functions
+- All functions use string type for JSON values (no native JSON type in Substrait)
+- YAML validity verified with Python yaml.safe_load — all 9 functions parsed correctly, all fields present
+- Files changed: 1 new file (unified_json_functions.yaml, ~223 lines)
+- Commit: 1261bf400, pushed successfully
+- All 3 acceptance criteria verified programmatically (PASS)
+- **Learnings for future iterations:**
+  - JSON functions all use string for input/output since Substrait has no JSON type
+  - json_array and json_object are variadic in practice but spec shows minimal overload (2-arg and 1-pair respectively)
+  - json_set creates key if not exists, overwrites if exists — important for test case design
+  - json_append vs json_extend: append adds single value, extend merges array elements
+  - All JSON functions recommend serde_json crate; json_extract also uses jsonpath_lib
+---

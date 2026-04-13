@@ -1,0 +1,171 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_json_functions
+
+# json_extract
+# group: basic
+json_extract('{"a":1}'::str, '$.a'::str) = '1'::str
+json_extract('{"a":"hello"}'::str, '$.a'::str) = '"hello"'::str
+json_extract('{"a":true}'::str, '$.a'::str) = 'true'::str
+json_extract('{"a":{"b":2}}'::str, '$.a.b'::str) = '2'::str
+json_extract('{"a":{"b":{"c":3}}}'::str, '$.a.b.c'::str) = '3'::str
+
+# group: null_handling
+json_extract(null::str, '$.a'::str) = null::str
+json_extract('{"a":1}'::str, null::str) = null::str
+json_extract(null::str, null::str) = null::str
+
+# group: edge_cases
+json_extract('{"a":1}'::str, '$.b'::str) = null::str
+json_extract('not json'::str, '$.a'::str) = null::str
+json_extract(''::str, '$.a'::str) = null::str
+json_extract('{"arr":[1,2,3]}'::str, '$.arr[0]'::str) = '1'::str
+json_extract('{"arr":[1,2,3]}'::str, '$.arr[2]'::str) = '3'::str
+json_extract('{"a":null}'::str, '$.a'::str) = 'null'::str
+json_extract('{"a":{"b":[10,20]}}'::str, '$.a.b[1]'::str) = '20'::str
+
+# json_valid
+# group: basic
+json_valid('{"a":1}'::str) = true::bool
+json_valid('[1,2,3]'::str) = true::bool
+json_valid('"hello"'::str) = true::bool
+json_valid('123'::str) = true::bool
+json_valid('true'::str) = true::bool
+json_valid('null'::str) = true::bool
+
+# group: null_handling
+json_valid(null::str) = null::bool
+
+# group: edge_cases
+json_valid(''::str) = false::bool
+json_valid('not json'::str) = false::bool
+json_valid('{missing_quotes: 1}'::str) = false::bool
+json_valid('{"a":}'::str) = false::bool
+json_valid('{"a":1,}'::str) = false::bool
+
+# json_keys
+# group: basic
+json_keys('{"a":1,"b":2}'::str) = 'a,b'::str
+json_keys('{"x":1}'::str) = 'x'::str
+json_keys('{"a":1,"b":2,"c":3}'::str) = 'a,b,c'::str
+
+# group: null_handling
+json_keys(null::str) = null::str
+
+# group: edge_cases
+json_keys('[1,2,3]'::str) = null::str
+json_keys('"hello"'::str) = null::str
+json_keys('123'::str) = null::str
+json_keys('not json'::str) = null::str
+json_keys(''::str) = null::str
+json_keys('{}'::str) = ''::str
+json_keys('{"z":1,"a":2,"m":3}'::str) = 'a,m,z'::str
+
+# json_delete
+# group: basic
+json_delete('{"a":1,"b":2}'::str, 'a'::str) = '{"b":2}'::str
+json_delete('{"a":1,"b":2,"c":3}'::str, 'b'::str) = '{"a":1,"c":3}'::str
+json_delete('{"x":10}'::str, 'x'::str) = '{}'::str
+
+# group: null_handling
+json_delete(null::str, 'a'::str) = null::str
+json_delete('{"a":1}'::str, null::str) = null::str
+json_delete(null::str, null::str) = null::str
+
+# group: edge_cases
+json_delete('{"a":1,"b":2}'::str, 'z'::str) = '{"a":1,"b":2}'::str
+json_delete('not json'::str, 'a'::str) = null::str
+json_delete(''::str, 'a'::str) = null::str
+json_delete('{"a":{"b":1},"c":2}'::str, 'a'::str) = '{"c":2}'::str
+json_delete('{}'::str, 'a'::str) = '{}'::str
+
+# json_set
+# group: basic
+json_set('{"a":1}'::str, 'b'::str, '2'::str) = '{"a":1,"b":2}'::str
+json_set('{"a":1}'::str, 'a'::str, '99'::str) = '{"a":99}'::str
+json_set('{}'::str, 'x'::str, '"hello"'::str) = '{"x":"hello"}'::str
+
+# group: null_handling
+json_set(null::str, 'a'::str, '1'::str) = null::str
+json_set('{"a":1}'::str, null::str, '1'::str) = null::str
+json_set('{"a":1}'::str, 'a'::str, null::str) = null::str
+json_set(null::str, null::str, null::str) = null::str
+
+# group: edge_cases
+json_set('not json'::str, 'a'::str, '1'::str) = null::str
+json_set(''::str, 'a'::str, '1'::str) = null::str
+json_set('{"a":1,"b":2}'::str, 'c'::str, '[1,2]'::str) = '{"a":1,"b":2,"c":[1,2]}'::str
+json_set('{"a":1}'::str, 'b'::str, '{"nested":true}'::str) = '{"a":1,"b":{"nested":true}}'::str
+
+# json_append
+# group: basic
+json_append('{"a":[1,2]}'::str, 'a'::str, '3'::str) = '{"a":[1,2,3]}'::str
+json_append('{"a":[]}'::str, 'a'::str, '1'::str) = '{"a":[1]}'::str
+json_append('{"a":[1],"b":"x"}'::str, 'a'::str, '2'::str) = '{"a":[1,2],"b":"x"}'::str
+
+# group: null_handling
+json_append(null::str, 'a'::str, '1'::str) = null::str
+json_append('{"a":[1]}'::str, null::str, '1'::str) = null::str
+json_append('{"a":[1]}'::str, 'a'::str, null::str) = null::str
+json_append(null::str, null::str, null::str) = null::str
+
+# group: edge_cases
+json_append('{"a":"not_array"}'::str, 'a'::str, '1'::str) = null::str
+json_append('{"a":1}'::str, 'a'::str, '2'::str) = null::str
+json_append('not json'::str, 'a'::str, '1'::str) = null::str
+json_append(''::str, 'a'::str, '1'::str) = null::str
+json_append('{"a":[1,2]}'::str, 'b'::str, '1'::str) = null::str
+json_append('{"a":["x"]}'::str, 'a'::str, '"y"'::str) = '{"a":["x","y"]}'::str
+
+# json_extend
+# group: basic
+json_extend('{"a":[1,2]}'::str, 'a'::str, '[3,4]'::str) = '{"a":[1,2,3,4]}'::str
+json_extend('{"a":[]}'::str, 'a'::str, '[1,2]'::str) = '{"a":[1,2]}'::str
+json_extend('{"a":[1],"b":"x"}'::str, 'a'::str, '[2,3]'::str) = '{"a":[1,2,3],"b":"x"}'::str
+
+# group: null_handling
+json_extend(null::str, 'a'::str, '[1]'::str) = null::str
+json_extend('{"a":[1]}'::str, null::str, '[1]'::str) = null::str
+json_extend('{"a":[1]}'::str, 'a'::str, null::str) = null::str
+json_extend(null::str, null::str, null::str) = null::str
+
+# group: edge_cases
+json_extend('{"a":[1]}'::str, 'a'::str, 'not_array'::str) = null::str
+json_extend('{"a":"not_array"}'::str, 'a'::str, '[1]'::str) = null::str
+json_extend('not json'::str, 'a'::str, '[1]'::str) = null::str
+json_extend(''::str, 'a'::str, '[1]'::str) = null::str
+json_extend('{"a":[1]}'::str, 'b'::str, '[1]'::str) = null::str
+json_extend('{"a":[1]}'::str, 'a'::str, '42'::str) = null::str
+
+# json_array
+# group: basic
+json_array('1'::str, '2'::str) = '[1,2]'::str
+json_array('"a"'::str, '"b"'::str) = '["a","b"]'::str
+json_array('true'::str, 'false'::str) = '[true,false]'::str
+json_array('"hello"'::str, '123'::str) = '["hello",123]'::str
+
+# group: null_handling
+json_array(null::str, '1'::str) = '[null,1]'::str
+json_array('1'::str, null::str) = '[1,null]'::str
+json_array(null::str, null::str) = '[null,null]'::str
+
+# group: edge_cases
+json_array('{"a":1}'::str, '[1,2]'::str) = '[{"a":1},[1,2]]'::str
+json_array('null'::str, 'null'::str) = '[null,null]'::str
+json_array('"x"'::str, '"y"'::str) = '["x","y"]'::str
+
+# json_object
+# group: basic
+json_object('a'::str, '1'::str) = '{"a":1}'::str
+json_object('name'::str, '"Alice"'::str) = '{"name":"Alice"}'::str
+json_object('flag'::str, 'true'::str) = '{"flag":true}'::str
+json_object('data'::str, '[1,2]'::str) = '{"data":[1,2]}'::str
+
+# group: null_handling
+json_object(null::str, '1'::str) = null::str
+json_object('a'::str, null::str) = '{"a":null}'::str
+json_object(null::str, null::str) = null::str
+
+# group: edge_cases
+json_object('k'::str, '{"nested":true}'::str) = '{"k":{"nested":true}}'::str
+json_object('k'::str, 'null'::str) = '{"k":null}'::str
+json_object(''::str, '1'::str) = '{"":1}'::str
