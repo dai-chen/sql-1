@@ -1,0 +1,180 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_ip_functions"
+scalar_functions:
+  - name: cidrmatch
+    description: >-
+      Checks if an IP address is within a CIDR range. Supports both IPv4 and IPv6 addresses.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid IP or CIDR -> false"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["ipnetwork"]
+            notes: "Use IpNetwork::contains()"
+    impls:
+      - args:
+          - value: "string"
+            name: "ip_address"
+            description: "The IP address to check"
+          - value: "string"
+            name: "cidr_block"
+            description: "The CIDR range to check against"
+        return: "boolean"
+
+  - name: is_ipv4
+    description: >-
+      Returns true if the string is a valid IPv4 address.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> false"
+        - "empty string -> false"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std::net"]
+            notes: "Use Ipv4Addr::from_str()"
+    impls:
+      - args:
+          - value: "string"
+            name: "ip_address"
+            description: "The string to validate as IPv4"
+        return: "boolean"
+
+  - name: is_ipv6
+    description: >-
+      Returns true if the string is a valid IPv6 address.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> false"
+        - "empty string -> false"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std::net"]
+            notes: "Use Ipv6Addr::from_str()"
+    impls:
+      - args:
+          - value: "string"
+            name: "ip_address"
+            description: "The string to validate as IPv6"
+        return: "boolean"
+
+  - name: ip_to_int
+    description: >-
+      Converts an IPv4 address to its integer representation.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid IP -> null"
+        - "IPv6 -> null (only IPv4 supported)"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std::net"]
+            notes: "Parse Ipv4Addr, convert octets to u32, cast to i64"
+    impls:
+      - args:
+          - value: "string"
+            name: "ip_address"
+            description: "The IPv4 address to convert"
+        return: "i64"
+
+  - name: int_to_ip
+    description: >-
+      Converts an integer to an IPv4 address string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "negative value -> null"
+        - "value > 4294967295 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std::net"]
+            notes: "Cast i64 to u32, construct Ipv4Addr from u32"
+    impls:
+      - args:
+          - value: "i64"
+            name: "ip_integer"
+            description: "The integer to convert to IPv4 address"
+        return: "string"
+
+  - name: ip_version
+    description: >-
+      Returns 4 for IPv4, 6 for IPv6, or null for invalid IP addresses.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid IP -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std::net"]
+            notes: "Try Ipv4Addr then Ipv6Addr parsing"
+    impls:
+      - args:
+          - value: "string"
+            name: "ip_address"
+            description: "The IP address to determine version for"
+        return: "i32"
+
+  - name: ip_prefix
+    description: >-
+      Returns the network prefix in CIDR notation for the given IP address and prefix length.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid IP -> null"
+        - "prefix_length out of range (0-32 for IPv4, 0-128 for IPv6) -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["ipnetwork"]
+            notes: "Use IpNetwork::new() to compute network address"
+    impls:
+      - args:
+          - value: "string"
+            name: "ip_address"
+            description: "The IP address to compute prefix for"
+          - value: "i32"
+            name: "prefix_length"
+            description: "The prefix length in bits"
+        return: "string"
+
+  - name: geoip
+    description: >-
+      Returns geolocation data for an IP address. The field parameter specifies which geo field
+      to return, such as country, city, or region.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid IP -> null"
+        - "unknown field -> null"
+        - "private/reserved IP -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["maxminddb"]
+            notes: "Requires GeoIP database file. Returns string representation of requested field."
+    impls:
+      - args:
+          - value: "string"
+            name: "ip_address"
+            description: "The IP address to look up"
+          - value: "string"
+            name: "field"
+            description: "The geolocation field to return (e.g. country, city, region)"
+        return: "string"

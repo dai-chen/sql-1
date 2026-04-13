@@ -4,3 +4,18 @@
 # Iteration Log
 
 <!-- Round summaries and human intervention notes will be appended here automatically -->
+
+## 2026-04-13T23:26 - US-001
+- Created unified-functions directory structure under api/src/main/resources/
+- Created extensions/ and tests/ subdirectories with .gitkeep files
+- Created test_tables.yaml with two tables:
+  - `logs`: 9 columns (id/INTEGER, timestamp/TIMESTAMP, level/STRING, message/STRING, ip/STRING, payload/STRING, status_code/INTEGER, latency/DOUBLE, is_error/BOOLEAN), 7 sample rows with varied IPs (IPv4+IPv6), JSON payloads, log levels
+  - `employees`: 8 columns (id/INTEGER, name/STRING, department/STRING, salary/DOUBLE, hire_date/DATE, is_active/BOOLEAN, age/INTEGER, email/STRING), 6 sample rows
+- Files changed: 4 new files
+- All 5 acceptance criteria verified programmatically (PASS)
+- Commit: b50b8bfc9
+- **Learnings for future iterations:**
+  - test_tables.yaml uses dict-keyed structure: `tables: {logs: {columns: [...], sample_data: [...]}, employees: {...}}`
+  - Type convention: STRING, INTEGER, LONG, DOUBLE, BOOLEAN, TIMESTAMP, DATE
+  - api/src/main/resources/ was created fresh (didn't exist before)
+---
