@@ -46,7 +46,7 @@
         "Uses correct Substrait test DSL syntax with typed literals"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

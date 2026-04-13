@@ -35,3 +35,21 @@
   - geoip is special — needs external maxminddb database, returns string per field lookup
   - ip_to_int only supports IPv4 (IPv6 would overflow i64)
 ---
+
+## 2026-04-13T23:48 - US-003
+- Created unified_ip_functions.test with 99 test cases across 8 IP functions
+- Test case counts: cidrmatch(16), is_ipv4(12), is_ipv6(12), ip_to_int(11), int_to_ip(11), ip_version(11), ip_prefix(15), geoip(12)
+- Each function has 3 groups: basic (happy path), null_handling, edge_cases
+- Header: `### SUBSTRAIT_SCALAR_TEST: v1.0` + `### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_ip_functions`
+- geoip basic tests marked with comment noting external DB dependency; placeholder expected values used
+- All 4 acceptance criteria verified programmatically (PASS)
+- Files changed: 1 new file (unified_ip_functions.test, ~158 lines)
+- Commit: 1dae1b02b, pushed successfully
+- **Learnings for future iterations:**
+  - DSL syntax: `func_name(arg::type) = expected::type` — types are str, bool, i32, i64, fp64
+  - String literals use single quotes: `'value'::str`
+  - Null literals: `null::type`
+  - Group comments: `# group: basic`, `# group: null_handling`, `# group: edge_cases`
+  - Each function section separated by blank line + function name comment
+  - For functions requiring external resources (like geoip with MaxMind DB), focus edge case tests on deterministic behavior (null/invalid input) and mark basic tests as placeholder
+---

@@ -1,0 +1,223 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_json_functions"
+scalar_functions:
+  - name: json_extract
+    description: >-
+      Extracts a value from a JSON string using a path expression. Supports nested paths.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> null"
+        - "missing path -> null"
+        - "nested paths supported"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json", "jsonpath_lib"]
+            notes: "Use jsonpath_lib::select() for path extraction, return as JSON string"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_string"
+            description: "The JSON string to extract from"
+          - value: "string"
+            name: "path"
+            description: "The path expression to evaluate"
+        return: "string"
+
+  - name: json_valid
+    description: >-
+      Returns true if the string is valid JSON.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "empty string -> false"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Use serde_json::from_str::<Value>() to validate"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_string"
+            description: "The string to validate as JSON"
+        return: "boolean"
+
+  - name: json_keys
+    description: >-
+      Returns the keys of a JSON object as a comma-separated string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid JSON -> null"
+        - "non-object (array/scalar) -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse as Value, match Object variant, collect keys"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_string"
+            description: "The JSON object string to extract keys from"
+        return: "string"
+
+  - name: json_delete
+    description: >-
+      Deletes a key from a JSON object and returns the modified JSON string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> null"
+        - "missing key -> returns original JSON unchanged"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse as Value, remove key from Object map, serialize back"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_string"
+            description: "The JSON object string to modify"
+          - value: "string"
+            name: "key"
+            description: "The key to delete"
+        return: "string"
+
+  - name: json_set
+    description: >-
+      Sets a value at a key in a JSON object and returns the modified JSON string.
+      Creates the key if it does not exist, overwrites if it exists.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> null"
+        - "creates key if not exists"
+        - "overwrites if exists"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse as Value, insert into Object map, serialize back"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_string"
+            description: "The JSON object string to modify"
+          - value: "string"
+            name: "key"
+            description: "The key to set"
+          - value: "string"
+            name: "value"
+            description: "The value to set (as JSON string)"
+        return: "string"
+
+  - name: json_append
+    description: >-
+      Appends a value to a JSON array at the given key in a JSON object.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> null"
+        - "key not an array -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse as Value, locate array at key, push value, serialize back"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_string"
+            description: "The JSON object string containing the array"
+          - value: "string"
+            name: "key"
+            description: "The key of the array to append to"
+          - value: "string"
+            name: "value"
+            description: "The value to append (as JSON string)"
+        return: "string"
+
+  - name: json_extend
+    description: >-
+      Extends a JSON array at the given key with elements from another array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> null"
+        - "values not an array -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse both values, extend target array with source array elements, serialize back"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_string"
+            description: "The JSON object string containing the array"
+          - value: "string"
+            name: "key"
+            description: "The key of the array to extend"
+          - value: "string"
+            name: "values"
+            description: "A JSON array string whose elements will be appended"
+        return: "string"
+
+  - name: json_array
+    description: >-
+      Creates a JSON array string from the given arguments. Variadic in practice;
+      spec shows a 2-argument overload.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args included as JSON null in array"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Variadic function. Collect args into Vec<Value>, serialize as JSON array."
+    impls:
+      - args:
+          - value: "string"
+            name: "value1"
+            description: "The first value for the array"
+          - value: "string"
+            name: "value2"
+            description: "The second value for the array"
+        return: "string"
+
+  - name: json_object
+    description: >-
+      Creates a JSON object string from key-value pairs. Variadic in practice
+      with alternating key/value arguments; spec shows a 1-pair overload.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null key -> null"
+        - "null value -> JSON null for that key"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Variadic function. Collect alternating key/value pairs into Map, serialize as JSON object."
+    impls:
+      - args:
+          - value: "string"
+            name: "key"
+            description: "The key for the JSON object entry"
+          - value: "string"
+            name: "value"
+            description: "The value for the JSON object entry"
+        return: "string"
