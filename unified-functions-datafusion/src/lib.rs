@@ -12,6 +12,7 @@ pub mod rex;
 pub mod binning;
 pub mod relevance;
 pub mod test_harness;
+pub mod schema_loader;
 
 use datafusion::prelude::SessionContext;
 
