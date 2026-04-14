@@ -142,3 +142,42 @@
   - dissect uses %{fieldname} tokenizer syntax, NOT regex — different from rex/parse which use regex
   - Collection functions all operate on JSON array strings (no native array type in Substrait)
 ---
+
+## 2026-04-14T00:19 - US-009
+- Scaffolded unified-functions-datafusion Rust crate at repo root
+- Cargo.toml: edition 2021, datafusion 45, arrow 54, serde_yaml 0.9, serde_json 1, chrono 0.4, ipnetwork 0.20, regex 1
+- src/lib.rs: declares 13 pub modules, register_all_udfs(ctx: &SessionContext) calls all 13 register functions
+- 13 module stubs: ip.rs, json.rs, datetime.rs, collection.rs, math.rs, parse.rs, condition.rs, aggregation.rs, type_conv.rs, crypto.rs, rex.rs, binning.rs, relevance.rs — each with `pub fn register_{category}_udfs(_ctx: &SessionContext) {}`
+- tests/spec_tests.rs: placeholder test `assert!(true)`
+- Added .gitignore for /target/
+- cargo build: ✅ success
+- cargo test: ✅ 1 passed (placeholder), 0 failed
+- Files changed: 18 new files (Cargo.toml, Cargo.lock, .gitignore, lib.rs, 13 module stubs, spec_tests.rs)
+- Commit: 29873e85f, pushed successfully
+- All 5 acceptance criteria verified (PASS)
+- **Learnings for future iterations:**
+  - Rust toolchain installed at ~/.cargo/bin — need `export PATH="$HOME/.cargo/bin:$PATH"` before cargo commands
+  - datafusion 45 + arrow 54 is the compatible version pair
+  - Module register functions take `_ctx: &SessionContext` (underscore prefix to suppress unused warnings in stubs)
+  - .gitignore with `/target/` is essential — cargo build artifacts are massive
+  - 13 categories (not 12): includes relevance.rs even though those functions are pushdown-only
+---
+
+## 2026-04-14T00:27 - US-010
+- Implemented Substrait test DSL parser in src/test_harness.rs (532 lines)
+- Parser handles: headers, comments (extracting function name + group), blank lines, test case lines with quoted strings containing any characters
+- Data types: DslType enum (Str, I32, I64, Fp64, Bool, Date, Timestamp), TypedLiteral struct, TestCase struct, TestResult struct
+- Key functions: parse_test_file() -> Vec<TestCase>, test_case_to_sql() -> String, run_test_file() async executor
+- SQL generation maps: str→VARCHAR, i32→INT, i64→BIGINT, fp64→DOUBLE, bool→BOOLEAN, date→DATE, timestamp→TIMESTAMP
+- NULL handling: CAST(NULL AS type) in generated SQL
+- tests/spec_tests.rs: 12 integration tests parsing all .test files + validating structure
+- 20 unit tests in test_harness::tests covering literal parsing, test line parsing, SQL generation
+- Total: 32 tests, all passing. cargo build ✅, cargo test ✅
+- Files changed: src/test_harness.rs (new), src/lib.rs (added module), tests/spec_tests.rs (replaced placeholder)
+- **Learnings for future iterations:**
+  - Hand-written char-by-char parser handles quoted strings with special chars (JSON, regex, commas, parens) correctly
+  - Zero-arg functions like `e()` are supported
+  - run_test_file is async and ready for UDF validation in US-011+
+  - Parser extracts group names from `# group: xxx` and function names from bare `# name` comments
+  - All library code uses Result types — no unwrap() in non-test code
+---

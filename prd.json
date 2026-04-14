@@ -127,7 +127,7 @@
         "cargo build succeeds"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -144,7 +144,7 @@
         "cargo test succeeds (with placeholder pass for now)"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
