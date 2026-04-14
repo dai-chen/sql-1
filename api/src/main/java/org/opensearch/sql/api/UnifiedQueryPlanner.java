@@ -9,19 +9,29 @@ import static org.opensearch.sql.monitor.profile.MetricName.ANALYZE;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.calcite.rel.RelCollation;
-import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelRoot;
+import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalSort;
+import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.validate.SqlUserDefinedFunction;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Planner;
 import org.opensearch.sql.api.parser.NamedArgRewriter;
 import org.opensearch.sql.api.parser.UnifiedQueryParser;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.CalciteRelNodeVisitor;
+import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
+import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.executor.QueryType;
 
@@ -60,12 +70,72 @@ public class UnifiedQueryPlanner {
    */
   public RelNode plan(String query) {
     try {
-      return context.measure(ANALYZE, () -> strategy.plan(query));
+      return context.measure(ANALYZE, () -> sanitizeExprUdtTypes(strategy.plan(query)));
     } catch (SyntaxCheckException | UnsupportedOperationException e) {
       throw e;
     } catch (Exception e) {
       throw new IllegalStateException("Failed to plan query", e);
     }
+  }
+
+  /**
+   * Rewrites expression UDT types in Rex nodes to standard Calcite SQL datetime types for unified
+   * API consumers.
+   */
+  private RelNode sanitizeExprUdtTypes(RelNode plan) {
+    RexBuilder rexBuilder = context.getPlanContext().rexBuilder;
+    RexShuttle shuttle =
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(RexInputRef inputRef) {
+            RexInputRef rewritten = (RexInputRef) super.visitInputRef(inputRef);
+            if (!isDatetimeUdt(rewritten.getType())) {
+              return rewritten;
+            }
+
+            SqlTypeName sqlType =
+                UserDefinedFunctionUtils.convertRelDataTypeToSqlTypeName(rewritten.getType());
+            RelDataType targetType =
+                rexBuilder
+                    .getTypeFactory()
+                    .createTypeWithNullability(
+                        rexBuilder.getTypeFactory().createSqlType(sqlType),
+                        rewritten.getType().isNullable());
+            return rexBuilder.makeInputRef(targetType, rewritten.getIndex());
+          }
+
+          @Override
+          public RexNode visitCall(RexCall call) {
+            RexCall rewritten = (RexCall) super.visitCall(call);
+
+            if (!(rewritten.getOperator() instanceof SqlUserDefinedFunction)
+                || !isDatetimeUdt(rewritten.getType())) {
+              return rewritten;
+            }
+
+            SqlTypeName sqlType =
+                UserDefinedFunctionUtils.convertRelDataTypeToSqlTypeName(rewritten.getType());
+            RelDataType targetType =
+                rexBuilder
+                    .getTypeFactory()
+                    .createTypeWithNullability(
+                        rexBuilder.getTypeFactory().createSqlType(sqlType),
+                        rewritten.getType().isNullable());
+            return rexBuilder.makeCall(targetType, rewritten.getOperator(), rewritten.getOperands());
+          }
+
+          private boolean isDatetimeUdt(RelDataType type) {
+            if (!(type instanceof AbstractExprRelDataType<?>)) {
+              return false;
+            }
+            SqlTypeName sqlType = UserDefinedFunctionUtils.convertRelDataTypeToSqlTypeName(type);
+            return sqlType == SqlTypeName.DATE
+                || sqlType == SqlTypeName.TIME
+                || sqlType == SqlTypeName.TIMESTAMP;
+          }
+        };
+
+    return plan.accept(shuttle);
   }
 
   /** Strategy interface for language-specific planning logic. */

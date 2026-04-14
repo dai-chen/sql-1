@@ -78,6 +78,11 @@ public class ExprDateValue extends AbstractExprValue {
   }
 
   @Override
+  public Object valueForCalcite() {
+    return Math.toIntExact(date.toEpochDay());
+  }
+
+  @Override
   public String toString() {
     return String.format("DATE '%s'", value());
   }
