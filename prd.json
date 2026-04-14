@@ -217,8 +217,8 @@
         "All E2E tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Schema loader + 16 E2E tests covering 9 UDF categories. All 40 tests pass."
     }
   ]
 }

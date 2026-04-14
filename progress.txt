@@ -234,3 +234,31 @@
   - rint uses banker's rounding (round half to even) — f64::round_ties_even() or manual implementation
   - cast_to_boolean accepts true/false/1/0/yes/no case-insensitively
 ---
+
+## 2026-04-14T01:38 - US-015
+- Implemented shared schema loader (src/schema_loader.rs, ~153 lines) that reads test_tables.yaml and creates DataFusion MemTables
+- Schema loader maps YAML types to Arrow: STRING→Utf8, INTEGER→Int32, LONG→Int64, DOUBLE→Float64, BOOLEAN→Boolean, TIMESTAMP→Timestamp(Nanosecond,None), DATE→Date32
+- Public API: `create_context_with_tables(yaml_path) -> Result<SessionContext>` — loads tables + registers all UDFs
+- Created tests/ppl_e2e_tests.rs with 16 E2E tests covering 9 UDF categories:
+  - IP (2): cidrmatch subnet filtering, is_ipv4/is_ipv6 classification
+  - JSON (3): json_extract, json_keys, json_valid
+  - Datetime (2): dayname, monthname on hire_date
+  - Math (2): cbrt on salary, signum on latency
+  - Collection (1): array_length
+  - Type conversion (2): typeof, cast_to_string
+  - Condition (2): ifnull, nullif
+  - Crypto (1): md5 hash length
+  - Parse (1): grok IP extraction
+- Added serde dependency to Cargo.toml, schema_loader module to lib.rs
+- cargo build: ✅ success
+- cargo test: ✅ 40 passed (16 E2E + 24 spec), 0 failed
+- Commit: 6429124e7, pushed successfully
+- All 6 acceptance criteria verified (PASS)
+- **Learnings for future iterations:**
+  - typeof() UDF returns "STRING" for all inputs (casts to StringArray internally)
+  - signum() displays integer-style `1` not `1.0` in Arrow formatting
+  - json_keys() returns comma-separated keys, not a JSON array
+  - is_ipv6() returns false for `fe80::1%25eth0` (zone ID prevents parsing)
+  - assert_batches_eq! is whitespace-sensitive — table borders must match exactly
+  - serde with derive feature needed for YAML deserialization structs
+---
