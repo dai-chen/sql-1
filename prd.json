@@ -98,7 +98,7 @@
         "Covers timezone, boundary dates, format string edge cases"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -112,7 +112,7 @@
         "Relevance functions marked as pushdown-only in metadata"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "This is a large story but the pattern is established by US-002 through US-007. Batch by category."
     },
     {

@@ -1,0 +1,23 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_crypto_functions"
+scalar_functions:
+  - name: md5
+    description: >-
+      Computes MD5 hash of a string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "empty string -> hash of empty string"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["md-5"]
+            notes: "Returns hex-encoded hash string"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to compute MD5 hash for"
+        return: "string"

@@ -1,0 +1,70 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_binning_functions
+
+# span
+# group: basic
+span(15.0::fp64, 10.0::fp64) = 10.0::fp64
+span(25.0::fp64, 10.0::fp64) = 20.0::fp64
+span(0.0::fp64, 10.0::fp64) = 0.0::fp64
+span(99.0::fp64, 10.0::fp64) = 90.0::fp64
+
+# group: null_handling
+span(null::fp64, 10.0::fp64) = null::fp64
+span(15.0::fp64, null::fp64) = null::fp64
+span(null::fp64, null::fp64) = null::fp64
+
+# group: edge_cases
+span(-5.0::fp64, 10.0::fp64) = -10.0::fp64
+span(10.0::fp64, 10.0::fp64) = 10.0::fp64
+span(0.5::fp64, 1.0::fp64) = 0.0::fp64
+
+# width_bucket
+# group: basic
+width_bucket(5.0::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = 3::i32
+width_bucket(2.0::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = 1::i32
+width_bucket(8.0::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = 4::i32
+width_bucket(0.0::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = 1::i32
+
+# group: null_handling
+width_bucket(null::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = null::i32
+width_bucket(5.0::fp64, null::fp64, 10.0::fp64, 5::i32) = null::i32
+width_bucket(5.0::fp64, 0.0::fp64, null::fp64, 5::i32) = null::i32
+
+# group: edge_cases
+width_bucket(-1.0::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = 0::i32
+width_bucket(11.0::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = 6::i32
+width_bucket(10.0::fp64, 0.0::fp64, 10.0::fp64, 5::i32) = 6::i32
+
+# ntile
+# group: basic
+ntile(4::i32) = 1::i32
+ntile(1::i32) = 1::i32
+ntile(10::i32) = 1::i32
+ntile(100::i32) = 1::i32
+
+# group: null_handling
+ntile(null::i32) = null::i32
+
+# group: edge_cases
+ntile(2::i32) = 1::i32
+ntile(3::i32) = 1::i32
+ntile(5::i32) = 1::i32
+ntile(50::i32) = 1::i32
+ntile(1000::i32) = 1::i32
+
+# histogram
+# group: basic
+histogram(5.0::fp64, 10::i32) = '{"bucket":0,"count":1}'::str
+histogram(15.0::fp64, 10::i32) = '{"bucket":1,"count":1}'::str
+histogram(0.0::fp64, 10::i32) = '{"bucket":0,"count":1}'::str
+histogram(50.0::fp64, 5::i32) = '{"bucket":10,"count":1}'::str
+
+# group: null_handling
+histogram(null::fp64, 10::i32) = null::str
+histogram(5.0::fp64, null::i32) = null::str
+histogram(null::fp64, null::i32) = null::str
+
+# group: edge_cases
+histogram(-5.0::fp64, 10::i32) = '{"bucket":-1,"count":1}'::str
+histogram(100.0::fp64, 10::i32) = '{"bucket":10,"count":1}'::str
+histogram(0.0::fp64, 1::i32) = '{"bucket":0,"count":1}'::str

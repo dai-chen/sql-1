@@ -1,0 +1,164 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_relevance_functions"
+scalar_functions:
+  - name: match_query
+    description: >-
+      Full-text match query.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      pushdown_only: true
+      edge_cases:
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pushdown to OpenSearch only, NOT evaluable as UDF"
+    impls:
+      - args:
+          - value: "string"
+            name: "field"
+            description: "The field to match against"
+          - value: "string"
+            name: "query"
+            description: "The query text"
+        return: "boolean"
+
+  - name: match_phrase
+    description: >-
+      Full-text phrase match.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      pushdown_only: true
+      edge_cases:
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pushdown to OpenSearch only, NOT evaluable as UDF"
+    impls:
+      - args:
+          - value: "string"
+            name: "field"
+            description: "The field to match against"
+          - value: "string"
+            name: "query"
+            description: "The phrase to match"
+        return: "boolean"
+
+  - name: match_phrase_prefix
+    description: >-
+      Phrase prefix match.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      pushdown_only: true
+      edge_cases:
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pushdown to OpenSearch only, NOT evaluable as UDF"
+    impls:
+      - args:
+          - value: "string"
+            name: "field"
+            description: "The field to match against"
+          - value: "string"
+            name: "query"
+            description: "The phrase prefix to match"
+        return: "boolean"
+
+  - name: multi_match
+    description: >-
+      Multi-field match query.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      pushdown_only: true
+      edge_cases:
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pushdown to OpenSearch only, NOT evaluable as UDF, fields is comma-separated"
+    impls:
+      - args:
+          - value: "string"
+            name: "fields"
+            description: "Comma-separated list of fields to match against"
+          - value: "string"
+            name: "query"
+            description: "The query text"
+        return: "boolean"
+
+  - name: simple_query_string
+    description: >-
+      Simple query string syntax.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      pushdown_only: true
+      edge_cases:
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pushdown to OpenSearch only, NOT evaluable as UDF"
+    impls:
+      - args:
+          - value: "string"
+            name: "fields"
+            description: "Comma-separated list of fields to search"
+          - value: "string"
+            name: "query"
+            description: "The simple query string"
+        return: "boolean"
+
+  - name: query_string
+    description: >-
+      Full query string syntax.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      pushdown_only: true
+      edge_cases:
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pushdown to OpenSearch only, NOT evaluable as UDF"
+    impls:
+      - args:
+          - value: "string"
+            name: "fields"
+            description: "Comma-separated list of fields to search"
+          - value: "string"
+            name: "query"
+            description: "The query string"
+        return: "boolean"
+
+  - name: wildcard_query
+    description: >-
+      Wildcard pattern match.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      pushdown_only: true
+      edge_cases:
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pushdown to OpenSearch only, NOT evaluable as UDF"
+    impls:
+      - args:
+          - value: "string"
+            name: "field"
+            description: "The field to match against"
+          - value: "string"
+            name: "pattern"
+            description: "The wildcard pattern"
+        return: "boolean"

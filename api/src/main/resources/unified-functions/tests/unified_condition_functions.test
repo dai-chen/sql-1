@@ -1,0 +1,36 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_condition_functions
+
+# ifnull
+# group: basic
+ifnull('a'::str, 'b'::str) = 'a'::str
+ifnull('hello'::str, 'world'::str) = 'hello'::str
+ifnull('first'::str, 'second'::str) = 'first'::str
+
+# group: null_handling
+ifnull(null::str, 'b'::str) = 'b'::str
+ifnull(null::str, 'default'::str) = 'default'::str
+ifnull(null::str, null::str) = null::str
+
+# group: edge_cases
+ifnull(''::str, 'fallback'::str) = ''::str
+ifnull('value'::str, null::str) = 'value'::str
+ifnull(' '::str, 'x'::str) = ' '::str
+ifnull('abc'::str, ''::str) = 'abc'::str
+
+# nullif
+# group: basic
+nullif('a'::str, 'b'::str) = 'a'::str
+nullif('hello'::str, 'world'::str) = 'hello'::str
+nullif('x'::str, 'y'::str) = 'x'::str
+
+# group: null_handling
+nullif('a'::str, 'a'::str) = null::str
+nullif('test'::str, 'test'::str) = null::str
+nullif(null::str, 'a'::str) = null::str
+nullif(null::str, null::str) = null::str
+
+# group: edge_cases
+nullif(''::str, ''::str) = null::str
+nullif(' '::str, ' '::str) = null::str
+nullif('abc'::str, 'ABC'::str) = 'abc'::str

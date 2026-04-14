@@ -1,0 +1,128 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_relevance_functions
+
+# match_query
+# NOTE: pushdown-only function, tests verify spec format only
+# group: basic
+match_query('title'::str, 'opensearch'::str) = true::bool
+match_query('content'::str, 'hello world'::str) = true::bool
+match_query('description'::str, 'test query'::str) = true::bool
+match_query('name'::str, 'John'::str) = true::bool
+
+# group: null_handling
+match_query(null::str, 'opensearch'::str) = null::bool
+match_query('title'::str, null::str) = null::bool
+match_query(null::str, null::str) = null::bool
+
+# group: edge_cases
+match_query('title'::str, ''::str) = true::bool
+match_query(''::str, 'opensearch'::str) = true::bool
+match_query('title'::str, 'a b c d e'::str) = true::bool
+
+# match_phrase
+# NOTE: pushdown-only function, tests verify spec format only
+# group: basic
+match_phrase('title'::str, 'quick brown fox'::str) = true::bool
+match_phrase('content'::str, 'hello world'::str) = true::bool
+match_phrase('description'::str, 'exact phrase'::str) = true::bool
+match_phrase('name'::str, 'John Doe'::str) = true::bool
+
+# group: null_handling
+match_phrase(null::str, 'hello'::str) = null::bool
+match_phrase('title'::str, null::str) = null::bool
+match_phrase(null::str, null::str) = null::bool
+
+# group: edge_cases
+match_phrase('title'::str, ''::str) = true::bool
+match_phrase(''::str, 'hello'::str) = true::bool
+match_phrase('title'::str, 'a'::str) = true::bool
+
+# match_phrase_prefix
+# NOTE: pushdown-only function, tests verify spec format only
+# group: basic
+match_phrase_prefix('title'::str, 'open'::str) = true::bool
+match_phrase_prefix('content'::str, 'quick bro'::str) = true::bool
+match_phrase_prefix('description'::str, 'test'::str) = true::bool
+match_phrase_prefix('name'::str, 'Jo'::str) = true::bool
+
+# group: null_handling
+match_phrase_prefix(null::str, 'open'::str) = null::bool
+match_phrase_prefix('title'::str, null::str) = null::bool
+match_phrase_prefix(null::str, null::str) = null::bool
+
+# group: edge_cases
+match_phrase_prefix('title'::str, ''::str) = true::bool
+match_phrase_prefix(''::str, 'open'::str) = true::bool
+match_phrase_prefix('title'::str, 'a'::str) = true::bool
+
+# multi_match
+# NOTE: pushdown-only function, tests verify spec format only
+# group: basic
+multi_match('title,content'::str, 'opensearch'::str) = true::bool
+multi_match('title'::str, 'hello world'::str) = true::bool
+multi_match('title,content,description'::str, 'test'::str) = true::bool
+multi_match('name,email'::str, 'John'::str) = true::bool
+
+# group: null_handling
+multi_match(null::str, 'opensearch'::str) = null::bool
+multi_match('title'::str, null::str) = null::bool
+multi_match(null::str, null::str) = null::bool
+
+# group: edge_cases
+multi_match('title'::str, ''::str) = true::bool
+multi_match(''::str, 'opensearch'::str) = true::bool
+multi_match('title,content'::str, 'a b c'::str) = true::bool
+
+# simple_query_string
+# NOTE: pushdown-only function, tests verify spec format only
+# group: basic
+simple_query_string('title,content'::str, 'opensearch +sql'::str) = true::bool
+simple_query_string('title'::str, 'hello | world'::str) = true::bool
+simple_query_string('content'::str, '"exact phrase"'::str) = true::bool
+simple_query_string('name'::str, 'John'::str) = true::bool
+
+# group: null_handling
+simple_query_string(null::str, 'opensearch'::str) = null::bool
+simple_query_string('title'::str, null::str) = null::bool
+simple_query_string(null::str, null::str) = null::bool
+
+# group: edge_cases
+simple_query_string('title'::str, ''::str) = true::bool
+simple_query_string(''::str, 'opensearch'::str) = true::bool
+simple_query_string('title'::str, '+a -b'::str) = true::bool
+
+# query_string
+# NOTE: pushdown-only function, tests verify spec format only
+# group: basic
+query_string('title,content'::str, 'opensearch AND sql'::str) = true::bool
+query_string('title'::str, 'hello OR world'::str) = true::bool
+query_string('content'::str, '"exact phrase"'::str) = true::bool
+query_string('name'::str, 'John'::str) = true::bool
+
+# group: null_handling
+query_string(null::str, 'opensearch'::str) = null::bool
+query_string('title'::str, null::str) = null::bool
+query_string(null::str, null::str) = null::bool
+
+# group: edge_cases
+query_string('title'::str, ''::str) = true::bool
+query_string(''::str, 'opensearch'::str) = true::bool
+query_string('title'::str, 'a AND (b OR c)'::str) = true::bool
+
+# wildcard_query
+# NOTE: pushdown-only function, tests verify spec format only
+# group: basic
+wildcard_query('title'::str, 'open*'::str) = true::bool
+wildcard_query('content'::str, '*search'::str) = true::bool
+wildcard_query('name'::str, 'Jo?n'::str) = true::bool
+wildcard_query('status'::str, 'activ?'::str) = true::bool
+
+# group: null_handling
+wildcard_query(null::str, 'open*'::str) = null::bool
+wildcard_query('title'::str, null::str) = null::bool
+wildcard_query(null::str, null::str) = null::bool
+
+# group: edge_cases
+wildcard_query('title'::str, '*'::str) = true::bool
+wildcard_query('title'::str, '?'::str) = true::bool
+wildcard_query(''::str, 'open*'::str) = true::bool

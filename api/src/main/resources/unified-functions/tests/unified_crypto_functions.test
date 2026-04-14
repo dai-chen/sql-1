@@ -1,0 +1,19 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_crypto_functions
+
+# md5
+# group: basic
+md5('hello'::str) = '5d41402abc4b2a76b9719d911017c592'::str
+md5('world'::str) = '7d793037a0760186574b0282f2f435e7'::str
+md5('abc'::str) = '900150983cd24fb0d6963f7d28e17f72'::str
+md5('test'::str) = '098f6bcd4621d373cade4e832627b4f6'::str
+
+# group: null_handling
+md5(null::str) = null::str
+
+# group: edge_cases
+md5(''::str) = 'd41d8cd98f00b204e9800998ecf8427e'::str
+md5(' '::str) = '7215ee9c7d9dc229d2921a40e899ec5f'::str
+md5('Hello'::str) = '8b1a9953c4611296a827abf8c47804d7'::str
+md5('123'::str) = '202cb962ac59075b964b07152d234b70'::str
+md5('opensearch'::str) = 'ce04e16d3d59e3b2e1a657e7e57cb008'::str

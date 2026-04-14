@@ -1,0 +1,51 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_condition_functions"
+scalar_functions:
+  - name: ifnull
+    description: >-
+      Returns first non-null argument.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "both null -> null"
+        - "first non-null -> first"
+        - "first null -> second"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Use COALESCE pattern"
+    impls:
+      - args:
+          - value: "string"
+            name: "value1"
+            description: "The first value to check"
+          - value: "string"
+            name: "value2"
+            description: "The fallback value if first is null"
+        return: "string"
+
+  - name: nullif
+    description: >-
+      Returns null if args are equal, else first arg.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "equal values -> null"
+        - "different values -> first value"
+        - "null args -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Standard SQL NULLIF"
+    impls:
+      - args:
+          - value: "string"
+            name: "value1"
+            description: "The first value to compare"
+          - value: "string"
+            name: "value2"
+            description: "The second value to compare"
+        return: "string"

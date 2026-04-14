@@ -1,0 +1,121 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_aggregation_functions
+
+# percentile
+# group: basic
+percentile(50.0::fp64, 0.5::fp64) = 50.0::fp64
+percentile(100.0::fp64, 1.0::fp64) = 100.0::fp64
+percentile(0.0::fp64, 0.0::fp64) = 0.0::fp64
+percentile(75.0::fp64, 0.25::fp64) = 75.0::fp64
+
+# group: null_handling
+percentile(null::fp64, 0.5::fp64) = null::fp64
+percentile(50.0::fp64, null::fp64) = null::fp64
+percentile(null::fp64, null::fp64) = null::fp64
+
+# group: edge_cases
+percentile(0.0::fp64, 0.0::fp64) = 0.0::fp64
+percentile(0.0::fp64, 1.0::fp64) = 0.0::fp64
+percentile(-100.0::fp64, 0.5::fp64) = -100.0::fp64
+
+# percentile_approx
+# group: basic
+percentile_approx(50.0::fp64, 0.5::fp64) = 50.0::fp64
+percentile_approx(100.0::fp64, 1.0::fp64) = 100.0::fp64
+percentile_approx(0.0::fp64, 0.0::fp64) = 0.0::fp64
+percentile_approx(75.0::fp64, 0.25::fp64) = 75.0::fp64
+
+# group: null_handling
+percentile_approx(null::fp64, 0.5::fp64) = null::fp64
+percentile_approx(50.0::fp64, null::fp64) = null::fp64
+percentile_approx(null::fp64, null::fp64) = null::fp64
+
+# group: edge_cases
+percentile_approx(0.0::fp64, 0.0::fp64) = 0.0::fp64
+percentile_approx(0.0::fp64, 1.0::fp64) = 0.0::fp64
+percentile_approx(-100.0::fp64, 0.5::fp64) = -100.0::fp64
+
+# stddev_pop
+# group: basic
+stddev_pop(0.0::fp64) = 0.0::fp64
+stddev_pop(5.0::fp64) = 0.0::fp64
+stddev_pop(100.0::fp64) = 0.0::fp64
+stddev_pop(-10.0::fp64) = 0.0::fp64
+
+# group: null_handling
+stddev_pop(null::fp64) = null::fp64
+
+# group: edge_cases
+stddev_pop(0.0::fp64) = 0.0::fp64
+stddev_pop(999999.0::fp64) = 0.0::fp64
+stddev_pop(-999999.0::fp64) = 0.0::fp64
+stddev_pop(0.001::fp64) = 0.0::fp64
+stddev_pop(-0.001::fp64) = 0.0::fp64
+
+# stddev_samp
+# group: basic
+stddev_samp(0.0::fp64) = null::fp64
+stddev_samp(5.0::fp64) = null::fp64
+stddev_samp(100.0::fp64) = null::fp64
+stddev_samp(-10.0::fp64) = null::fp64
+
+# group: null_handling
+stddev_samp(null::fp64) = null::fp64
+
+# group: edge_cases
+stddev_samp(0.0::fp64) = null::fp64
+stddev_samp(999999.0::fp64) = null::fp64
+stddev_samp(-999999.0::fp64) = null::fp64
+stddev_samp(0.001::fp64) = null::fp64
+stddev_samp(-0.001::fp64) = null::fp64
+
+# var_pop
+# group: basic
+var_pop(0.0::fp64) = 0.0::fp64
+var_pop(5.0::fp64) = 0.0::fp64
+var_pop(100.0::fp64) = 0.0::fp64
+var_pop(-10.0::fp64) = 0.0::fp64
+
+# group: null_handling
+var_pop(null::fp64) = null::fp64
+
+# group: edge_cases
+var_pop(0.0::fp64) = 0.0::fp64
+var_pop(999999.0::fp64) = 0.0::fp64
+var_pop(-999999.0::fp64) = 0.0::fp64
+var_pop(0.001::fp64) = 0.0::fp64
+var_pop(-0.001::fp64) = 0.0::fp64
+
+# var_samp
+# group: basic
+var_samp(0.0::fp64) = null::fp64
+var_samp(5.0::fp64) = null::fp64
+var_samp(100.0::fp64) = null::fp64
+var_samp(-10.0::fp64) = null::fp64
+
+# group: null_handling
+var_samp(null::fp64) = null::fp64
+
+# group: edge_cases
+var_samp(0.0::fp64) = null::fp64
+var_samp(999999.0::fp64) = null::fp64
+var_samp(-999999.0::fp64) = null::fp64
+var_samp(0.001::fp64) = null::fp64
+var_samp(-0.001::fp64) = null::fp64
+
+# take
+# group: basic
+take('hello'::str, 1::i32) = 'hello'::str
+take('world'::str, 1::i32) = 'world'::str
+take('test'::str, 1::i32) = 'test'::str
+take('abc'::str, 1::i32) = 'abc'::str
+
+# group: null_handling
+take(null::str, 1::i32) = null::str
+take('hello'::str, null::i32) = null::str
+take(null::str, null::i32) = null::str
+
+# group: edge_cases
+take(''::str, 1::i32) = ''::str
+take('hello'::str, 0::i32) = null::str
+take('hello'::str, -1::i32) = null::str

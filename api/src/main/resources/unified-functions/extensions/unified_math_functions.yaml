@@ -1,0 +1,161 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_math_functions"
+scalar_functions:
+  - name: cbrt
+    description: >-
+      Cube root of a number.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "negative value -> negative cube root"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std"]
+            notes: "Use f64::cbrt()"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The number to compute cube root of"
+        return: "fp64"
+
+  - name: crc32
+    description: >-
+      CRC-32 checksum of a string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "empty string -> 0"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["crc32fast"]
+            notes: "Use crc32fast::hash()"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to compute CRC-32 checksum for"
+        return: "i64"
+
+  - name: e
+    description: >-
+      Returns Euler's number (approximately 2.718281828).
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases: []
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std"]
+            notes: "Use std::f64::consts::E"
+    impls:
+      - args: []
+        return: "fp64"
+
+  - name: expm1
+    description: >-
+      Returns e^x - 1.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "0 -> 0"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std"]
+            notes: "Use f64::exp_m1()"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The exponent value"
+        return: "fp64"
+
+  - name: log2
+    description: >-
+      Base-2 logarithm.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "value <= 0 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std"]
+            notes: "Use f64::log2()"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The number to compute base-2 logarithm of"
+        return: "fp64"
+
+  - name: log10
+    description: >-
+      Base-10 logarithm.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "value <= 0 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std"]
+            notes: "Use f64::log10()"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The number to compute base-10 logarithm of"
+        return: "fp64"
+
+  - name: rint
+    description: >-
+      Round to nearest integer (banker's rounding).
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "0.5 -> 0 (rounds to even)"
+        - "1.5 -> 2 (rounds to even)"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std"]
+            notes: "Use f64::round_ties_even() or manual banker's rounding"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The number to round"
+        return: "fp64"
+
+  - name: signum
+    description: >-
+      Sign of a number (-1, 0, 1).
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "positive -> 1"
+        - "negative -> -1"
+        - "zero -> 0"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["std"]
+            notes: "Use f64::signum() mapped to i32"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The number to determine sign of"
+        return: "i32"

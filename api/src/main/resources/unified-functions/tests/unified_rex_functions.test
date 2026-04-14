@@ -1,0 +1,53 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_rex_functions
+
+# rex
+# group: basic
+rex('age=25'::str, 'age=(?P<age>\\d+)'::str) = '{"age":"25"}'::str
+rex('name=John'::str, 'name=(?P<name>\\w+)'::str) = '{"name":"John"}'::str
+rex('ip=192.168.1.1'::str, 'ip=(?P<ip>[\\d.]+)'::str) = '{"ip":"192.168.1.1"}'::str
+rex('key=value'::str, 'key=(?P<val>\\w+)'::str) = '{"val":"value"}'::str
+
+# group: null_handling
+rex(null::str, 'age=(?P<age>\\d+)'::str) = null::str
+rex('age=25'::str, null::str) = null::str
+rex(null::str, null::str) = null::str
+
+# group: edge_cases
+rex(''::str, 'age=(?P<age>\\d+)'::str) = null::str
+rex('no_match'::str, 'age=(?P<age>\\d+)'::str) = null::str
+rex('age=25 name=Bob'::str, 'age=(?P<age>\\d+) name=(?P<name>\\w+)'::str) = '{"age":"25","name":"Bob"}'::str
+
+# replace
+# group: basic
+replace('hello world'::str, 'world'::str, 'there'::str) = 'hello there'::str
+replace('aaa'::str, 'a'::str, 'b'::str) = 'bbb'::str
+replace('foo bar foo'::str, 'foo'::str, 'baz'::str) = 'baz bar baz'::str
+replace('abc123'::str, '\\d+'::str, 'NUM'::str) = 'abcNUM'::str
+
+# group: null_handling
+replace(null::str, 'a'::str, 'b'::str) = null::str
+replace('hello'::str, null::str, 'b'::str) = null::str
+replace('hello'::str, 'a'::str, null::str) = null::str
+
+# group: edge_cases
+replace(''::str, 'a'::str, 'b'::str) = ''::str
+replace('hello'::str, 'xyz'::str, 'b'::str) = 'hello'::str
+replace('hello'::str, 'l+'::str, 'L'::str) = 'heLo'::str
+
+# dissect
+# group: basic
+dissect('John 30'::str, '%{name} %{age}'::str) = '{"age":"30","name":"John"}'::str
+dissect('2023-01-15 ERROR timeout'::str, '%{date} %{level} %{msg}'::str) = '{"date":"2023-01-15","level":"ERROR","msg":"timeout"}'::str
+dissect('host=web01 status=200'::str, 'host=%{host} status=%{status}'::str) = '{"host":"web01","status":"200"}'::str
+dissect('Alice:admin'::str, '%{user}:%{role}'::str) = '{"role":"admin","user":"Alice"}'::str
+
+# group: null_handling
+dissect(null::str, '%{name} %{age}'::str) = null::str
+dissect('John 30'::str, null::str) = null::str
+dissect(null::str, null::str) = null::str
+
+# group: edge_cases
+dissect(''::str, '%{name} %{age}'::str) = null::str
+dissect('no_match'::str, '%{a} %{b} %{c}'::str) = null::str
+dissect('a b c'::str, '%{x} %{y} %{z}'::str) = '{"x":"a","y":"b","z":"c"}'::str

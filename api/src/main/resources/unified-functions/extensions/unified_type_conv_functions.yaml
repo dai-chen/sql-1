@@ -1,0 +1,165 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_type_conv_functions"
+scalar_functions:
+  - name: typeof
+    description: >-
+      Returns the type name of a value as string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Returns type name"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The value to determine type of"
+        return: "string"
+
+  - name: cast_to_string
+    description: >-
+      Casts value to string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Identity for string input"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The value to cast to string"
+        return: "string"
+
+  - name: cast_to_int
+    description: >-
+      Casts string to integer.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> null"
+        - "overflow -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Parse string to i32"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to cast to integer"
+        return: "i32"
+
+  - name: cast_to_long
+    description: >-
+      Casts string to long.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> null"
+        - "overflow -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Parse string to i64"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to cast to long"
+        return: "i64"
+
+  - name: cast_to_float
+    description: >-
+      Casts string to float.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Parse string to f64"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to cast to float"
+        return: "fp64"
+
+  - name: cast_to_boolean
+    description: >-
+      Casts string to boolean.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> null"
+        - "'true'/'1' -> true"
+        - "'false'/'0' -> false"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "'true'/'false'/'1'/'0'"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to cast to boolean"
+        return: "boolean"
+
+  - name: cast_to_date
+    description: >-
+      Casts string to date.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse ISO date"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to cast to date"
+        return: "date"
+
+  - name: cast_to_timestamp
+    description: >-
+      Casts string to timestamp.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid format -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse ISO timestamp"
+    impls:
+      - args:
+          - value: "string"
+            name: "value"
+            description: "The string to cast to timestamp"
+        return: "timestamp"

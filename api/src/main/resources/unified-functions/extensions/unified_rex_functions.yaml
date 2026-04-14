@@ -1,0 +1,77 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_rex_functions"
+scalar_functions:
+  - name: rex
+    description: >-
+      Extracts fields from text using regex with named groups.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "no match -> null"
+        - "invalid regex -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["regex"]
+            notes: "Returns JSON object with named captures, similar to Splunk rex"
+    impls:
+      - args:
+          - value: "string"
+            name: "source"
+            description: "The text to extract fields from"
+          - value: "string"
+            name: "pattern"
+            description: "The regex pattern with named groups"
+        return: "string"
+
+  - name: replace
+    description: >-
+      Replaces regex matches in a string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "no match -> original string"
+        - "invalid regex -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["regex"]
+            notes: "Use Regex::replace_all()"
+    impls:
+      - args:
+          - value: "string"
+            name: "source"
+            description: "The string to perform replacements on"
+          - value: "string"
+            name: "pattern"
+            description: "The regex pattern to match"
+          - value: "string"
+            name: "replacement"
+            description: "The replacement string"
+        return: "string"
+
+  - name: dissect
+    description: >-
+      Parses a string using a dissect pattern (tokenizer).
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "pattern mismatch -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Returns JSON object with named tokens, no regex"
+    impls:
+      - args:
+          - value: "string"
+            name: "source"
+            description: "The string to parse"
+          - value: "string"
+            name: "pattern"
+            description: "The dissect pattern with named tokens"
+        return: "string"

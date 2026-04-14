@@ -1,0 +1,99 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_binning_functions"
+scalar_functions:
+  - name: span
+    description: >-
+      Creates a span/bucket for numeric or date values.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "interval <= 0 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "floor(value / interval) * interval"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The value to bucket"
+          - value: "fp64"
+            name: "interval"
+            description: "The span interval size"
+        return: "fp64"
+
+  - name: width_bucket
+    description: >-
+      Assigns value to equi-width histogram bucket.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "value < min -> 0"
+        - "value >= max -> num_buckets + 1"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Standard SQL width_bucket"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The value to assign to a bucket"
+          - value: "fp64"
+            name: "min"
+            description: "The minimum range value"
+          - value: "fp64"
+            name: "max"
+            description: "The maximum range value"
+          - value: "i32"
+            name: "num_buckets"
+            description: "The number of buckets"
+        return: "i32"
+
+  - name: ntile
+    description: >-
+      Distributes rows into N buckets.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "num_buckets <= 0 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Window function, DataFusion has built-in"
+    impls:
+      - args:
+          - value: "i32"
+            name: "num_buckets"
+            description: "The number of buckets to distribute rows into"
+        return: "i32"
+
+  - name: histogram
+    description: >-
+      Creates histogram buckets from data.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "num_buckets <= 0 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Aggregate function, returns JSON bucket info"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "value"
+            description: "The value to bucket"
+          - value: "i32"
+            name: "num_buckets"
+            description: "The number of histogram buckets"
+        return: "string"

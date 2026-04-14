@@ -1,0 +1,75 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_parse_functions"
+scalar_functions:
+  - name: parse
+    description: >-
+      Parses a string using a regex pattern with named groups.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "no match -> null"
+        - "invalid regex -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["regex"]
+            notes: "Returns JSON object with named group matches"
+    impls:
+      - args:
+          - value: "string"
+            name: "source"
+            description: "The source string to parse"
+          - value: "string"
+            name: "pattern"
+            description: "The regex pattern with named groups"
+        return: "string"
+
+  - name: patterns
+    description: >-
+      Extracts known patterns (email, ip, url) from text.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "no match -> empty array"
+        - "unknown pattern_type -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["regex"]
+            notes: "Returns JSON array of matches"
+    impls:
+      - args:
+          - value: "string"
+            name: "source"
+            description: "The source text to extract patterns from"
+          - value: "string"
+            name: "pattern_type"
+            description: "The type of pattern to extract (email, ip, url)"
+        return: "string"
+
+  - name: grok
+    description: >-
+      Parses a string using a grok pattern.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "no match -> null"
+        - "invalid pattern -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["regex"]
+            notes: "Returns JSON object with named captures"
+    impls:
+      - args:
+          - value: "string"
+            name: "source"
+            description: "The source string to parse"
+          - value: "string"
+            name: "pattern"
+            description: "The grok pattern"
+        return: "string"

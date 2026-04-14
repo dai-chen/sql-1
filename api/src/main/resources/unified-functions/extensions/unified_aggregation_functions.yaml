@@ -1,0 +1,152 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_aggregation_functions"
+scalar_functions:
+  - name: percentile
+    description: >-
+      Computes the percentile value.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "percent outside 0-100 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Aggregate function, use DataFusion UDAF"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "column"
+            description: "The column to compute percentile for"
+          - value: "fp64"
+            name: "percent"
+            description: "The percentile to compute (0-100)"
+        return: "fp64"
+
+  - name: percentile_approx
+    description: >-
+      Approximate percentile.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "percent outside 0-100 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Approximate aggregate"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "column"
+            description: "The column to compute approximate percentile for"
+          - value: "fp64"
+            name: "percent"
+            description: "The percentile to compute (0-100)"
+        return: "fp64"
+
+  - name: stddev_pop
+    description: >-
+      Population standard deviation.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "empty group -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "DataFusion has built-in"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "column"
+            description: "The column to compute population standard deviation for"
+        return: "fp64"
+
+  - name: stddev_samp
+    description: >-
+      Sample standard deviation.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "empty group -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "DataFusion has built-in"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "column"
+            description: "The column to compute sample standard deviation for"
+        return: "fp64"
+
+  - name: var_pop
+    description: >-
+      Population variance.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "empty group -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "DataFusion has built-in"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "column"
+            description: "The column to compute population variance for"
+        return: "fp64"
+
+  - name: var_samp
+    description: >-
+      Sample variance.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "empty group -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "DataFusion has built-in"
+    impls:
+      - args:
+          - value: "fp64"
+            name: "column"
+            description: "The column to compute sample variance for"
+        return: "fp64"
+
+  - name: take
+    description: >-
+      Returns the value at a given position in a group.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "index out of bounds -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Custom aggregate, returns nth value"
+    impls:
+      - args:
+          - value: "string"
+            name: "column"
+            description: "The column to retrieve value from"
+          - value: "i32"
+            name: "index"
+            description: "The position in the group to retrieve"
+        return: "string"

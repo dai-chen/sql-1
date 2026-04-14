@@ -1,0 +1,254 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_collection_functions"
+scalar_functions:
+  - name: array
+    description: >-
+      Creates a JSON array from arguments.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null elements in array"
+        - "no args -> empty array"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Variadic, construct JSON array"
+    impls:
+      - args:
+          - value: "string"
+            name: "value1"
+            description: "First element of the array"
+          - value: "string"
+            name: "value2"
+            description: "Second element of the array"
+        return: "string"
+
+  - name: array_length
+    description: >-
+      Returns length of a JSON array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid JSON -> null"
+        - "empty array -> 0"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse and count elements"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string"
+        return: "i32"
+
+  - name: array_flatten
+    description: >-
+      Flattens nested JSON arrays.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid JSON -> null"
+        - "already flat -> unchanged"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Recursive flatten"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The nested JSON array string to flatten"
+        return: "string"
+
+  - name: array_distinct
+    description: >-
+      Returns unique elements from JSON array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid JSON -> null"
+        - "empty array -> empty array"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Preserve order, deduplicate"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string to deduplicate"
+        return: "string"
+
+  - name: array_sort
+    description: >-
+      Sorts elements of a JSON array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid JSON -> null"
+        - "empty array -> empty array"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Lexicographic sort"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string to sort"
+        return: "string"
+
+  - name: array_contains
+    description: >-
+      Checks if JSON array contains a value.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> false"
+        - "empty array -> false"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse and search"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string to search"
+          - value: "string"
+            name: "value"
+            description: "The value to search for"
+        return: "boolean"
+
+  - name: array_position
+    description: >-
+      Returns 1-based index of value in JSON array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "not found -> 0"
+        - "invalid JSON -> 0"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "0 if not found"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string to search"
+          - value: "string"
+            name: "value"
+            description: "The value to find position of"
+        return: "i32"
+
+  - name: array_join
+    description: >-
+      Joins JSON array elements with separator.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> null"
+        - "empty array -> empty string"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Convert elements to strings"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string to join"
+          - value: "string"
+            name: "separator"
+            description: "The separator string"
+        return: "string"
+
+  - name: array_remove
+    description: >-
+      Removes all occurrences of value from JSON array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid JSON -> null"
+        - "value not found -> unchanged"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Remove matching elements"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string"
+          - value: "string"
+            name: "value"
+            description: "The value to remove"
+        return: "string"
+
+  - name: array_reverse
+    description: >-
+      Reverses a JSON array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid JSON -> null"
+        - "empty array -> empty array"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "Parse, reverse, serialize"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string to reverse"
+        return: "string"
+
+  - name: array_slice
+    description: >-
+      Returns a slice of a JSON array.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid JSON -> null"
+        - "out of bounds -> clamp to array bounds"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["serde_json"]
+            notes: "0-based start index"
+    impls:
+      - args:
+          - value: "string"
+            name: "json_array"
+            description: "The JSON array string to slice"
+          - value: "i32"
+            name: "start"
+            description: "The 0-based start index"
+          - value: "i32"
+            name: "length"
+            description: "The number of elements to include"
+        return: "string"

@@ -1,0 +1,138 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_type_conv_functions
+
+# typeof
+# group: basic
+typeof('hello'::str) = 'STRING'::str
+typeof('123'::str) = 'STRING'::str
+typeof('true'::str) = 'STRING'::str
+
+# group: null_handling
+typeof(null::str) = null::str
+
+# group: edge_cases
+typeof(''::str) = 'STRING'::str
+typeof(' '::str) = 'STRING'::str
+typeof('2024-01-15'::str) = 'STRING'::str
+typeof('3.14'::str) = 'STRING'::str
+typeof('null'::str) = 'STRING'::str
+typeof('a very long string value'::str) = 'STRING'::str
+
+# cast_to_string
+# group: basic
+cast_to_string('42'::str) = '42'::str
+cast_to_string('hello'::str) = 'hello'::str
+cast_to_string('true'::str) = 'true'::str
+
+# group: null_handling
+cast_to_string(null::str) = null::str
+
+# group: edge_cases
+cast_to_string(''::str) = ''::str
+cast_to_string(' '::str) = ' '::str
+cast_to_string('3.14'::str) = '3.14'::str
+cast_to_string('2024-01-15'::str) = '2024-01-15'::str
+cast_to_string('special!@#'::str) = 'special!@#'::str
+cast_to_string('0'::str) = '0'::str
+
+# cast_to_int
+# group: basic
+cast_to_int('42'::str) = 42::i32
+cast_to_int('0'::str) = 0::i32
+cast_to_int('-1'::str) = -1::i32
+cast_to_int('100'::str) = 100::i32
+
+# group: null_handling
+cast_to_int(null::str) = null::i32
+
+# group: edge_cases
+cast_to_int('2147483647'::str) = 2147483647::i32
+cast_to_int('-2147483648'::str) = -2147483648::i32
+cast_to_int('1'::str) = 1::i32
+cast_to_int('999'::str) = 999::i32
+cast_to_int('-999'::str) = -999::i32
+
+# cast_to_long
+# group: basic
+cast_to_long('42'::str) = 42::i64
+cast_to_long('0'::str) = 0::i64
+cast_to_long('-1'::str) = -1::i64
+cast_to_long('1000000'::str) = 1000000::i64
+
+# group: null_handling
+cast_to_long(null::str) = null::i64
+
+# group: edge_cases
+cast_to_long('9223372036854775807'::str) = 9223372036854775807::i64
+cast_to_long('-9223372036854775808'::str) = -9223372036854775808::i64
+cast_to_long('1'::str) = 1::i64
+cast_to_long('999999999'::str) = 999999999::i64
+cast_to_long('-999999999'::str) = -999999999::i64
+
+# cast_to_float
+# group: basic
+cast_to_float('3.14'::str) = 3.14::fp64
+cast_to_float('0.0'::str) = 0.0::fp64
+cast_to_float('-1.5'::str) = -1.5::fp64
+cast_to_float('100.0'::str) = 100.0::fp64
+
+# group: null_handling
+cast_to_float(null::str) = null::fp64
+
+# group: edge_cases
+cast_to_float('0.001'::str) = 0.001::fp64
+cast_to_float('-0.001'::str) = -0.001::fp64
+cast_to_float('1.0'::str) = 1.0::fp64
+cast_to_float('999.999'::str) = 999.999::fp64
+cast_to_float('42'::str) = 42.0::fp64
+
+# cast_to_boolean
+# group: basic
+cast_to_boolean('true'::str) = true::bool
+cast_to_boolean('false'::str) = false::bool
+cast_to_boolean('TRUE'::str) = true::bool
+
+# group: null_handling
+cast_to_boolean(null::str) = null::bool
+
+# group: edge_cases
+cast_to_boolean('FALSE'::str) = false::bool
+cast_to_boolean('True'::str) = true::bool
+cast_to_boolean('False'::str) = false::bool
+cast_to_boolean('1'::str) = true::bool
+cast_to_boolean('0'::str) = false::bool
+cast_to_boolean('yes'::str) = true::bool
+
+# cast_to_date
+# group: basic
+cast_to_date('2024-01-15'::str) = '2024-01-15'::date
+cast_to_date('2023-12-31'::str) = '2023-12-31'::date
+cast_to_date('2000-01-01'::str) = '2000-01-01'::date
+
+# group: null_handling
+cast_to_date(null::str) = null::date
+
+# group: edge_cases
+cast_to_date('1970-01-01'::str) = '1970-01-01'::date
+cast_to_date('2024-02-29'::str) = '2024-02-29'::date
+cast_to_date('2024-12-31'::str) = '2024-12-31'::date
+cast_to_date('1999-06-15'::str) = '1999-06-15'::date
+cast_to_date('invalid'::str) = null::date
+cast_to_date(''::str) = null::date
+
+# cast_to_timestamp
+# group: basic
+cast_to_timestamp('2024-01-15 10:30:00'::str) = '2024-01-15 10:30:00'::timestamp
+cast_to_timestamp('2023-12-31 23:59:59'::str) = '2023-12-31 23:59:59'::timestamp
+cast_to_timestamp('2000-01-01 00:00:00'::str) = '2000-01-01 00:00:00'::timestamp
+
+# group: null_handling
+cast_to_timestamp(null::str) = null::timestamp
+
+# group: edge_cases
+cast_to_timestamp('1970-01-01 00:00:00'::str) = '1970-01-01 00:00:00'::timestamp
+cast_to_timestamp('2024-02-29 12:00:00'::str) = '2024-02-29 12:00:00'::timestamp
+cast_to_timestamp('2024-12-31 23:59:59'::str) = '2024-12-31 23:59:59'::timestamp
+cast_to_timestamp('invalid'::str) = null::timestamp
+cast_to_timestamp(''::str) = null::timestamp
+cast_to_timestamp('2024-06-15 08:30:45'::str) = '2024-06-15 08:30:45'::timestamp

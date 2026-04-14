@@ -1,0 +1,53 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_parse_functions
+
+# parse
+# group: basic
+parse('age=25 name=John'::str, 'age=(?P<age>\\d+)'::str) = '{"age":"25"}'::str
+parse('status=200 method=GET'::str, 'status=(?P<status>\\d+)'::str) = '{"status":"200"}'::str
+parse('key=value'::str, 'key=(?P<key>\\w+)'::str) = '{"key":"value"}'::str
+
+# group: null_handling
+parse(null::str, 'age=(?P<age>\\d+)'::str) = null::str
+parse('age=25'::str, null::str) = null::str
+parse(null::str, null::str) = null::str
+
+# group: edge_cases
+parse('no match here'::str, 'age=(?P<age>\\d+)'::str) = null::str
+parse(''::str, '(?P<val>\\w+)'::str) = null::str
+parse('x=1 y=2'::str, 'x=(?P<x>\\d+) y=(?P<y>\\d+)'::str) = '{"x":"1","y":"2"}'::str
+parse('abc123'::str, '(?P<letters>[a-z]+)(?P<digits>\\d+)'::str) = '{"letters":"abc","digits":"123"}'::str
+
+# patterns
+# group: basic
+patterns('email me at test@example.com'::str, 'email'::str) = '["test@example.com"]'::str
+patterns('visit http://example.com today'::str, 'url'::str) = '["http://example.com"]'::str
+patterns('call 192.168.1.1 now'::str, 'ip'::str) = '["192.168.1.1"]'::str
+
+# group: null_handling
+patterns(null::str, 'email'::str) = null::str
+patterns('test@example.com'::str, null::str) = null::str
+patterns(null::str, null::str) = null::str
+
+# group: edge_cases
+patterns('no patterns here'::str, 'email'::str) = '[]'::str
+patterns(''::str, 'email'::str) = '[]'::str
+patterns('a@b.com and c@d.com'::str, 'email'::str) = '["a@b.com","c@d.com"]'::str
+patterns('test'::str, 'unknown_pattern'::str) = null::str
+
+# grok
+# group: basic
+grok('55.3.244.1 GET /index.html'::str, '%{IP:client} %{WORD:method} %{URIPATHPARAM:request}'::str) = '{"client":"55.3.244.1","method":"GET","request":"/index.html"}'::str
+grok('2024-01-15 ERROR something failed'::str, '%{DATE:date} %{WORD:level} %{GREEDYDATA:message}'::str) = '{"date":"2024-01-15","level":"ERROR","message":"something failed"}'::str
+grok('127.0.0.1 POST /api/data'::str, '%{IP:client} %{WORD:method} %{URIPATHPARAM:request}'::str) = '{"client":"127.0.0.1","method":"POST","request":"/api/data"}'::str
+
+# group: null_handling
+grok(null::str, '%{IP:client}'::str) = null::str
+grok('55.3.244.1'::str, null::str) = null::str
+grok(null::str, null::str) = null::str
+
+# group: edge_cases
+grok('no match'::str, '%{IP:client}'::str) = null::str
+grok(''::str, '%{WORD:word}'::str) = null::str
+grok('hello world'::str, '%{WORD:first} %{WORD:second}'::str) = '{"first":"hello","second":"world"}'::str
+grok('42'::str, '%{NUMBER:num}'::str) = '{"num":"42"}'::str

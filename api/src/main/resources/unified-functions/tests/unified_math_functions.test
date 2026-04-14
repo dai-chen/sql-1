@@ -1,0 +1,141 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_math_functions
+
+# cbrt
+# group: basic
+cbrt(27.0::fp64) = 3.0::fp64
+cbrt(8.0::fp64) = 2.0::fp64
+cbrt(1.0::fp64) = 1.0::fp64
+cbrt(0.0::fp64) = 0.0::fp64
+cbrt(64.0::fp64) = 4.0::fp64
+
+# group: null_handling
+cbrt(null::fp64) = null::fp64
+
+# group: edge_cases
+cbrt(-8.0::fp64) = -2.0::fp64
+cbrt(-27.0::fp64) = -3.0::fp64
+cbrt(0.001::fp64) = 0.1::fp64
+cbrt(1000000.0::fp64) = 100.0::fp64
+
+# crc32
+# group: basic
+crc32('hello'::str) = 907060870::i64
+crc32('world'::str) = 868757069::i64
+crc32('abc'::str) = 891568578::i64
+crc32('test'::str) = 3632233996::i64
+
+# group: null_handling
+crc32(null::str) = null::i64
+
+# group: edge_cases
+crc32(''::str) = 0::i64
+crc32(' '::str) = 3916222277::i64
+crc32('Hello'::str) = 4157704578::i64
+crc32('a'::str) = 3904355907::i64
+crc32('123'::str) = 2286445522::i64
+
+
+# e
+# group: basic
+e() = 2.718281828459045::fp64
+e() = 2.718281828459045::fp64
+e() = 2.718281828459045::fp64
+
+# group: null_handling
+# e() takes no arguments; no null input possible
+e() = 2.718281828459045::fp64
+
+# group: edge_cases
+# e() is a constant function; edge cases are limited
+e() = 2.718281828459045::fp64
+e() = 2.718281828459045::fp64
+e() = 2.718281828459045::fp64
+e() = 2.718281828459045::fp64
+e() = 2.718281828459045::fp64
+e() = 2.718281828459045::fp64
+
+# expm1
+# group: basic
+expm1(0.0::fp64) = 0.0::fp64
+expm1(1.0::fp64) = 1.718281828459045::fp64
+expm1(-1.0::fp64) = -0.6321205588285577::fp64
+expm1(2.0::fp64) = 6.38905609893065::fp64
+
+# group: null_handling
+expm1(null::fp64) = null::fp64
+
+# group: edge_cases
+expm1(0.5::fp64) = 0.6487212707001282::fp64
+expm1(-0.5::fp64) = -0.3934693402873666::fp64
+expm1(0.001::fp64) = 0.0010005001667083846::fp64
+expm1(10.0::fp64) = 22025.465794806718::fp64
+expm1(-10.0::fp64) = -0.9999546000702375::fp64
+
+# log2
+# group: basic
+log2(1.0::fp64) = 0.0::fp64
+log2(2.0::fp64) = 1.0::fp64
+log2(4.0::fp64) = 2.0::fp64
+log2(8.0::fp64) = 3.0::fp64
+log2(16.0::fp64) = 4.0::fp64
+
+# group: null_handling
+log2(null::fp64) = null::fp64
+
+# group: edge_cases
+log2(0.5::fp64) = -1.0::fp64
+log2(0.25::fp64) = -2.0::fp64
+log2(1024.0::fp64) = 10.0::fp64
+log2(32.0::fp64) = 5.0::fp64
+
+# log10
+# group: basic
+log10(1.0::fp64) = 0.0::fp64
+log10(10.0::fp64) = 1.0::fp64
+log10(100.0::fp64) = 2.0::fp64
+log10(1000.0::fp64) = 3.0::fp64
+log10(10000.0::fp64) = 4.0::fp64
+
+# group: null_handling
+log10(null::fp64) = null::fp64
+
+# group: edge_cases
+log10(0.1::fp64) = -1.0::fp64
+log10(0.01::fp64) = -2.0::fp64
+log10(1000000.0::fp64) = 6.0::fp64
+log10(0.001::fp64) = -3.0::fp64
+
+# rint
+# group: basic
+rint(2.4::fp64) = 2.0::fp64
+rint(2.6::fp64) = 3.0::fp64
+rint(3.1::fp64) = 3.0::fp64
+rint(5.0::fp64) = 5.0::fp64
+
+# group: null_handling
+rint(null::fp64) = null::fp64
+
+# group: edge_cases
+rint(2.5::fp64) = 2.0::fp64
+rint(3.5::fp64) = 4.0::fp64
+rint(-2.5::fp64) = -2.0::fp64
+rint(-3.5::fp64) = -4.0::fp64
+rint(0.5::fp64) = 0.0::fp64
+
+# signum
+# group: basic
+signum(5.0::fp64) = 1::i32
+signum(-3.0::fp64) = -1::i32
+signum(0.0::fp64) = 0::i32
+signum(100.0::fp64) = 1::i32
+
+# group: null_handling
+signum(null::fp64) = null::i32
+
+# group: edge_cases
+signum(-0.0::fp64) = 0::i32
+signum(0.001::fp64) = 1::i32
+signum(-0.001::fp64) = -1::i32
+signum(999999.0::fp64) = 1::i32
+signum(-999999.0::fp64) = -1::i32
