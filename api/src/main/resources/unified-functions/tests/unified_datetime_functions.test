@@ -1,0 +1,505 @@
+### SUBSTRAIT_SCALAR_TEST: v1.0
+### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_datetime_functions
+
+# adddate
+# group: basic
+adddate('2024-01-15'::date, 1::i64) = '2024-01-16'::date
+adddate('2024-01-15'::date, 10::i64) = '2024-01-25'::date
+adddate('2024-01-15'::date, 0::i64) = '2024-01-15'::date
+adddate('2024-02-28'::date, 1::i64) = '2024-02-29'::date
+adddate('2024-12-31'::date, 1::i64) = '2025-01-01'::date
+# group: null_handling
+adddate(null::date, 1::i64) = null::date
+adddate('2024-01-15'::date, null::i64) = null::date
+adddate(null::date, null::i64) = null::date
+# group: edge_cases
+adddate('2024-02-29'::date, 1::i64) = '2024-03-01'::date
+adddate('2024-01-15'::date, 365::i64) = '2025-01-14'::date
+adddate('2024-01-15'::date, -1::i64) = '2024-01-14'::date
+adddate('2023-02-28'::date, 1::i64) = '2023-03-01'::date
+
+# addtime
+# group: basic
+addtime('2024-01-15 10:30:00'::timestamp, '01:00:00'::str) = '2024-01-15 11:30:00'::timestamp
+addtime('2024-01-15 10:30:00'::timestamp, '00:30:00'::str) = '2024-01-15 11:00:00'::timestamp
+addtime('2024-01-15 10:30:00'::timestamp, '00:00:01'::str) = '2024-01-15 10:30:01'::timestamp
+addtime('2024-01-15 00:00:00'::timestamp, '10:30:00'::str) = '2024-01-15 10:30:00'::timestamp
+addtime('2024-01-15 10:30:00'::timestamp, '00:00:00'::str) = '2024-01-15 10:30:00'::timestamp
+# group: null_handling
+addtime(null::timestamp, '01:00:00'::str) = null::timestamp
+addtime('2024-01-15 10:30:00'::timestamp, null::str) = null::timestamp
+addtime(null::timestamp, null::str) = null::timestamp
+# group: edge_cases
+addtime('2024-01-15 23:59:59'::timestamp, '00:00:01'::str) = '2024-01-16 00:00:00'::timestamp
+addtime('2024-12-31 23:59:59'::timestamp, '00:00:01'::str) = '2025-01-01 00:00:00'::timestamp
+addtime('2024-01-15 10:30:00'::timestamp, '13:30:00'::str) = '2024-01-16 00:00:00'::timestamp
+
+# convert_tz
+# group: basic
+convert_tz('2024-01-15 10:00:00'::timestamp, 'UTC'::str, 'US/Eastern'::str) = '2024-01-15 05:00:00'::timestamp
+convert_tz('2024-01-15 10:00:00'::timestamp, 'US/Eastern'::str, 'UTC'::str) = '2024-01-15 15:00:00'::timestamp
+convert_tz('2024-01-15 10:00:00'::timestamp, 'UTC'::str, 'UTC'::str) = '2024-01-15 10:00:00'::timestamp
+convert_tz('2024-01-15 10:00:00'::timestamp, 'UTC'::str, 'Asia/Tokyo'::str) = '2024-01-15 19:00:00'::timestamp
+convert_tz('2024-01-15 10:00:00'::timestamp, '+00:00'::str, '+05:30'::str) = '2024-01-15 15:30:00'::timestamp
+# group: null_handling
+convert_tz(null::timestamp, 'UTC'::str, 'US/Eastern'::str) = null::timestamp
+convert_tz('2024-01-15 10:00:00'::timestamp, null::str, 'US/Eastern'::str) = null::timestamp
+convert_tz('2024-01-15 10:00:00'::timestamp, 'UTC'::str, null::str) = null::timestamp
+convert_tz(null::timestamp, null::str, null::str) = null::timestamp
+# group: edge_cases
+convert_tz('2024-01-15 00:00:00'::timestamp, 'UTC'::str, 'US/Pacific'::str) = '2024-01-14 16:00:00'::timestamp
+convert_tz('2024-12-31 23:00:00'::timestamp, 'UTC'::str, '+02:00'::str) = '2025-01-01 01:00:00'::timestamp
+convert_tz('2024-06-15 12:00:00'::timestamp, 'US/Eastern'::str, 'US/Pacific'::str) = '2024-06-15 09:00:00'::timestamp
+
+# date
+# group: basic
+date('2024-01-15'::str) = '2024-01-15'::date
+date('2024-12-31'::str) = '2024-12-31'::date
+date('2024-02-29'::str) = '2024-02-29'::date
+date('2000-01-01'::str) = '2000-01-01'::date
+date('1970-01-01'::str) = '1970-01-01'::date
+date('2024-06-15'::str) = '2024-06-15'::date
+# group: null_handling
+date(null::str) = null::date
+# group: edge_cases
+date('2024-01-15 10:30:00'::str) = '2024-01-15'::date
+date('0001-01-01'::str) = '0001-01-01'::date
+date('9999-12-31'::str) = '9999-12-31'::date
+date(''::str) = null::date
+
+# date_format
+# group: basic
+date_format('2024-01-15 10:30:00'::timestamp, '%Y-%m-%d'::str) = '2024-01-15'::str
+date_format('2024-01-15 10:30:00'::timestamp, '%H:%i:%s'::str) = '10:30:00'::str
+date_format('2024-01-15 10:30:00'::timestamp, '%Y-%m-%d %H:%i:%s'::str) = '2024-01-15 10:30:00'::str
+date_format('2024-01-15 10:30:00'::timestamp, '%d/%m/%Y'::str) = '15/01/2024'::str
+date_format('2024-01-15 10:30:00'::timestamp, '%Y'::str) = '2024'::str
+# group: null_handling
+date_format(null::timestamp, '%Y-%m-%d'::str) = null::str
+date_format('2024-01-15 10:30:00'::timestamp, null::str) = null::str
+date_format(null::timestamp, null::str) = null::str
+# group: edge_cases
+date_format('2024-02-29 00:00:00'::timestamp, '%Y-%m-%d'::str) = '2024-02-29'::str
+date_format('2024-12-31 23:59:59'::timestamp, '%Y-%m-%d %H:%i:%s'::str) = '2024-12-31 23:59:59'::str
+date_format('2024-01-15 10:30:00'::timestamp, ''::str) = ''::str
+
+# dayname
+# group: basic
+dayname('2024-01-15'::date) = 'Monday'::str
+dayname('2024-01-16'::date) = 'Tuesday'::str
+dayname('2024-01-17'::date) = 'Wednesday'::str
+dayname('2024-01-18'::date) = 'Thursday'::str
+dayname('2024-01-19'::date) = 'Friday'::str
+dayname('2024-01-20'::date) = 'Saturday'::str
+dayname('2024-01-14'::date) = 'Sunday'::str
+# group: null_handling
+dayname(null::date) = null::str
+# group: edge_cases
+dayname('2024-02-29'::date) = 'Thursday'::str
+dayname('2024-12-31'::date) = 'Tuesday'::str
+dayname('2000-01-01'::date) = 'Saturday'::str
+dayname('1970-01-01'::date) = 'Thursday'::str
+
+# from_days
+# group: basic
+from_days(739264::i64) = '2024-01-15'::date
+from_days(1::i64) = '0000-01-01'::date
+from_days(366::i64) = '0001-01-01'::date
+from_days(730485::i64) = '2000-01-01'::date
+from_days(719528::i64) = '1970-01-01'::date
+from_days(730120::i64) = '1999-01-01'::date
+# group: null_handling
+from_days(null::i64) = null::date
+# group: edge_cases
+from_days(0::i64) = null::date
+from_days(3652424::i64) = '9999-12-31'::date
+from_days(739280::i64) = '2024-01-31'::date
+from_days(739295::i64) = '2024-02-15'::date
+
+# from_unixtime
+# group: basic
+from_unixtime(0.0::fp64) = '1970-01-01 00:00:00'::timestamp
+from_unixtime(1705320000.0::fp64) = '2024-01-15 12:00:00'::timestamp
+from_unixtime(86400.0::fp64) = '1970-01-02 00:00:00'::timestamp
+from_unixtime(946684800.0::fp64) = '2000-01-01 00:00:00'::timestamp
+from_unixtime(1.0::fp64) = '1970-01-01 00:00:01'::timestamp
+from_unixtime(3600.0::fp64) = '1970-01-01 01:00:00'::timestamp
+# group: null_handling
+from_unixtime(null::fp64) = null::timestamp
+# group: edge_cases
+from_unixtime(-1.0::fp64) = '1969-12-31 23:59:59'::timestamp
+from_unixtime(0.5::fp64) = '1970-01-01 00:00:00'::timestamp
+from_unixtime(2147483647.0::fp64) = '2038-01-19 03:14:07'::timestamp
+from_unixtime(253402300799.0::fp64) = '9999-12-31 23:59:59'::timestamp
+
+# get_format
+# group: basic
+get_format('DATE'::str, 'USA'::str) = '%m.%d.%Y'::str
+get_format('DATE'::str, 'EUR'::str) = '%d.%m.%Y'::str
+get_format('DATE'::str, 'ISO'::str) = '%Y-%m-%d'::str
+get_format('DATE'::str, 'JIS'::str) = '%Y-%m-%d'::str
+get_format('DATE'::str, 'INTERNAL'::str) = '%Y%m%d'::str
+get_format('TIME'::str, 'USA'::str) = '%h:%i:%s %p'::str
+get_format('TIME'::str, 'EUR'::str) = '%H.%i.%s'::str
+get_format('TIME'::str, 'ISO'::str) = '%H:%i:%s'::str
+get_format('DATETIME'::str, 'USA'::str) = '%Y-%m-%d %H.%i.%s'::str
+get_format('DATETIME'::str, 'ISO'::str) = '%Y-%m-%d %H:%i:%s'::str
+# group: null_handling
+get_format(null::str, 'USA'::str) = null::str
+get_format('DATE'::str, null::str) = null::str
+get_format(null::str, null::str) = null::str
+# group: edge_cases
+get_format('TIME'::str, 'JIS'::str) = '%H:%i:%s'::str
+get_format('TIME'::str, 'INTERNAL'::str) = '%H%i%s'::str
+get_format('DATETIME'::str, 'EUR'::str) = '%Y-%m-%d %H.%i.%s'::str
+get_format('DATETIME'::str, 'JIS'::str) = '%Y-%m-%d %H:%i:%s'::str
+get_format('DATETIME'::str, 'INTERNAL'::str) = '%Y%m%d%H%i%s'::str
+
+# makedate
+# group: basic
+makedate(2024.0::fp64, 1.0::fp64) = '2024-01-01'::date
+makedate(2024.0::fp64, 15.0::fp64) = '2024-01-15'::date
+makedate(2024.0::fp64, 32.0::fp64) = '2024-02-01'::date
+makedate(2024.0::fp64, 366.0::fp64) = '2024-12-31'::date
+makedate(2023.0::fp64, 365.0::fp64) = '2023-12-31'::date
+# group: null_handling
+makedate(null::fp64, 1.0::fp64) = null::date
+makedate(2024.0::fp64, null::fp64) = null::date
+makedate(null::fp64, null::fp64) = null::date
+# group: edge_cases
+makedate(2024.0::fp64, 0.0::fp64) = null::date
+makedate(2024.0::fp64, -1.0::fp64) = null::date
+makedate(2000.0::fp64, 60.0::fp64) = '2000-02-29'::date
+
+# maketime
+# group: basic
+maketime(10.0::fp64, 30.0::fp64, 0.0::fp64) = '10:30:00'::str
+maketime(0.0::fp64, 0.0::fp64, 0.0::fp64) = '00:00:00'::str
+maketime(23.0::fp64, 59.0::fp64, 59.0::fp64) = '23:59:59'::str
+maketime(12.0::fp64, 0.0::fp64, 0.0::fp64) = '12:00:00'::str
+maketime(1.0::fp64, 2.0::fp64, 3.0::fp64) = '01:02:03'::str
+# group: null_handling
+maketime(null::fp64, 30.0::fp64, 0.0::fp64) = null::str
+maketime(10.0::fp64, null::fp64, 0.0::fp64) = null::str
+maketime(10.0::fp64, 30.0::fp64, null::fp64) = null::str
+maketime(null::fp64, null::fp64, null::fp64) = null::str
+# group: edge_cases
+maketime(0.0::fp64, 0.0::fp64, 1.0::fp64) = '00:00:01'::str
+maketime(23.0::fp64, 0.0::fp64, 0.0::fp64) = '23:00:00'::str
+
+# microsecond
+# group: basic
+microsecond('10:30:00.123456'::str) = 123456::i32
+microsecond('10:30:00'::str) = 0::i32
+microsecond('10:30:00.000001'::str) = 1::i32
+microsecond('10:30:00.999999'::str) = 999999::i32
+microsecond('00:00:00.500000'::str) = 500000::i32
+microsecond('12:34:56.654321'::str) = 654321::i32
+# group: null_handling
+microsecond(null::str) = null::i32
+# group: edge_cases
+microsecond('23:59:59.999999'::str) = 999999::i32
+microsecond('00:00:00.000000'::str) = 0::i32
+microsecond('12:00:00.100000'::str) = 100000::i32
+microsecond('12:00:00.010000'::str) = 10000::i32
+
+# minute_of_day
+# group: basic
+minute_of_day('10:30:00'::str) = 630::i32
+minute_of_day('00:00:00'::str) = 0::i32
+minute_of_day('23:59:59'::str) = 1439::i32
+minute_of_day('12:00:00'::str) = 720::i32
+minute_of_day('01:01:00'::str) = 61::i32
+minute_of_day('03:15:00'::str) = 195::i32
+# group: null_handling
+minute_of_day(null::str) = null::i32
+# group: edge_cases
+minute_of_day('00:01:00'::str) = 1::i32
+minute_of_day('00:59:59'::str) = 59::i32
+minute_of_day('06:30:00'::str) = 390::i32
+minute_of_day('18:45:00'::str) = 1125::i32
+
+# monthname
+# group: basic
+monthname('2024-01-15'::date) = 'January'::str
+monthname('2024-02-15'::date) = 'February'::str
+monthname('2024-03-15'::date) = 'March'::str
+monthname('2024-06-15'::date) = 'June'::str
+monthname('2024-12-15'::date) = 'December'::str
+monthname('2024-05-15'::date) = 'May'::str
+# group: null_handling
+monthname(null::date) = null::str
+# group: edge_cases
+monthname('2024-04-01'::date) = 'April'::str
+monthname('2024-07-31'::date) = 'July'::str
+monthname('2024-09-30'::date) = 'September'::str
+monthname('2024-11-15'::date) = 'November'::str
+
+# period_add
+# group: basic
+period_add(202401::i32, 5::i32) = 202406::i32
+period_add(202411::i32, 3::i32) = 202502::i32
+period_add(202401::i32, 0::i32) = 202401::i32
+period_add(202401::i32, 12::i32) = 202501::i32
+period_add(202406::i32, 6::i32) = 202412::i32
+# group: null_handling
+period_add(null::i32, 5::i32) = null::i32
+period_add(202401::i32, null::i32) = null::i32
+period_add(null::i32, null::i32) = null::i32
+# group: edge_cases
+period_add(202412::i32, 1::i32) = 202501::i32
+period_add(202401::i32, 24::i32) = 202601::i32
+period_add(9901::i32, 1::i32) = 199902::i32
+
+# period_diff
+# group: basic
+period_diff(202406::i32, 202401::i32) = 5::i32
+period_diff(202501::i32, 202401::i32) = 12::i32
+period_diff(202401::i32, 202401::i32) = 0::i32
+period_diff(202412::i32, 202406::i32) = 6::i32
+period_diff(202401::i32, 202312::i32) = 1::i32
+# group: null_handling
+period_diff(null::i32, 202401::i32) = null::i32
+period_diff(202406::i32, null::i32) = null::i32
+period_diff(null::i32, null::i32) = null::i32
+# group: edge_cases
+period_diff(202401::i32, 202406::i32) = -5::i32
+period_diff(202601::i32, 202401::i32) = 24::i32
+period_diff(9902::i32, 9901::i32) = 1::i32
+
+# sec_to_time
+# group: basic
+sec_to_time(3661::i64) = '01:01:01'::str
+sec_to_time(0::i64) = '00:00:00'::str
+sec_to_time(86399::i64) = '23:59:59'::str
+sec_to_time(3600::i64) = '01:00:00'::str
+sec_to_time(60::i64) = '00:01:00'::str
+sec_to_time(7200::i64) = '02:00:00'::str
+# group: null_handling
+sec_to_time(null::i64) = null::str
+# group: edge_cases
+sec_to_time(-3661::i64) = '-01:01:01'::str
+sec_to_time(1::i64) = '00:00:01'::str
+sec_to_time(86400::i64) = '24:00:00'::str
+sec_to_time(-1::i64) = '-00:00:01'::str
+
+# str_to_date
+# group: basic
+str_to_date('2024-01-15'::str, '%Y-%m-%d'::str) = '2024-01-15 00:00:00'::timestamp
+str_to_date('15/01/2024'::str, '%d/%m/%Y'::str) = '2024-01-15 00:00:00'::timestamp
+str_to_date('2024-01-15 10:30:00'::str, '%Y-%m-%d %H:%i:%s'::str) = '2024-01-15 10:30:00'::timestamp
+str_to_date('01.15.2024'::str, '%m.%d.%Y'::str) = '2024-01-15 00:00:00'::timestamp
+str_to_date('Jan 15, 2024'::str, '%b %d, %Y'::str) = '2024-01-15 00:00:00'::timestamp
+# group: null_handling
+str_to_date(null::str, '%Y-%m-%d'::str) = null::timestamp
+str_to_date('2024-01-15'::str, null::str) = null::timestamp
+str_to_date(null::str, null::str) = null::timestamp
+# group: edge_cases
+str_to_date('2024-02-29'::str, '%Y-%m-%d'::str) = '2024-02-29 00:00:00'::timestamp
+str_to_date('2024-12-31 23:59:59'::str, '%Y-%m-%d %H:%i:%s'::str) = '2024-12-31 23:59:59'::timestamp
+str_to_date(''::str, '%Y-%m-%d'::str) = null::timestamp
+
+# strftime
+# group: basic
+strftime('2024-01-15 10:30:00'::timestamp, '%Y-%m-%d'::str) = '2024-01-15'::str
+strftime('2024-01-15 10:30:00'::timestamp, '%H:%i:%s'::str) = '10:30:00'::str
+strftime('2024-01-15 10:30:00'::timestamp, '%Y-%m-%d %H:%i:%s'::str) = '2024-01-15 10:30:00'::str
+strftime('2024-01-15 10:30:00'::timestamp, '%d/%m/%Y'::str) = '15/01/2024'::str
+strftime('2024-01-15 10:30:00'::timestamp, '%Y'::str) = '2024'::str
+# group: null_handling
+strftime(null::timestamp, '%Y-%m-%d'::str) = null::str
+strftime('2024-01-15 10:30:00'::timestamp, null::str) = null::str
+strftime(null::timestamp, null::str) = null::str
+# group: edge_cases
+strftime('2024-02-29 00:00:00'::timestamp, '%Y-%m-%d'::str) = '2024-02-29'::str
+strftime('2024-12-31 23:59:59'::timestamp, '%Y-%m-%d %H:%i:%s'::str) = '2024-12-31 23:59:59'::str
+strftime('2024-01-15 10:30:00'::timestamp, ''::str) = ''::str
+
+# subdate
+# group: basic
+subdate('2024-01-15'::date, 1::i64) = '2024-01-14'::date
+subdate('2024-01-15'::date, 10::i64) = '2024-01-05'::date
+subdate('2024-01-15'::date, 0::i64) = '2024-01-15'::date
+subdate('2024-03-01'::date, 1::i64) = '2024-02-29'::date
+subdate('2024-01-15'::date, 15::i64) = '2023-12-31'::date
+# group: null_handling
+subdate(null::date, 1::i64) = null::date
+subdate('2024-01-15'::date, null::i64) = null::date
+subdate(null::date, null::i64) = null::date
+# group: edge_cases
+subdate('2024-01-01'::date, 1::i64) = '2023-12-31'::date
+subdate('2024-01-15'::date, 365::i64) = '2023-01-16'::date
+subdate('2024-01-15'::date, -1::i64) = '2024-01-16'::date
+
+# subtime
+# group: basic
+subtime('2024-01-15 10:30:00'::timestamp, '01:00:00'::str) = '2024-01-15 09:30:00'::timestamp
+subtime('2024-01-15 10:30:00'::timestamp, '00:30:00'::str) = '2024-01-15 10:00:00'::timestamp
+subtime('2024-01-15 10:30:00'::timestamp, '00:00:01'::str) = '2024-01-15 10:29:59'::timestamp
+subtime('2024-01-15 10:30:00'::timestamp, '10:30:00'::str) = '2024-01-15 00:00:00'::timestamp
+subtime('2024-01-15 10:30:00'::timestamp, '00:00:00'::str) = '2024-01-15 10:30:00'::timestamp
+# group: null_handling
+subtime(null::timestamp, '01:00:00'::str) = null::timestamp
+subtime('2024-01-15 10:30:00'::timestamp, null::str) = null::timestamp
+subtime(null::timestamp, null::str) = null::timestamp
+# group: edge_cases
+subtime('2024-01-15 00:00:00'::timestamp, '00:00:01'::str) = '2024-01-14 23:59:59'::timestamp
+subtime('2024-01-01 00:00:00'::timestamp, '00:00:01'::str) = '2023-12-31 23:59:59'::timestamp
+subtime('2024-01-15 10:30:00'::timestamp, '10:30:01'::str) = '2024-01-14 23:59:59'::timestamp
+
+# sysdate
+# non-deterministic: basic tests skipped
+# group: null_handling
+# sysdate takes no arguments, no null inputs possible
+# group: edge_cases
+# non-deterministic: returns current timestamp, cannot assert specific value
+
+# time
+# group: basic
+time('10:30:00'::str) = '10:30:00'::str
+time('23:59:59'::str) = '23:59:59'::str
+time('00:00:00'::str) = '00:00:00'::str
+time('12:00:00'::str) = '12:00:00'::str
+time('01:02:03'::str) = '01:02:03'::str
+time('06:15:30'::str) = '06:15:30'::str
+# group: null_handling
+time(null::str) = null::str
+# group: edge_cases
+time('2024-01-15 10:30:00'::str) = '10:30:00'::str
+time('2024-12-31 23:59:59'::str) = '23:59:59'::str
+time('1970-01-01 00:00:00'::str) = '00:00:00'::str
+time(''::str) = null::str
+
+# timediff
+# group: basic
+timediff('10:30:00'::str, '08:00:00'::str) = '02:30:00'::str
+timediff('12:00:00'::str, '10:00:00'::str) = '02:00:00'::str
+timediff('23:59:59'::str, '00:00:00'::str) = '23:59:59'::str
+timediff('10:00:00'::str, '10:00:00'::str) = '00:00:00'::str
+timediff('15:30:45'::str, '10:15:30'::str) = '05:15:15'::str
+# group: null_handling
+timediff(null::str, '08:00:00'::str) = null::str
+timediff('10:30:00'::str, null::str) = null::str
+timediff(null::str, null::str) = null::str
+# group: edge_cases
+timediff('08:00:00'::str, '10:30:00'::str) = '-02:30:00'::str
+timediff('00:00:00'::str, '23:59:59'::str) = '-23:59:59'::str
+timediff('00:00:01'::str, '00:00:00'::str) = '00:00:01'::str
+
+# time_to_sec
+# group: basic
+time_to_sec('01:01:01'::str) = 3661::i64
+time_to_sec('00:00:00'::str) = 0::i64
+time_to_sec('23:59:59'::str) = 86399::i64
+time_to_sec('01:00:00'::str) = 3600::i64
+time_to_sec('00:01:00'::str) = 60::i64
+time_to_sec('02:00:00'::str) = 7200::i64
+# group: null_handling
+time_to_sec(null::str) = null::i64
+# group: edge_cases
+time_to_sec('00:00:01'::str) = 1::i64
+time_to_sec('12:00:00'::str) = 43200::i64
+time_to_sec('10:30:00'::str) = 37800::i64
+time_to_sec('06:15:30'::str) = 22530::i64
+
+# timestamp
+# group: basic
+timestamp('2024-01-15 10:30:00'::str) = '2024-01-15 10:30:00'::timestamp
+timestamp('2024-01-15 00:00:00'::str) = '2024-01-15 00:00:00'::timestamp
+timestamp('2024-12-31 23:59:59'::str) = '2024-12-31 23:59:59'::timestamp
+timestamp('1970-01-01 00:00:00'::str) = '1970-01-01 00:00:00'::timestamp
+timestamp('2000-06-15 12:30:45'::str) = '2000-06-15 12:30:45'::timestamp
+timestamp('2024-07-04 18:00:00'::str) = '2024-07-04 18:00:00'::timestamp
+# group: null_handling
+timestamp(null::str) = null::timestamp
+# group: edge_cases
+timestamp('2024-02-29 12:00:00'::str) = '2024-02-29 12:00:00'::timestamp
+timestamp('2024-01-15'::str) = '2024-01-15 00:00:00'::timestamp
+timestamp(''::str) = null::timestamp
+timestamp('9999-12-31 23:59:59'::str) = '9999-12-31 23:59:59'::timestamp
+
+# to_days
+# group: basic
+to_days('2024-01-15'::date) = 739264::i64
+to_days('0000-01-01'::date) = 1::i64
+to_days('0001-01-01'::date) = 366::i64
+to_days('1970-01-01'::date) = 719528::i64
+to_days('2000-01-01'::date) = 730485::i64
+to_days('2024-06-15'::date) = 739416::i64
+# group: null_handling
+to_days(null::date) = null::i64
+# group: edge_cases
+to_days('2024-02-29'::date) = 739309::i64
+to_days('2024-12-31'::date) = 739615::i64
+to_days('9999-12-31'::date) = 3652424::i64
+to_days('2024-01-01'::date) = 739250::i64
+
+# unix_timestamp
+# group: basic
+unix_timestamp('1970-01-01 00:00:00'::timestamp) = 0.0::fp64
+unix_timestamp('2024-01-15 12:00:00'::timestamp) = 1705320000.0::fp64
+unix_timestamp('2000-01-01 00:00:00'::timestamp) = 946684800.0::fp64
+unix_timestamp('1970-01-02 00:00:00'::timestamp) = 86400.0::fp64
+unix_timestamp('1970-01-01 00:00:01'::timestamp) = 1.0::fp64
+unix_timestamp('1970-01-01 01:00:00'::timestamp) = 3600.0::fp64
+# group: null_handling
+unix_timestamp(null::timestamp) = null::fp64
+# group: edge_cases
+unix_timestamp('1969-12-31 23:59:59'::timestamp) = -1.0::fp64
+unix_timestamp('2038-01-19 03:14:07'::timestamp) = 2147483647.0::fp64
+unix_timestamp('2024-02-29 00:00:00'::timestamp) = 1709164800.0::fp64
+unix_timestamp('2024-12-31 23:59:59'::timestamp) = 1735689599.0::fp64
+
+# utc_date
+# non-deterministic: basic tests skipped
+# group: null_handling
+# utc_date takes no arguments, no null inputs possible
+# group: edge_cases
+# non-deterministic: returns current UTC date, cannot assert specific value
+
+# utc_time
+# non-deterministic: basic tests skipped
+# group: null_handling
+# utc_time takes no arguments, no null inputs possible
+# group: edge_cases
+# non-deterministic: returns current UTC time, cannot assert specific value
+
+# utc_timestamp
+# non-deterministic: basic tests skipped
+# group: null_handling
+# utc_timestamp takes no arguments, no null inputs possible
+# group: edge_cases
+# non-deterministic: returns current UTC timestamp, cannot assert specific value
+
+# weekday
+# group: basic
+weekday('2024-01-15'::date) = 0::i32
+weekday('2024-01-16'::date) = 1::i32
+weekday('2024-01-17'::date) = 2::i32
+weekday('2024-01-18'::date) = 3::i32
+weekday('2024-01-19'::date) = 4::i32
+weekday('2024-01-20'::date) = 5::i32
+weekday('2024-01-14'::date) = 6::i32
+# group: null_handling
+weekday(null::date) = null::i32
+# group: edge_cases
+weekday('2024-02-29'::date) = 3::i32
+weekday('2024-12-31'::date) = 1::i32
+weekday('2000-01-01'::date) = 5::i32
+weekday('1970-01-01'::date) = 3::i32
+
+# yearweek
+# group: basic
+yearweek('2024-01-15'::date) = 202403::i32
+yearweek('2024-01-01'::date) = 202401::i32
+yearweek('2023-12-31'::date) = 202352::i32
+yearweek('2024-06-15'::date) = 202424::i32
+yearweek('2024-12-31'::date) = 202501::i32
+yearweek('2024-07-04'::date) = 202427::i32
+# group: null_handling
+yearweek(null::date) = null::i32
+# group: edge_cases
+yearweek('2024-02-29'::date) = 202409::i32
+yearweek('2024-03-01'::date) = 202409::i32
+yearweek('2000-01-01'::date) = 199952::i32
+yearweek('2023-01-01'::date) = 202252::i32
