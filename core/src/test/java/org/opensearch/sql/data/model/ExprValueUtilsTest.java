@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -242,6 +243,25 @@ public class ExprValueUtilsTest {
     assertEquals(
         new ExprTimestampValue("2012-07-07 01:01:01"),
         ExprValueUtils.fromObjectValue("2012-07-07 01:01:01", TIMESTAMP));
+  }
+
+
+  @Test
+  public void constructDateValueFromCalciteInternalInteger() {
+    ExprValue value = ExprValueUtils.fromObjectValue(20297, DATE);
+    assertEquals(LocalDate.of(2025, 7, 28), value.dateValue());
+  }
+
+  @Test
+  public void constructTimeValueFromCalciteInternalInteger() {
+    ExprValue value = ExprValueUtils.fromObjectValue(34_200_000, TIME);
+    assertEquals(LocalTime.of(9, 30), value.timeValue());
+  }
+
+  @Test
+  public void constructTimestampValueFromCalciteInternalLong() {
+    ExprValue value = ExprValueUtils.fromObjectValue(1_717_233_000_000L, TIMESTAMP);
+    assertEquals(Instant.ofEpochMilli(1_717_233_000_000L), value.timestampValue());
   }
 
   @Test
