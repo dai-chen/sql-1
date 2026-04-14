@@ -2539,6 +2539,7 @@ dependencies = [
  "regex",
  "serde_json",
  "serde_yaml",
+ "tokio",
 ]
 
 [[package]]

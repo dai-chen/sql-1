@@ -152,3 +152,27 @@ fn test_parse_all_test_files() {
     assert!(total_cases > 100, "Expected > 100 total test cases, found {}", total_cases);
     println!("Parsed {} test cases across {} files", total_cases, file_count);
 }
+
+#[tokio::test]
+async fn test_run_ip_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, IP_TEST_FILE).await.expect("Failed to run IP spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    // geoip basic tests (3) will fail since no GeoIP database
+    let non_geoip_failures: Vec<_> = failures.iter()
+        .filter(|r| !(r.test_case.function_name == "geoip" && r.test_case.group_name == "basic"))
+        .collect();
+    for f in &non_geoip_failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(non_geoip_failures.is_empty(),
+        "{} non-geoip IP spec tests failed", non_geoip_failures.len());
+}
