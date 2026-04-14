@@ -176,3 +176,23 @@ async fn test_run_ip_spec_tests() {
     assert!(non_geoip_failures.is_empty(),
         "{} non-geoip IP spec tests failed", non_geoip_failures.len());
 }
+
+#[tokio::test]
+async fn test_run_json_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, JSON_TEST_FILE).await.expect("Failed to run JSON spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(),
+        "{} JSON spec tests failed", failures.len());
+}
