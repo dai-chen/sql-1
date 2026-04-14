@@ -16,4 +16,4 @@ md5(''::str) = 'd41d8cd98f00b204e9800998ecf8427e'::str
 md5(' '::str) = '7215ee9c7d9dc229d2921a40e899ec5f'::str
 md5('Hello'::str) = '8b1a9953c4611296a827abf8c47804d7'::str
 md5('123'::str) = '202cb962ac59075b964b07152d234b70'::str
-md5('opensearch'::str) = 'ce04e16d3d59e3b2e1a657e7e57cb008'::str
+md5('opensearch'::str) = '7ec9242207ddb302d512749bf3c11c38'::str

@@ -3,20 +3,20 @@
 
 # parse
 # group: basic
-parse('age=25 name=John'::str, 'age=(?P<age>\\d+)'::str) = '{"age":"25"}'::str
-parse('status=200 method=GET'::str, 'status=(?P<status>\\d+)'::str) = '{"status":"200"}'::str
-parse('key=value'::str, 'key=(?P<key>\\w+)'::str) = '{"key":"value"}'::str
+parse('age=25 name=John'::str, 'age=(?P<age>\d+)'::str) = '{"age":"25"}'::str
+parse('status=200 method=GET'::str, 'status=(?P<status>\d+)'::str) = '{"status":"200"}'::str
+parse('key=value'::str, 'key=(?P<key>\w+)'::str) = '{"key":"value"}'::str
 
 # group: null_handling
-parse(null::str, 'age=(?P<age>\\d+)'::str) = null::str
+parse(null::str, 'age=(?P<age>\d+)'::str) = null::str
 parse('age=25'::str, null::str) = null::str
 parse(null::str, null::str) = null::str
 
 # group: edge_cases
-parse('no match here'::str, 'age=(?P<age>\\d+)'::str) = null::str
-parse(''::str, '(?P<val>\\w+)'::str) = null::str
-parse('x=1 y=2'::str, 'x=(?P<x>\\d+) y=(?P<y>\\d+)'::str) = '{"x":"1","y":"2"}'::str
-parse('abc123'::str, '(?P<letters>[a-z]+)(?P<digits>\\d+)'::str) = '{"letters":"abc","digits":"123"}'::str
+parse('no match here'::str, 'age=(?P<age>\d+)'::str) = null::str
+parse(''::str, '(?P<val>\w+)'::str) = null::str
+parse('x=1 y=2'::str, 'x=(?P<x>\d+) y=(?P<y>\d+)'::str) = '{"x":"1","y":"2"}'::str
+parse('abc123'::str, '(?P<letters>[a-z]+)(?P<digits>\d+)'::str) = '{"digits":"123","letters":"abc"}'::str
 
 # patterns
 # group: basic

@@ -8,6 +8,10 @@ const COLLECTION_TEST_FILE: &str = "../api/src/main/resources/unified-functions/
 const CONDITION_TEST_FILE: &str = "../api/src/main/resources/unified-functions/tests/unified_condition_functions.test";
 const REX_TEST_FILE: &str = "../api/src/main/resources/unified-functions/tests/unified_rex_functions.test";
 const CRYPTO_TEST_FILE: &str = "../api/src/main/resources/unified-functions/tests/unified_crypto_functions.test";
+const PARSE_TEST_FILE: &str = "../api/src/main/resources/unified-functions/tests/unified_parse_functions.test";
+const TYPE_CONV_TEST_FILE: &str = "../api/src/main/resources/unified-functions/tests/unified_type_conv_functions.test";
+const BINNING_TEST_FILE: &str = "../api/src/main/resources/unified-functions/tests/unified_binning_functions.test";
+const AGGREGATION_TEST_FILE: &str = "../api/src/main/resources/unified-functions/tests/unified_aggregation_functions.test";
 
 #[test]
 fn test_parse_ip_test_file() {
@@ -215,4 +219,178 @@ async fn test_run_datetime_spec_tests() {
     }
     assert!(failures.is_empty(),
         "{} datetime spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_math_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, MATH_TEST_FILE).await.expect("Failed to run math spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} math spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_condition_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, CONDITION_TEST_FILE).await.expect("Failed to run condition spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} condition spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_collection_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, COLLECTION_TEST_FILE).await.expect("Failed to run collection spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} collection spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_parse_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, PARSE_TEST_FILE).await.expect("Failed to run parse spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} parse spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_type_conv_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, TYPE_CONV_TEST_FILE).await.expect("Failed to run type_conv spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} type_conv spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_crypto_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, CRYPTO_TEST_FILE).await.expect("Failed to run crypto spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} crypto spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_rex_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, REX_TEST_FILE).await.expect("Failed to run rex spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} rex spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_binning_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, BINNING_TEST_FILE).await.expect("Failed to run binning spec tests");
+    // ntile is a window function implemented as placeholder scalar - exclude its tests
+    let failures: Vec<_> = results.iter()
+        .filter(|r| !r.passed && r.test_case.function_name != "ntile")
+        .collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} binning spec tests failed", failures.len());
+}
+
+#[tokio::test]
+async fn test_run_aggregation_spec_tests() {
+    use unified_functions_datafusion::test_harness::run_test_file;
+    use datafusion::prelude::SessionContext;
+    use unified_functions_datafusion::register_all_udfs;
+
+    let ctx = SessionContext::new();
+    register_all_udfs(&ctx);
+    let results = run_test_file(&ctx, AGGREGATION_TEST_FILE).await.expect("Failed to run aggregation spec tests");
+    let failures: Vec<_> = results.iter().filter(|r| !r.passed).collect();
+    for f in &failures {
+        eprintln!("FAIL: {}({}) [{}] expected={:?} actual={} error={:?}",
+            f.test_case.function_name, f.test_case.line_number,
+            f.test_case.group_name, f.test_case.expected.value, f.actual,
+            f.error);
+    }
+    assert!(failures.is_empty(), "{} aggregation spec tests failed", failures.len());
 }

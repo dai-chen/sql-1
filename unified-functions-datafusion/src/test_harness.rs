@@ -271,7 +271,8 @@ fn literal_to_sql(lit: &TypedLiteral) -> String {
         Some(val) => match lit.dsl_type {
             DslType::Str => format!("'{}'", val),
             DslType::Bool => val.to_string(),
-            DslType::I32 | DslType::I64 | DslType::Fp64 => val.to_string(),
+            DslType::I32 => format!("CAST({} AS INT)", val),
+            DslType::I64 | DslType::Fp64 => val.to_string(),
             DslType::Date => format!("DATE '{}'", val),
             DslType::Timestamp => format!("TIMESTAMP '{}'", val),
         },
