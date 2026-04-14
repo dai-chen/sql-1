@@ -85,7 +85,7 @@
         "YAML is valid Substrait extension format"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

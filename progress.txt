@@ -89,3 +89,23 @@
   - json_array/json_object treat null args specially: null key in json_object -> null result, null value -> JSON null in output
   - json_set creates new keys and overwrites existing ones; value arg is a JSON literal string
 ---
+
+## 2026-04-13T23:57 - US-006
+- Created unified_datetime_functions.yaml with 33 complete datetime function specs
+- Functions: adddate, addtime, convert_tz, date, date_format, dayname, from_days, from_unixtime, get_format, makedate, maketime, microsecond, minute_of_day, monthname, period_add, period_diff, sec_to_time, str_to_date, strftime, subdate, subtime, sysdate, time, timediff, time_to_sec, timestamp, to_days, unix_timestamp, utc_date, utc_time, utc_timestamp, weekday, yearweek
+- Each function has: name, description (>- block), metadata (null_handling: ACCEPT_NULLS, edge_cases, ai_hints.platform_hints.datafusion with crates and notes), impls with typed args and return
+- URN: extension:org.opensearch:unified_datetime_functions
+- Substrait types used: string, i32, i64, fp64, date, timestamp, time (new types date/timestamp/time introduced for this category)
+- YAML validity verified with python3 yaml.safe_load — all 33 functions parsed, all required fields present
+- Files changed: 1 new file (unified_datetime_functions.yaml, ~691 lines)
+- Commit: 9f75f703f, pushed successfully
+- All 3 acceptance criteria verified programmatically (PASS)
+- **Learnings for future iterations:**
+  - Datetime functions introduce new Substrait types: date, timestamp, time (not used in IP/JSON specs)
+  - No-arg functions (sysdate, utc_date, utc_time, utc_timestamp) have empty args list in impls
+  - Non-deterministic functions (sysdate, utc_*) noted in edge_cases and ai_hints
+  - period_add/period_diff use YYMM/YYYYMM integer format — pure arithmetic, no chrono needed
+  - get_format is a pure lookup table (type+locale -> format string), no external crates
+  - sec_to_time and time_to_sec are pure arithmetic conversions
+  - Functions returning "time" use string type since Substrait time type maps to string representation in DataFusion
+---
