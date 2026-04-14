@@ -2534,6 +2534,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "chrono",
+ "chrono-tz",
  "datafusion",
  "ipnetwork",
  "regex",

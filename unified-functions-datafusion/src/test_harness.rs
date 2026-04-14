@@ -320,10 +320,13 @@ pub async fn run_test_file(ctx: &SessionContext, path: &str) -> Result<Vec<TestR
                             .unwrap_or_else(|e| format!("<display error: {}>", e));
                         let expected_str = tc.expected.value.clone().unwrap_or_else(|| "NULL".to_string());
                         // Normalize comparison: treat empty-looking nulls
+                        // Arrow displays timestamps with 'T' separator, test files use space
                         let passed = if tc.expected.value.is_none() {
                             col.is_null(0)
                         } else {
-                            actual == expected_str
+                            let norm_actual = actual.replace('T', " ");
+                            let norm_expected = expected_str.replace('T', " ");
+                            norm_actual == norm_expected
                         };
                         TestResult {
                             test_case: tc,

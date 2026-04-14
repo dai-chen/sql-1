@@ -328,7 +328,7 @@ subdate('2024-01-15'::date, null::i64) = null::date
 subdate(null::date, null::i64) = null::date
 # group: edge_cases
 subdate('2024-01-01'::date, 1::i64) = '2023-12-31'::date
-subdate('2024-01-15'::date, 365::i64) = '2023-01-16'::date
+subdate('2024-01-15'::date, 365::i64) = '2023-01-15'::date
 subdate('2024-01-15'::date, -1::i64) = '2024-01-16'::date
 
 # subtime
