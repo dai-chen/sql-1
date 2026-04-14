@@ -181,3 +181,24 @@
   - Parser extracts group names from `# group: xxx` and function names from bare `# name` comments
   - All library code uses Result types — no unwrap() in non-test code
 ---
+
+## 2026-04-14T00:47 - US-013
+- Implemented all 33 datetime functions as DataFusion ScalarUDFs in src/datetime.rs (~1250 lines)
+- 29 deterministic (Immutable): adddate, addtime, convert_tz, date, date_format, dayname, from_days, from_unixtime, get_format, makedate, maketime, microsecond, minute_of_day, monthname, period_add, period_diff, sec_to_time, str_to_date, strftime, subdate, subtime, time, timediff, time_to_sec, timestamp, to_days, unix_timestamp, weekday, yearweek
+- 4 non-deterministic (Volatile): sysdate, utc_date, utc_time, utc_timestamp
+- Added chrono-tz dependency for convert_tz timezone conversion
+- Added timestamp display normalization (T→space) in test_harness.rs for arrow compatibility
+- Fixed 1 test expectation: subdate('2024-01-15', 365) = '2023-01-15' (was incorrectly '2023-01-16')
+- Added test_run_datetime_spec_tests() in spec_tests.rs
+- Files changed: src/datetime.rs (rewritten), Cargo.toml (+chrono-tz), Cargo.lock, src/test_harness.rs (minor), tests/spec_tests.rs (+test), unified_datetime_functions.test (1 fix)
+- cargo build: ✅ 0 warnings
+- cargo test: ✅ 35 passed, 0 failed (20 unit + 15 integration including all datetime spec tests)
+- **Learnings for future iterations:**
+  - DataFusion TIMESTAMP literal creates Timestamp(Nanosecond) — need to handle both Nanosecond and Microsecond precision in invoke_batch
+  - MySQL TO_DAYS/FROM_DAYS use a non-standard calendar algorithm (calc_daynr formula), not proleptic Gregorian
+  - MySQL format specifiers: %i = minutes (chrono %M), %h = 12-hour (chrono %I), %s = seconds (chrono %S)
+  - period_add/period_diff signatures use Int64 (not Int32) because DataFusion auto-infers integer literals as Int64
+  - convert_tz supports both named timezones (chrono-tz) and offset format (+HH:MM)
+  - Arrow displays timestamps as 'YYYY-MM-DDTHH:MM:SS' (with T) — test harness normalizes to space for comparison
+  - sec_to_time supports values beyond 24h (e.g., 86400 -> '24:00:00') and negative values
+---
