@@ -72,7 +72,7 @@
         "Covers nested data, missing keys, invalid JSON edge cases"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

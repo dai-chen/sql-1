@@ -71,3 +71,21 @@
   - json_append vs json_extend: append adds single value, extend merges array elements
   - All JSON functions recommend serde_json crate; json_extract also uses jsonpath_lib
 ---
+
+## 2026-04-13T23:54 - US-005
+- Created unified_json_functions.test with 106 test cases across 9 JSON functions
+- Test case counts: json_extract(15), json_valid(12), json_keys(11), json_delete(11), json_set(11), json_append(13), json_extend(13), json_array(10), json_object(10)
+- Each function has 3 groups: basic, null_handling, edge_cases
+- Header: `### SUBSTRAIT_SCALAR_TEST: v1.0` + `### SUBSTRAIT_INCLUDE: extension:org.opensearch:unified_json_functions`
+- JSON expected outputs use serde_json alphabetical key ordering
+- All 3 acceptance criteria verified programmatically (PASS)
+- Files changed: 1 new file (unified_json_functions.test, 171 lines)
+- Commit: a2c9da2b1, pushed successfully
+- **Learnings for future iterations:**
+  - JSON test values use single-quoted JSON strings: `'{"a":1}'::str`
+  - json_extract returns raw JSON values as strings: numbers unquoted (`'1'::str`), strings with inner quotes (`'"hello"'::str`)
+  - json_keys returns comma-separated keys in alphabetical order (matching serde_json)
+  - json_append/json_extend return null when target key is not an array or doesn't exist
+  - json_array/json_object treat null args specially: null key in json_object -> null result, null value -> JSON null in output
+  - json_set creates new keys and overwrites existing ones; value arg is a JSON literal string
+---

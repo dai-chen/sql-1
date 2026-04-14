@@ -1,0 +1,691 @@
+%YAML 1.2
+---
+urn: "extension:org.opensearch:unified_datetime_functions"
+scalar_functions:
+  - name: adddate
+    description: >-
+      Adds a specified number of days to a date value and returns the resulting date.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "overflow beyond date range -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Add days to NaiveDate."
+    impls:
+      - args:
+          - value: "date"
+            name: "start_date"
+            description: "The date to add days to"
+          - value: "i64"
+            name: "days"
+            description: "The number of days to add"
+        return: "date"
+
+  - name: addtime
+    description: >-
+      Adds a time expression to a timestamp and returns the resulting timestamp.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid time string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse time string, add to timestamp."
+    impls:
+      - args:
+          - value: "timestamp"
+            name: "base_timestamp"
+            description: "The timestamp to add time to"
+          - value: "string"
+            name: "time_expr"
+            description: "The time expression to add (e.g. '01:30:00')"
+        return: "timestamp"
+
+  - name: convert_tz
+    description: >-
+      Converts a timestamp from one timezone to another and returns the resulting timestamp.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid timezone -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono", "chrono-tz"]
+            notes: "Use chrono-tz for timezone conversion."
+    impls:
+      - args:
+          - value: "timestamp"
+            name: "datetime_value"
+            description: "The timestamp to convert"
+          - value: "string"
+            name: "from_tz"
+            description: "The source timezone (e.g. 'America/New_York')"
+          - value: "string"
+            name: "to_tz"
+            description: "The target timezone (e.g. 'Europe/London')"
+        return: "timestamp"
+
+  - name: date
+    description: >-
+      Parses a string and extracts the date part, returning a date value.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid date string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse string to NaiveDate."
+    impls:
+      - args:
+          - value: "string"
+            name: "date_string"
+            description: "The string to parse as a date"
+        return: "date"
+
+  - name: date_format
+    description: >-
+      Formats a timestamp as a string using the specified format pattern.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid format -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Use strftime-style format."
+    impls:
+      - args:
+          - value: "timestamp"
+            name: "datetime_value"
+            description: "The timestamp to format"
+          - value: "string"
+            name: "format_pattern"
+            description: "The format pattern (e.g. '%Y-%m-%d')"
+        return: "string"
+
+  - name: dayname
+    description: >-
+      Returns the name of the weekday for a given date (e.g. 'Monday', 'Tuesday').
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Use Datelike::weekday().to_string()."
+    impls:
+      - args:
+          - value: "date"
+            name: "date_value"
+            description: "The date to get the day name for"
+        return: "string"
+
+  - name: from_days
+    description: >-
+      Converts a day number to a date, where day 1 corresponds to 0001-01-01.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "day_number <= 0 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Day 1 = 0001-01-01, add days."
+    impls:
+      - args:
+          - value: "i64"
+            name: "day_number"
+            description: "The day number to convert"
+        return: "date"
+
+  - name: from_unixtime
+    description: >-
+      Converts a Unix timestamp (seconds since epoch) to a datetime value.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "negative value -> dates before epoch"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "NaiveDateTime::from_timestamp."
+    impls:
+      - args:
+          - value: "fp64"
+            name: "unix_time"
+            description: "The Unix timestamp in seconds"
+        return: "timestamp"
+
+  - name: get_format
+    description: >-
+      Returns a format string for the given date type and locale combination.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "unknown type or locale -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pure lookup table, no external crates needed."
+    impls:
+      - args:
+          - value: "string"
+            name: "date_type"
+            description: "The date type (e.g. 'DATE', 'TIME', 'DATETIME')"
+          - value: "string"
+            name: "locale"
+            description: "The locale (e.g. 'USA', 'EUR', 'ISO')"
+        return: "string"
+
+  - name: makedate
+    description: >-
+      Creates a date from a year and day-of-year number.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "day_of_year < 1 or > 366 -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "NaiveDate::from_yo."
+    impls:
+      - args:
+          - value: "fp64"
+            name: "year"
+            description: "The year"
+          - value: "fp64"
+            name: "day_of_year"
+            description: "The day of the year (1-366)"
+        return: "date"
+
+  - name: maketime
+    description: >-
+      Creates a time string from hour, minute, and second components.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "out of range components -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Return time as string HH:MM:SS."
+    impls:
+      - args:
+          - value: "fp64"
+            name: "hour"
+            description: "The hour component"
+          - value: "fp64"
+            name: "minute"
+            description: "The minute component"
+          - value: "fp64"
+            name: "second"
+            description: "The second component"
+        return: "string"
+
+  - name: microsecond
+    description: >-
+      Extracts the microsecond component from a time string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid time string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse time, extract microseconds."
+    impls:
+      - args:
+          - value: "string"
+            name: "time_string"
+            description: "The time string to extract microseconds from"
+        return: "i32"
+
+  - name: minute_of_day
+    description: >-
+      Returns the minute of the day (0-1439) for a given time string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid time string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "hour*60 + minute."
+    impls:
+      - args:
+          - value: "string"
+            name: "time_string"
+            description: "The time string to compute minute of day for"
+        return: "i32"
+
+  - name: monthname
+    description: >-
+      Returns the name of the month for a given date (e.g. 'January', 'February').
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Use Month::name()."
+    impls:
+      - args:
+          - value: "date"
+            name: "date_value"
+            description: "The date to get the month name for"
+        return: "string"
+
+  - name: period_add
+    description: >-
+      Adds a specified number of months to a period value in YYMM or YYYYMM format.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid period format -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pure arithmetic on YYMM format."
+    impls:
+      - args:
+          - value: "i32"
+            name: "period"
+            description: "The period in YYMM or YYYYMM format"
+          - value: "i32"
+            name: "months"
+            description: "The number of months to add"
+        return: "i32"
+
+  - name: period_diff
+    description: >-
+      Returns the number of months between two period values in YYMM or YYYYMM format.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid period format -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Convert YYMM to months, subtract."
+    impls:
+      - args:
+          - value: "i32"
+            name: "period1"
+            description: "The first period in YYMM or YYYYMM format"
+          - value: "i32"
+            name: "period2"
+            description: "The second period in YYMM or YYYYMM format"
+        return: "i32"
+
+  - name: sec_to_time
+    description: >-
+      Converts a number of seconds to a time string in HH:MM:SS format.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "negative seconds -> negative time string"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: []
+            notes: "Pure arithmetic: h=s/3600, m=(s%3600)/60, s=s%60."
+    impls:
+      - args:
+          - value: "i64"
+            name: "seconds"
+            description: "The number of seconds to convert"
+        return: "string"
+
+  - name: str_to_date
+    description: >-
+      Parses a string to a datetime value using the specified format pattern.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "parse failure -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Use NaiveDateTime::parse_from_str."
+    impls:
+      - args:
+          - value: "string"
+            name: "date_string"
+            description: "The string to parse"
+          - value: "string"
+            name: "format_pattern"
+            description: "The format pattern to use for parsing"
+        return: "timestamp"
+
+  - name: strftime
+    description: >-
+      Formats a datetime value as a string using a strftime-style format pattern.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid format -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Use chrono strftime."
+    impls:
+      - args:
+          - value: "timestamp"
+            name: "datetime_value"
+            description: "The timestamp to format"
+          - value: "string"
+            name: "format_pattern"
+            description: "The strftime format pattern"
+        return: "string"
+
+  - name: subdate
+    description: >-
+      Subtracts a specified number of days from a date value and returns the resulting date.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "underflow beyond date range -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Subtract days from NaiveDate."
+    impls:
+      - args:
+          - value: "date"
+            name: "start_date"
+            description: "The date to subtract days from"
+          - value: "i64"
+            name: "days"
+            description: "The number of days to subtract"
+        return: "date"
+
+  - name: subtime
+    description: >-
+      Subtracts a time expression from a timestamp and returns the resulting timestamp.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid time string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse time string, subtract from timestamp."
+    impls:
+      - args:
+          - value: "timestamp"
+            name: "base_timestamp"
+            description: "The timestamp to subtract time from"
+          - value: "string"
+            name: "time_expr"
+            description: "The time expression to subtract (e.g. '01:30:00')"
+        return: "timestamp"
+
+  - name: sysdate
+    description: >-
+      Returns the current date and time as a timestamp. This function is non-deterministic.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "non-deterministic: returns different values on each call"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Utc::now(). Non-deterministic."
+    impls:
+      - args: []
+        return: "timestamp"
+
+  - name: time
+    description: >-
+      Extracts the time portion from a string and returns it as a time string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid time string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse and return time portion as string."
+    impls:
+      - args:
+          - value: "string"
+            name: "time_string"
+            description: "The string to extract time from"
+        return: "string"
+
+  - name: timediff
+    description: >-
+      Returns the difference between two time expressions as a time string.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null args -> null"
+        - "invalid time strings -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse both times, subtract, return as time string."
+    impls:
+      - args:
+          - value: "string"
+            name: "time1"
+            description: "The first time expression"
+          - value: "string"
+            name: "time2"
+            description: "The second time expression"
+        return: "string"
+
+  - name: time_to_sec
+    description: >-
+      Converts a time string to the number of seconds.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid time string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "h*3600 + m*60 + s."
+    impls:
+      - args:
+          - value: "string"
+            name: "time_string"
+            description: "The time string to convert to seconds"
+        return: "i64"
+
+  - name: timestamp
+    description: >-
+      Parses a string and returns a timestamp value.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "invalid timestamp string -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Parse string to NaiveDateTime."
+    impls:
+      - args:
+          - value: "string"
+            name: "timestamp_string"
+            description: "The string to parse as a timestamp"
+        return: "timestamp"
+
+  - name: to_days
+    description: >-
+      Converts a date to a day number, counting days since 0001-01-01.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Days since 0001-01-01."
+    impls:
+      - args:
+          - value: "date"
+            name: "date_value"
+            description: "The date to convert to a day number"
+        return: "i64"
+
+  - name: unix_timestamp
+    description: >-
+      Returns the Unix timestamp (seconds since epoch) for a given timestamp value.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "dates before epoch -> negative value"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Seconds since epoch as f64."
+    impls:
+      - args:
+          - value: "timestamp"
+            name: "datetime_value"
+            description: "The timestamp to convert to Unix time"
+        return: "fp64"
+
+  - name: utc_date
+    description: >-
+      Returns the current UTC date. This function is non-deterministic.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "non-deterministic: returns different values on each call"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Utc::now().date_naive(). Non-deterministic."
+    impls:
+      - args: []
+        return: "date"
+
+  - name: utc_time
+    description: >-
+      Returns the current UTC time as a string. This function is non-deterministic.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "non-deterministic: returns different values on each call"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Utc::now().time(). Non-deterministic. Return as string."
+    impls:
+      - args: []
+        return: "string"
+
+  - name: utc_timestamp
+    description: >-
+      Returns the current UTC date and time as a timestamp. This function is non-deterministic.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "non-deterministic: returns different values on each call"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Utc::now().naive_utc(). Non-deterministic."
+    impls:
+      - args: []
+        return: "timestamp"
+
+  - name: weekday
+    description: >-
+      Returns the weekday index for a given date, where 0 is Monday and 6 is Sunday.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "Datelike::weekday().num_days_from_monday()."
+    impls:
+      - args:
+          - value: "date"
+            name: "date_value"
+            description: "The date to get the weekday index for"
+        return: "i32"
+
+  - name: yearweek
+    description: >-
+      Returns the year and ISO week number as an integer in YYYYWW format for a given date.
+    metadata:
+      null_handling: "ACCEPT_NULLS"
+      edge_cases:
+        - "null -> null"
+        - "ISO week at year boundary may differ from calendar year"
+      ai_hints:
+        platform_hints:
+          datafusion:
+            crates: ["chrono"]
+            notes: "year*100 + iso_week. Optional mode arg."
+    impls:
+      - args:
+          - value: "date"
+            name: "date_value"
+            description: "The date to compute year-week for"
+        return: "i32"
