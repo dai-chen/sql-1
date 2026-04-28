@@ -10,6 +10,7 @@ This module provides components organized into two main areas aligned with the [
 
 - **`UnifiedQueryParser`**: Parses PPL (Piped Processing Language) or SQL queries and returns the native parse result (`UnresolvedPlan` for PPL, `SqlNode` for Calcite SQL).
 - **`UnifiedQueryPlanner`**: Accepts PPL or SQL queries and returns Calcite `RelNode` logical plans as intermediate representation.
+- **`UnifiedQueryOptimizer`**: Applies HEP-based rule rewrites (decorrelation, field trimming, filter pushdown, constant folding, project cleanup, sort removal) to logical plans.
 - **`UnifiedQueryTranspiler`**: Converts Calcite logical plans (`RelNode`) into SQL strings for various target databases using different SQL dialects.
 
 ### Unified Execution Runtime
@@ -105,6 +106,25 @@ try (PreparedStatement statement = compiler.compile(plan)) {
     }
 }
 ```
+
+### UnifiedQueryOptimizer
+
+Use `UnifiedQueryOptimizer` to apply rule-based logical rewrites to a Calcite `RelNode` plan. The optimizer uses Calcite's HEP (Heuristic) planner to apply rewrites including decorrelation, field trimming, filter pushdown, constant folding, project cleanup, and sort removal.
+
+```java
+UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
+UnifiedQueryOptimizer optimizer = new UnifiedQueryOptimizer(context);
+RelNode logical = planner.plan(query);
+RelNode optimized = optimizer.optimize(logical);
+```
+
+After calling `planner.plan()`, the next step depends on the workflow:
+
+- **External engine**: `optimize()` → `transpiler.toSql()` — optimize the plan, then transpile to target SQL for execution by an external engine (e.g., Spark).
+- **JDBC execution**: `compile()` — compile the plan directly into a JDBC `PreparedStatement` for local execution.
+- **Transpilation**: `transpiler.toSql()` — transpile the unoptimized plan directly to target SQL.
+
+Note that `optimize()` and `compile()` are alternative next steps after `plan()`, not sequential — `compile()` runs Calcite's Volcano planner internally, so calling `optimize()` before `compile()` is unnecessary.
 
 ### UnifiedFunction and UnifiedFunctionRepository
 
@@ -297,4 +317,4 @@ public class MySchema extends AbstractSchema {
 
 ## Future Work
 
-- Extend planner to generate optimized physical plans using Calcite's optimization frameworks.
+- Extend optimizer with cost-based optimization (CBO) using Calcite's Volcano planner for physical plan selection.

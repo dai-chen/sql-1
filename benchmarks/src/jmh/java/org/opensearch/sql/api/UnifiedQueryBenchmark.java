@@ -26,6 +26,7 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.opensearch.sql.api.compiler.UnifiedQueryCompiler;
 import org.opensearch.sql.api.transpiler.UnifiedQueryTranspiler;
 import org.opensearch.sql.executor.QueryType;
+import org.opensearch.sql.api.UnifiedQueryOptimizer;
 
 /**
  * JMH benchmark for measuring the overhead of unified query API components when processing PPL and
@@ -93,6 +94,7 @@ public class UnifiedQueryBenchmark extends UnifiedQueryTestBase {
   private String query;
   private UnifiedQueryTranspiler transpiler;
   private UnifiedQueryCompiler compiler;
+  private UnifiedQueryOptimizer optimizer;
 
   @Override
   protected QueryType queryType() {
@@ -105,6 +107,7 @@ public class UnifiedQueryBenchmark extends UnifiedQueryTestBase {
     query = (language.equals("PPL") ? PPL_QUERIES : SQL_QUERIES).get(queryPattern);
     transpiler = UnifiedQueryTranspiler.builder().dialect(SparkSqlDialect.DEFAULT).build();
     compiler = new UnifiedQueryCompiler(context);
+    optimizer = new UnifiedQueryOptimizer(context);
   }
 
   @TearDown(Level.Trial)
@@ -136,5 +139,12 @@ public class UnifiedQueryBenchmark extends UnifiedQueryTestBase {
     try (PreparedStatement stmt = compiler.compile(plan)) {
       // Statement is auto-closed after benchmark iteration
     }
+  }
+
+  /** Benchmarks the optimization pipeline: Query → logical plan → optimized plan. */
+  @Benchmark
+  public RelNode optimizeQuery() {
+    RelNode plan = planner.plan(query);
+    return optimizer.optimize(plan);
   }
 }
