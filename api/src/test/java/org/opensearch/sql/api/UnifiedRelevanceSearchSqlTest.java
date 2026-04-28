@@ -131,13 +131,16 @@ public class UnifiedRelevanceSearchSqlTest extends UnifiedQueryTestBase {
 
   @Test
   public void testNonRelevanceFunctionUnaffectedByRewriter() {
+    // Note: the NamedArgRewriter leaves non-relevance calls alone. The column name
+    // comes from SelectItemAliasRewriter (issue #5332), which derives it from the
+    // original SqlNode text.
     givenQuery(
             """
             SELECT upper(name) FROM catalog.employees\
             """)
         .assertPlan(
             """
-            LogicalProject(EXPR$0=[UPPER($1)])
+            LogicalProject(UPPER(name)=[UPPER($1)])
               LogicalTableScan(table=[[catalog, employees]])
             """);
   }

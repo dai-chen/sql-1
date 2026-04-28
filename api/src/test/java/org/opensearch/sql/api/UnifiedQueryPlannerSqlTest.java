@@ -257,4 +257,24 @@ public class UnifiedQueryPlannerSqlTest extends UnifiedQueryTestBase {
             """)
         .assertErrorMessage("Encountered");
   }
+
+  // --- Issue #5332: preserve original expression text as column name ---
+
+  @Test
+  public void testUnnamedMixedAggregatesPreserveExpressionNames() {
+    givenQuery(
+            """
+            SELECT SUM(id), COUNT(*), AVG(age) FROM catalog.employees\
+            """)
+        .assertFields("SUM(id)", "COUNT(*)", "AVG(age)");
+  }
+
+  @Test
+  public void testExplicitAliasStillWorks() {
+    givenQuery(
+            """
+            SELECT COUNT(*) AS cnt FROM catalog.employees\
+            """)
+        .assertFields("cnt");
+  }
 }
