@@ -29,8 +29,8 @@ import org.opensearch.sql.api.compiler.UnifiedQueryCompiler;
  * <p>Note: {@code IN} and {@code BETWEEN} are intentionally NOT covered here. The PPL AST→Rex
  * visitor ({@code CalciteRexNodeVisitor.visitIn} / {@code visitBetween}) rejects cross-type lists
  * at translation time by throwing {@link org.opensearch.sql.exception.SemanticCheckException}
- * before any post-analysis rule can run. Covering those cases requires a separate change to the
- * PPL visitor (out of scope for this post-analysis rule).
+ * before any post-analysis rule can run. Covering those cases requires a separate change to the PPL
+ * visitor (out of scope for this post-analysis rule).
  */
 public class DatetimeUdtLiteralCoercionRuleTest extends UnifiedQueryTestBase
     implements ResultSetAssertion {
@@ -87,8 +87,7 @@ public class DatetimeUdtLiteralCoercionRuleTest extends UnifiedQueryTestBase
   @Test
   public void compareTimeColWithStringLiteral() throws Exception {
     ResultSet rs =
-        planAndExecute(
-            "source = catalog.employees | where login_time < '12:00:00' | fields name");
+        planAndExecute("source = catalog.employees | where login_time < '12:00:00' | fields name");
     verify(rs).expectSchema(col("name", VARCHAR)).expectData(row("Alice"));
   }
 
@@ -107,8 +106,7 @@ public class DatetimeUdtLiteralCoercionRuleTest extends UnifiedQueryTestBase
   @Test
   public void equalsDateColWithStringLiteral() throws Exception {
     ResultSet rs =
-        planAndExecute(
-            "source = catalog.employees | where hire_date = '2020-03-15' | fields name");
+        planAndExecute("source = catalog.employees | where hire_date = '2020-03-15' | fields name");
     verify(rs).expectSchema(col("name", VARCHAR)).expectData(row("Alice"));
   }
 
