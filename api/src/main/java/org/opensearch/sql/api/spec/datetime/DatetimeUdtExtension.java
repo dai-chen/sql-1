@@ -24,16 +24,21 @@ import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
  * Normalizes datetime UDT operations in the logical plan and casts remaining datetime output
  * columns to VARCHAR so the wire output matches PPL's String datetime contract.
  *
- * <p>Contributes two ordered post-analysis rules: {@link DatetimeUdtNormalizeRule} rewrites UDT
- * calls; {@link DatetimeUdtOutputCastRule} wraps the root with a varchar projection. The cast
- * depends on the normalized row type, so both rules live in a single extension to keep their
- * ordering encapsulated.
+ * <p>Contributes three ordered post-analysis rules: {@link DatetimeUdtLiteralCoercionRule} casts
+ * VARCHAR operands that appear alongside standard datetime operands in non-UDF operators (so the
+ * subsequent rules see homogeneous types); {@link DatetimeUdtNormalizeRule} rewrites UDT calls;
+ * {@link DatetimeUdtOutputCastRule} wraps the root with a varchar projection. The cast depends on
+ * the normalized row type, so all three rules live in a single extension to keep their ordering
+ * encapsulated.
  */
 public class DatetimeUdtExtension implements LanguageExtension {
 
   @Override
   public List<PostAnalysisRule> postAnalysisRules() {
-    return List.of(new DatetimeUdtNormalizeRule(), new DatetimeUdtOutputCastRule());
+    return List.of(
+        new DatetimeUdtLiteralCoercionRule(),
+        new DatetimeUdtNormalizeRule(),
+        new DatetimeUdtOutputCastRule());
   }
 
   /** Maps a datetime UDT to its standard Calcite equivalent with value conversion methods. */
