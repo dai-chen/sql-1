@@ -36,10 +36,12 @@ import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.plan.rel.LogicalSystemLimit;
 import org.opensearch.sql.common.response.ResponseListener;
+import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
 import org.opensearch.sql.executor.QueryType;
 import org.opensearch.sql.executor.analytics.AnalyticsExecutionEngine;
 import org.opensearch.sql.lang.LangSpec;
+import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
 import org.opensearch.sql.protocol.response.QueryResult;
 import org.opensearch.sql.protocol.response.format.ResponseFormatter;
@@ -59,28 +61,52 @@ public class RestUnifiedQueryAction {
   private final AnalyticsExecutionEngine analyticsEngine;
   private final NodeClient client;
   private final ClusterService clusterService;
+  private final Settings pluginSettings;
 
   public RestUnifiedQueryAction(
       NodeClient client,
       ClusterService clusterService,
       QueryPlanExecutor<RelNode, Iterable<Object[]>> planExecutor) {
+    this(
+        client,
+        clusterService,
+        planExecutor,
+        new OpenSearchSettings(clusterService.getClusterSettings()));
+  }
+
+  RestUnifiedQueryAction(
+      NodeClient client,
+      ClusterService clusterService,
+      QueryPlanExecutor<RelNode, Iterable<Object[]>> planExecutor,
+      Settings pluginSettings) {
     this.client = client;
     this.clusterService = clusterService;
     this.analyticsEngine = new AnalyticsExecutionEngine(planExecutor);
+    this.pluginSettings = pluginSettings;
   }
 
   /**
-   * Check if the query targets an analytics engine index (e.g., Parquet-backed). Uses the context's
-   * parser for index name extraction, supporting both PPL and SQL.
+   * Check if the query targets an analytics engine index (e.g., Parquet-backed).
    *
-   * <p>Note: This creates a separate UnifiedQueryContext for parsing. The context cannot be shared
-   * with doExecute/doExplain because UnifiedQueryContext holds a Calcite JDBC connection that fails
-   * when used across threads (transport thread -> sql-worker thread). When real catalog metadata
-   * makes this expensive, consider moving the routing check to the sql-worker thread.
+   * <p>Routing rules, in order:
+   *
+   * <ol>
+   *   <li>If {@code plugins.calcite.analytics.force_routing} is true, every query routes to the
+   *       analytics path. This is the test-only knob the analytics compatibility report flips on.
+   *   <li>Otherwise, parse the query, extract the source index, and route when the table name
+   *       starts with {@code parquet_}.
+   * </ol>
+   *
+   * <p>This creates a separate UnifiedQueryContext for parsing because that context holds a Calcite
+   * JDBC connection that cannot be shared across threads (transport -> sql-worker handoff).
    */
   public boolean isAnalyticsIndex(String query, QueryType queryType) {
     if (query == null || query.isEmpty()) {
       return false;
+    }
+    if (Boolean.TRUE.equals(
+        pluginSettings.getSettingValue(Settings.Key.CALCITE_ANALYTICS_FORCE_ROUTING))) {
+      return true;
     }
     try (UnifiedQueryContext context = buildParsingContext(queryType)) {
       return extractIndexName(query, queryType, context)
