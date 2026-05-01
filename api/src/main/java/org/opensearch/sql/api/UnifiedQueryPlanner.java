@@ -64,7 +64,13 @@ public class UnifiedQueryPlanner {
     } catch (SyntaxCheckException | UnsupportedOperationException e) {
       throw e;
     } catch (Exception e) {
-      throw new IllegalStateException("Failed to plan query", e);
+      // Include the root cause message in our wrapper's own message so downstream error
+      // formatters (like ErrorMessage.fetchDetails() → exception.getLocalizedMessage()) surface
+      // the concrete syntax/semantic error to the client instead of the opaque wrapper text.
+      // The cause is still attached so server-side logging can recover the full stack.
+      String rootMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+      throw new IllegalStateException(
+          "Failed to plan query: [" + e.getClass().getSimpleName() + "] " + rootMsg, e);
     }
   }
 

@@ -275,16 +275,32 @@ ext {
 
         // Map a top stack frame's package prefix to a short origin label.
         // Order matters: most-specific prefix first.
+        //
+        // NOTE: we deliberately do NOT use "Calcite" as an origin bucket, because the Apache
+        // Calcite library is used by BOTH the SQL plugin (api/, core/) and the analytics-engine
+        // plugin. A raw `org.apache.calcite.*` frame tells us WHICH library the frame landed in
+        // but NOT which side (SQL plugin vs AE) caused the problem — for that we need the
+        // higher-level frame that invoked Calcite. Since the throw-frame alone can't answer that
+        // reliably, we fold Calcite-library frames into the best-guess owner: if the exception
+        // type is Calcite's own (ValidationException / CalciteContextException etc.), it almost
+        // always surfaces through `UnifiedQueryPlanner.plan` in api/ — so we attribute to SQL
+        // (specifically SQL/api) rather than AE. AE-owned failures show up through AE-specific
+        // message signatures or frames like `org.opensearch.analytics.*`.
         Closure originFromFrame = { String fqClassMethod ->
             if (fqClassMethod == null || fqClassMethod.isEmpty()) return '?'
             String f = fqClassMethod
+            if (f.startsWith('org.opensearch.sql.api.')) return 'SQL/api'
             if (f.startsWith('org.opensearch.sql.calcite.')) return 'SQL/calcite'
             if (f.startsWith('org.opensearch.sql.')) return 'SQL/other'
             if (f.startsWith('org.opensearch.analytics.')) return 'AE'
             if (f.startsWith('org.opensearch.parquet.') ||
                 f.startsWith('org.opensearch.composite.') ||
                 f.startsWith('org.opensearch.dsl.')) return 'AE/plugin'
-            if (f.startsWith('org.apache.calcite.')) return 'Calcite'
+            // Apache Calcite library frames: tag as SQL/api because the call into Calcite comes
+            // from api/UnifiedQueryPlanner on the forced-routing path. Not a perfect rule — a
+            // Calcite frame reached from AE's planner would also match — but far more accurate
+            // than "Calcite" (which told us nothing about which side to fix).
+            if (f.startsWith('org.apache.calcite.')) return 'SQL/api (via Calcite)'
             if (f.startsWith('org.opensearch.')) return 'OpenSearch'
             if (f.startsWith('java.') || f.startsWith('jdk.') || f.startsWith('sun.')) return 'JDK'
             return '?'
@@ -358,6 +374,11 @@ ext {
         long totalTimeMs = 0
         def buckets = new java.util.LinkedHashMap<String, java.util.List<String>>()
         def bucketOrigin = new java.util.LinkedHashMap<String, String>()
+        // Full (un-clipped) message and simple exception name captured once per bucket on first
+        // occurrence. Used by the "Full failure details" section so triagers see the complete
+        // concrete error message, not a table-clipped preview.
+        def bucketFullMessage = new java.util.LinkedHashMap<String, String>()
+        def bucketSimpleExc = new java.util.LinkedHashMap<String, String>()
         def perClass = new java.util.TreeMap<String, int[]>()
 
         xmlDir.eachFileMatch(~/TEST-.*\.xml/) { xmlFile ->
@@ -434,15 +455,63 @@ ext {
                 }
                 primary = primary.replace('\n', ' ').replace('\r', ' ').trim()
 
-                String normalized = normalize(primary)
-                if (normalized.length() > 200) normalized = normalized.substring(0, 200) + '…'
+                // For ResponseException-wrapped messages (which come from OpenSearch RestClient), the
+                // raw text looks like:
+                //   "org.opensearch.client.ResponseException: method [POST], host [...], URI [...], status line [HTTP/1.1 500 Internal Server Error] <real message>"
+                // The JSON parser above already handles the proper JSON-formatted error body; this
+                // regex strip handles the fallback case where the server sent a plain-text body. By
+                // dropping the client-side wrapper prefix, downstream "Failed to plan query: [X]"
+                // extraction can see the real message.
+                def reStripped = (primary =~ /^org\.opensearch\.client\.ResponseException: method \[[^\]]+\], host \[[^\]]+\], URI \[[^\]]+\], status line \[HTTP\/[\d\.]+ \d+ [^\]]+\]\s*(.*)$/)
+                if (reStripped.find()) {
+                    primary = reStripped.group(1).trim()
+                }
+                // RuntimeException-wrapping (seen with ?format=jdbc): same idea, one extra layer.
+                if (primary.startsWith('java.lang.RuntimeException: org.opensearch.client.ResponseException:')) {
+                    def reStripped2 = (primary =~ /^java\.lang\.RuntimeException: org\.opensearch\.client\.ResponseException: method \[[^\]]+\], host \[[^\]]+\], URI \[[^\]]+\], status line \[HTTP\/[\d\.]+ \d+ [^\]]+\]\s*(.*)$/)
+                    if (reStripped2.find()) {
+                        primary = reStripped2.group(1).trim()
+                    }
+                }
 
-                def key = "${excLabel} | ${normalized}".toString()
+                // The UnifiedQueryPlanner wrapper decorates its message as:
+                //   "Failed to plan query: [<InnerExcClass>] <inner message>"
+                // Extract that inner exception class+message so buckets reflect the REAL cause
+                // instead of collapsing every planner failure into one opaque bucket. Falls through
+                // cleanly for old-style "Failed to plan query" messages (no inner block) so existing
+                // bucketing still works.
+                def inner = (primary =~ /^Failed to plan query:\s*\[([\w\.\$]+)\]\s*(.*)$/)
+                if (inner.find()) {
+                    String innerCls = inner.group(1)
+                    String innerTxt = inner.group(2)
+                    // Promote the inner exception to be the bucket's exception label.
+                    innerExcSimple = innerCls
+                    excLabel = "${excType} → ${innerCls}".toString()
+                    // The inner message (non-empty) becomes the primary for bucketing/rendering.
+                    if (innerTxt != null && !innerTxt.trim().isEmpty()) {
+                        primary = innerTxt.trim()
+                    }
+                }
+
+                String normalized = normalize(primary)
+                // Keep the full message around for rendering; only the bucket KEY is clipped so
+                // structurally-identical errors collapse together.
+                String keyNormalized = normalized.length() > 200 ? normalized.substring(0, 200) + '…' : normalized
+
+                def key = "${excLabel} | ${keyNormalized}".toString()
                 buckets.computeIfAbsent(key, { new java.util.ArrayList<String>() }).add(fqid)
+
+                // Record full (un-clipped) message + simple exception for the FIRST occurrence
+                // of each bucket. Subsequent occurrences don't overwrite so the representative
+                // message stays stable.
+                if (!bucketFullMessage.containsKey(key)) {
+                    bucketFullMessage[key] = normalized
+                    bucketSimpleExc[key] = (innerExcSimple ?: excType).toString()
+                }
 
                 if (!bucketOrigin.containsKey(key)) {
                     String simpleExc = innerExcSimple ?: excType
-                    String stripped = normalized
+                    String stripped = keyNormalized
                             .replaceFirst(/^There was internal problem at backend(: )?/, '')
                     String sig = "${simpleExc} | ${stripped}".toString()
                     String topFrame = sigToTopFrame.get(sig)
@@ -459,11 +528,68 @@ ext {
                         }
                     }
                     if (topFrame == null) {
-                        if (simpleExc in [
+                        String simpleExcShort = simpleExc.contains('.') ?
+                                simpleExc.substring(simpleExc.lastIndexOf('.') + 1) :
+                                simpleExc
+                        if (simpleExcShort in [
                                 'SemanticCheckException',
                                 'ExpressionEvaluationException',
                                 'SqlParseException']) {
                             bucketOrigin[key] = 'SQL/preflight'
+                        } else if (simpleExcShort in [
+                                'CalciteException',
+                                'CalciteContextException',
+                                'SqlValidatorException',
+                                'SqlParserException',
+                                'ParseException',
+                                'TokenMgrError',
+                                'ValidationException']) {
+                            // Calcite-library exception types thrown during the
+                            // UnifiedQueryPlanner.plan() → SqlValidator path. Our SQL plugin's
+                            // api/UnifiedSqlSpec.operatorTable() registers only SqlStdOperatorTable +
+                            // SearchExtension — it does NOT include OpenSearch SQL's function library
+                            // (YEAR, MONTH, DATE_FORMAT, etc. are registered in core/PPLBuiltinOperators
+                            // but only wired into the custom-visitor path, not the Calcite-native path).
+                            // So "No match found for function signature TIMESTAMP(<CHARACTER>)" etc.
+                            // are SQL/api gaps, not Calcite library bugs and not AE bugs.
+                            bucketOrigin[key] = 'SQL/api'
+                        } else if (simpleExcShort in [
+                                'ComparisonFailure',
+                                'AssertionError']) {
+                            bucketOrigin[key] = 'Test'
+                        } else if (simpleExcShort == 'IllegalStateException' &&
+                                keyNormalized.contains('unmarked child')) {
+                            // "Project rule encountered unmarked child" — well-known analytics-engine
+                            // planner bailout signature.
+                            bucketOrigin[key] = 'AE'
+                        } else if (simpleExcShort == 'IllegalStateException' &&
+                                keyNormalized.startsWith('Failed to plan query')) {
+                            // UnifiedQueryPlanner.plan() in api/ wraps any planning Exception.
+                            // Without an extracted inner class, this is still SQL plugin's api/ code
+                            // that raised it; we just don't know the underlying cause.
+                            bucketOrigin[key] = 'SQL/api (root cause unknown)'
+                        } else if (simpleExcShort == 'RuntimeException' ||
+                                simpleExcShort == 'ResponseException') {
+                            // Plain RuntimeException/ResponseException wrappers without a cluster-log
+                            // frame are server-side failures where we couldn't recover the root cause.
+                            // Try to infer by message signature when possible.
+                            String errMsg = keyNormalized
+                            if (errMsg.contains('unmarked child')) {
+                                bucketOrigin[key] = 'AE'
+                            } else if (errMsg.contains('No backend can scan')) {
+                                // Thrown by analytics-engine's OpenSearchTableScanRule when a query
+                                // requests fields the chosen backend can't scan.
+                                bucketOrigin[key] = 'AE'
+                            } else if (errMsg =~ /(?i)(semantic|parse|syntax|expected|token|lexical)/) {
+                                // Message looks like a Calcite parser/validator bailout.
+                                // Attribute to SQL/api since the validator is invoked from api/.
+                                bucketOrigin[key] = 'SQL/api (inferred)'
+                            } else {
+                                // Unknown — we can't confidently attribute. Downstream display will
+                                // still show it as '?' but with the full error text so a human can
+                                // triage from the message.
+                                bucketOrigin[key] = '?'
+                            }
                         } else {
                             bucketOrigin[key] = '?'
                         }
@@ -476,7 +602,13 @@ ext {
 
         int totalFailed = totalFailures + totalErrors
         int totalPassed = totalTests - totalFailed - totalSkipped
-        double passPct = totalTests == 0 ? 0.0 : (100.0 * totalPassed / totalTests)
+        // Executed = tests that actually ran (excludes @Ignore'd and @Assume-false skipped tests).
+        // This matches the methodology used in the earlier shadow-run comparison reports — skips
+        // would artificially inflate the denominator otherwise. The prior formula divided by
+        // totalTests (= executed + skipped), which makes the pass rate look worse than it is when
+        // many tests are class-level @Ignore'd for reasons unrelated to the analytics-engine path.
+        int totalExecuted = totalTests - totalSkipped
+        double passPct = totalExecuted == 0 ? 0.0 : (100.0 * totalPassed / totalExecuted)
 
         def sb = new StringBuilder()
         sb << "# Analytics-engine ${label} IT Compatibility Report\n\n"
@@ -488,13 +620,18 @@ ext {
         sb << "## Summary\n\n"
         sb << "| Metric | Count |\n"
         sb << "|---|---|\n"
-        sb << "| Tests executed | ${totalTests} |\n"
+        sb << "| Tests executed | ${totalExecuted} |\n"
+        sb << "| Tests in suite (incl. skipped) | ${totalTests} |\n"
         sb << "| Passed | ${totalPassed} |\n"
         sb << "| Failed | ${totalFailures} |\n"
         sb << "| Errored | ${totalErrors} |\n"
-        sb << "| Skipped | ${totalSkipped} |\n"
-        sb << "| Pass rate | **${String.format('%.1f', passPct)}%** |\n"
+        sb << "| Skipped (@Ignore / assume-false) | ${totalSkipped} |\n"
+        sb << "| Pass rate (of executed) | **${String.format('%.1f', passPct)}%** |\n"
         sb << "| Total time | ${String.format('%.1f', totalTimeMs / 1000.0)}s |\n\n"
+        sb << "_Pass rate = passed / executed. Skipped tests are excluded from the denominator since " +
+                "they never ran (typically class-level `@Ignore`). This matches the methodology of prior " +
+                "compatibility reports and avoids penalizing the analytics-engine path for tests that " +
+                "would be skipped regardless of routing._\n\n"
 
         int TOP_BUCKETS = 25
         Closure cell = { String s ->
@@ -509,27 +646,46 @@ ext {
                 (int) sortedBuckets.drop(TOP_BUCKETS).sum(0) { it.value.size() }
 
         sb << "## Top ${Math.min(TOP_BUCKETS, sortedBuckets.size())} failure buckets\n\n"
-        sb << "Cells are clipped to keep table renderers from line-wrapping. The full uncut messages live in `integ-test/build/test-results/${resultsSubdir}/`.\n\n"
-        sb << "Origin column legend: `SQL/calcite` = our SQL plugin's Calcite visitors (`org.opensearch.sql.calcite.*`); `SQL/preflight` = our SQL plugin's parser/analyzer (raised before reaching the analytics-engine path); `SQL/other` = other SQL-plugin code; `AE` = analytics-engine plugin (`org.opensearch.analytics.*`); `AE/plugin` = analytics-engine sister plugins (parquet/composite/dsl); `Calcite` = the Apache Calcite library; `OpenSearch` = OpenSearch core; `Test` = test code (assertion failure, not a server error); `?` = no matching cluster-log frame found.\n\n"
+        sb << "Error column shows the **full concrete error message** (not clipped) so syntax/semantic errors, index names, and cause chains are visible at-a-glance. The `Origin` column says where in the stack the error was thrown:\n\n"
+        sb << "- `SQL/api` = our SQL plugin's api/ module (`org.opensearch.sql.api.*` — UnifiedQueryPlanner, UnifiedSqlSpec). Covers Calcite-validator gaps where api/ didn't register OpenSearch SQL's function library into the operator table — e.g. `No match found for function signature TIMESTAMP(<CHARACTER>)`\n"
+        sb << "- `SQL/api (via Calcite)` = stack frame landed in `org.apache.calcite.*` but was invoked from api/ — counted as SQL/api because that's where to fix it\n"
+        sb << "- `SQL/api (inferred)` = message signature looks like a Calcite parser/validator bailout but no stack frame confirms which side invoked Calcite\n"
+        sb << "- `SQL/api (root cause unknown)` = UnifiedQueryPlanner threw an opaque wrapper IllegalStateException with no extractable inner class\n"
+        sb << "- `SQL/calcite` = our SQL plugin's Calcite visitors (`org.opensearch.sql.calcite.*` — the custom-visitor path)\n"
+        sb << "- `SQL/preflight` = our SQL plugin's parser/analyzer (raised before reaching any planner path)\n"
+        sb << "- `SQL/other` = other SQL-plugin code\n"
+        sb << "- `AE` = analytics-engine plugin (`org.opensearch.analytics.*`) — e.g. `Project rule encountered unmarked child`, `No backend can scan all requested fields`\n"
+        sb << "- `AE (inferred)` = RuntimeException/ResponseException whose message matches known AE signatures without a cluster-log frame\n"
+        sb << "- `AE/plugin` = analytics-engine sister plugins (parquet/composite/dsl)\n"
+        sb << "- `OpenSearch` = OpenSearch core\n"
+        sb << "- `Test` = test code assertion failure (not a server error)\n"
+        sb << "- `?` = still unknown (no stack frame, no known exception-type mapping, no message signature match)\n\n"
+        sb << "Per-test XMLs live at `integ-test/build/test-results/${resultsSubdir}/`. See also the `## Full failure details` section below each bucket for complete message text if a row wraps awkwardly.\n\n"
         if (sortedBuckets.isEmpty()) {
             sb << "_No failures._\n\n"
         } else {
-            sb << "| # | Count | Origin | Error |\n"
-            sb << "|---:|---:|:--|---|\n"
+            sb << "| # | Count | Origin | Exception | Error |\n"
+            sb << "|---:|---:|:--|:--|---|\n"
             int idx = 0
             sortedBuckets.take(TOP_BUCKETS).each { entry ->
                 idx++
                 def parts = entry.key.split(/ \| /, 2)
                 def excType = parts.length > 0 ? parts[0] : '<unknown>'
-                def msgPart = parts.length > 1 ? parts[1] : ''
-                def shortExc = excType.replaceFirst(/^.*?(ResponseException|AssertionError) → /, '')
-                shortExc = shortExc.replaceFirst(/^java\.lang\./, '').replaceFirst(/^org\.opensearch\.[^ ]*\./, '')
-                def combined = "${shortExc} — ${msgPart}"
+                def shortExc = bucketSimpleExc.get(entry.key) ?: excType
+                shortExc = shortExc.replaceFirst(/^.*?(ResponseException|AssertionError) → /, '')
+                        .replaceFirst(/^java\.lang\./, '')
+                        .replaceFirst(/^org\.opensearch\.[^ ]*\./, '')
                 String origin = bucketOrigin.get(entry.key) ?: '?'
                 if (origin == '?' && (excType.endsWith('ComparisonFailure') || excType == 'java.lang.AssertionError' || excType == 'AssertionError')) {
                     origin = 'Test'
                 }
-                sb << "| ${idx} | ${entry.value.size()} | ${origin} | ${cell(clip(combined, 80))} |\n"
+                // Full concrete message — NOT clipped. Use bucketFullMessage for the widest view;
+                // fall back to the bucket key's msg part if somehow unset.
+                String fullMsg = bucketFullMessage.get(entry.key)
+                if (fullMsg == null) {
+                    fullMsg = parts.length > 1 ? parts[1] : ''
+                }
+                sb << "| ${idx} | ${entry.value.size()} | ${origin} | ${cell(shortExc)} | ${cell(fullMsg)} |\n"
             }
             if (remainingBuckets > 0) {
                 sb << "\n_${remainingBuckets} more buckets cover the remaining ${remainingFails} failures (long tail, each ≤${sortedBuckets.get(TOP_BUCKETS).value.size()} tests)._\n\n"
@@ -559,6 +715,39 @@ ext {
                 sb << "| ${e.key} | ${e.value} | ${pct}% |\n"
             }
             sb << "\n"
+
+            // -----------------------------------------------------------------------------
+            // Full failure details: one block per top bucket with the COMPLETE uncut
+            // message, origin, exception class, failure count, and up to 5 sample test IDs
+            // so triagers can jump straight into a representative test case without first
+            // grepping the XML dir.
+            // -----------------------------------------------------------------------------
+            sb << "## Full failure details\n\n"
+            sb << "Complete error text for the top ${Math.min(TOP_BUCKETS, sortedBuckets.size())} buckets. For each bucket we show: the resolved `Origin`, the `Exception` class, total failures in the bucket, up to 5 sample test IDs (full list in the XML files), and the full normalized error message without truncation.\n\n"
+            int dIdx = 0
+            sortedBuckets.take(TOP_BUCKETS).each { entry ->
+                dIdx++
+                String simpleExc = bucketSimpleExc.get(entry.key) ?:
+                        ((entry.key.split(/ \| /, 2))[0] ?: '<unknown>')
+                simpleExc = simpleExc.replaceFirst(/^java\.lang\./, '').replaceFirst(/^org\.opensearch\.[^ ]*\./, '')
+                String origin = bucketOrigin.get(entry.key) ?: '?'
+                if (origin == '?') {
+                    String parts0 = (entry.key.split(/ \| /, 2))[0]
+                    if (parts0.endsWith('ComparisonFailure') || parts0.endsWith('AssertionError')) origin = 'Test'
+                }
+                String fullMsg = bucketFullMessage.get(entry.key) ?:
+                        ((entry.key.split(/ \| /, 2)).length > 1 ? (entry.key.split(/ \| /, 2))[1] : '')
+                List<String> sampleTests = entry.value.take(5) as List<String>
+                int moreTests = Math.max(0, entry.value.size() - 5)
+
+                sb << "### ${dIdx}. `${simpleExc}` — ${entry.value.size()} failure${entry.value.size() == 1 ? '' : 's'} — Origin: **${origin}**\n\n"
+                sb << "**Full error:**\n\n"
+                sb << "```\n${fullMsg}\n```\n\n"
+                sb << "**Sample failing tests:**\n\n"
+                sampleTests.each { sb << "- `${it}`\n" }
+                if (moreTests > 0) sb << "- _(and ${moreTests} more…)_\n"
+                sb << "\n"
+            }
         }
 
         def perClassActive = []
