@@ -19,6 +19,7 @@ import org.apache.calcite.sql.validate.SqlValidator;
 import org.opensearch.sql.api.spec.cast.CastExtension;
 import org.opensearch.sql.api.spec.datetime.DateTimeExtension;
 import org.opensearch.sql.api.spec.library.CalciteLibraryExtension;
+import org.opensearch.sql.api.spec.library.OpenSearchStubFunctionExtension;
 import org.opensearch.sql.api.spec.search.SearchExtension;
 
 /**
@@ -57,7 +58,8 @@ public class UnifiedSqlSpec implements LanguageSpec {
             new SearchExtension(),
             new DateTimeExtension(),
             new CastExtension(),
-            new CalciteLibraryExtension()));
+            new CalciteLibraryExtension(),
+            new OpenSearchStubFunctionExtension()));
   }
 
   @Override
