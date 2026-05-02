@@ -19,6 +19,19 @@ public class DateTimeExtension implements LanguageSpec.LanguageExtension {
 
   @Override
   public List<SqlVisitor<SqlNode>> postParseRules() {
-    return List.of(DateTimeLiteralRewriter.INSTANCE);
+    // Order matters:
+    // 1. DateTimeLiteralRewriter — converts DATE('str')/TIME('str')/TIMESTAMP('str') to ANSI
+    //    typed literals. Must run first so the downstream rewriters see typed literals.
+    // 2. MultiArgDateTimeRewriter — collapses CONVERT_TZ(s,t,t) / DATETIME(s,tz) to TIMESTAMP
+    //    literals.
+    // 3. CrossTypeTemporalCompareRewriter — wraps cross-type <DATE>/<TIME>/<TIMESTAMP>
+    //    comparisons with CAST-to-VARCHAR so the validator accepts them.
+    // 4. AvgTemporalRewriter — wraps AVG(<temporal>) in CAST(... AS BIGINT) since ANSI AVG
+    //    rejects non-numeric types.
+    return List.of(
+        DateTimeLiteralRewriter.INSTANCE,
+        MultiArgDateTimeRewriter.INSTANCE,
+        CrossTypeTemporalCompareRewriter.INSTANCE,
+        AvgTemporalRewriter.INSTANCE);
   }
 }
