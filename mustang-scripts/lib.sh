@@ -15,11 +15,69 @@ set -u -o pipefail
 # Default SQL_REPO to the parent of this script directory, so scripts work out-of-the-box
 # when shipped inside the sql repo itself. Override via env var for custom layouts.
 _SCRIPT_DIR_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export OS_REPO="${OS_REPO:-/Users/daichen/IdeaProjects/OpenSearch}"
+export OS_REPO="${OS_REPO:-$HOME/IdeaProjects/OpenSearch}"
 export SQL_REPO="${SQL_REPO:-$(cd "$_SCRIPT_DIR_LIB/.." && pwd)}"
 export STATE_DIR="${STATE_DIR:-/tmp/sisyphus-cluster}"
-export JDK21="${JDK21:-/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home}"
-export JDK25="${JDK25:-/Library/Java/JavaVirtualMachines/amazon-corretto-25.jdk/Contents/Home}"
+
+# --- JDK discovery ---
+# find_jdk <major_version> [extra_search_paths...]
+# Echoes the JAVA_HOME of a matching JDK, or empty string if none found.
+# Search order:
+#   1. Explicit env vars JDK_<ver> (e.g. JDK_21) — caller override wins.
+#   2. Extra paths passed as arguments (platform-specific common locations).
+#   3. macOS /usr/libexec/java_home -v <ver> if available.
+#   4. update-alternatives via `which java` → resolve symlink (Linux).
+#   5. $JAVA_HOME if `java -version` reports the right major.
+find_jdk() {
+    local want="$1"; shift
+    local override_var="JDK_${want}"
+    local override_val="${!override_var:-}"
+    if [[ -n "$override_val" && -x "$override_val/bin/java" ]]; then
+        echo "$override_val"; return 0
+    fi
+    local candidate
+    for candidate in "$@"; do
+        [[ -x "$candidate/bin/java" ]] && { echo "$candidate"; return 0; }
+    done
+    # macOS helper
+    if command -v /usr/libexec/java_home >/dev/null 2>&1; then
+        candidate=$(/usr/libexec/java_home -v "$want" 2>/dev/null || true)
+        [[ -n "$candidate" && -x "$candidate/bin/java" ]] && { echo "$candidate"; return 0; }
+    fi
+    # Linux: scan common JDK install roots
+    local root
+    for root in /usr/lib/jvm /opt/jdks /opt; do
+        [[ -d "$root" ]] || continue
+        for candidate in "$root"/*; do
+            [[ -x "$candidate/bin/java" ]] || continue
+            # Check the major version reported by this JDK
+            local ver
+            ver=$("$candidate/bin/java" -version 2>&1 | head -1 | sed -nE 's/.*"([0-9]+)[.\"].*/\1/p')
+            [[ "$ver" == "$want" ]] && { echo "$candidate"; return 0; }
+        done
+    done
+    # Last resort: current JAVA_HOME if it matches
+    if [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+        local ver
+        ver=$("$JAVA_HOME/bin/java" -version 2>&1 | head -1 | sed -nE 's/.*"([0-9]+)[.\"].*/\1/p')
+        [[ "$ver" == "$want" ]] && { echo "$JAVA_HOME"; return 0; }
+    fi
+    echo ""
+    return 1
+}
+
+# Resolve JDK 21 and 25. These are lazy (only die when a script actually needs them).
+# Override by exporting JDK_21 / JDK_25 before sourcing this file.
+export JDK21="${JDK21:-$(find_jdk 21 \
+    "/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home" \
+    "/usr/lib/jvm/java-21-amazon-corretto" \
+    "/usr/lib/jvm/amazon-corretto-21" \
+    "/usr/lib/jvm/java-21-openjdk")}"
+export JDK25="${JDK25:-$(find_jdk 25 \
+    "/Library/Java/JavaVirtualMachines/amazon-corretto-25.jdk/Contents/Home" \
+    "/usr/lib/jvm/java-25-amazon-corretto" \
+    "/usr/lib/jvm/amazon-corretto-25" \
+    "/usr/lib/jvm/java-25-openjdk")}"
 
 mkdir -p "$STATE_DIR"
 

@@ -9,17 +9,75 @@ will hang forever.
 This directory (`mustang-scripts/`) ships inside the SQL repo so the scripts default to using
 the enclosing repo as `SQL_REPO`. Override via env var if your layout differs.
 
+## First time on a fresh machine
+
+Run `./preflight.sh` first — it validates every prerequisite (JDKs, sandbox repo, native
+library, free ports, disk, memory) and prints actionable install instructions for anything
+missing.
+
+### Required tools
+
+- Amazon Corretto **JDK 21** (for SQL plugin build + runtime)
+- Amazon Corretto **JDK 25** (for `sandbox/libs/dataformat-native` which uses the FFM API)
+- **Rust/cargo** (to build the native library on first run)
+- `git`, `curl`, `bash 4+`, `find`, `tar`
+
+Scripts auto-discover JDKs in common locations (`/Library/Java/JavaVirtualMachines/` on macOS,
+`/usr/lib/jvm/` on Linux). To override, export `JDK_21` or `JDK_25` pointing at JAVA_HOME.
+
+### Required external repo: OpenSearch sandbox fork
+
+The analyticsSqlCompatibilityReport task requires a **sandbox-enabled OpenSearch build**
+(the `sandbox/plugins/` directory with analytics-engine and friends). This is an
+Amazon-internal fork. Clone it and set `OS_REPO` to its path.
+
+```bash
+# One-time setup
+git clone <your-opensearch-sandbox-fork-url> ~/IdeaProjects/OpenSearch
+cd ~/IdeaProjects/OpenSearch
+# Check out the branch with Mustang sandbox plugins (team-specific name)
+# Build native library first (cargo must be installed):
+cd sandbox/libs/dataformat-native/rust && cargo build --release
+```
+
+Then, from a scratch machine setup:
+
+```bash
+# Clone the SQL repo's mustang branch (this one)
+git clone git@github.com:dai-chen/sql-1.git
+cd sql-1
+git checkout feature/mustang-sql-it-local-changes
+
+# Set up env
+export OS_REPO=$HOME/IdeaProjects/OpenSearch
+# (JDK21/JDK25 auto-discovered, override via JDK_21 / JDK_25 if needed)
+
+# Validate setup
+./mustang-scripts/preflight.sh
+
+# Build + run
+./mustang-scripts/plugin-build.sh
+./mustang-scripts/cluster-start.sh
+./mustang-scripts/cluster-wait.sh
+./mustang-scripts/test-run.sh
+./mustang-scripts/test-wait.sh
+./mustang-scripts/cluster-stop.sh
+```
+
 ## Paths (override with env vars)
 
-- `OS_REPO` - OpenSearch repo (default: `~/IdeaProjects/OpenSearch`)
+- `OS_REPO` - OpenSearch sandbox-enabled repo (default: `$HOME/IdeaProjects/OpenSearch`)
 - `SQL_REPO` - this SQL repo (default: parent of `mustang-scripts/`, i.e. the repo root)
 - `STATE_DIR` - where pid/log files live (default: `/tmp/sisyphus-cluster`)
-- `JDK21`, `JDK25` - paths to Corretto 21 and 25
+- `JDK_21`, `JDK_25` - paths to Corretto 21 and 25 (auto-discovered if unset)
 
 ## Typical workflow
 
 ```bash
 cd mustang-scripts/
+
+# First time on a fresh machine — validate environment
+./preflight.sh
 
 # Build + publish SQL plugin (after code changes in api/ or plugin/)
 ./plugin-build.sh

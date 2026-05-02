@@ -11,13 +11,19 @@ source "$SCRIPT_DIR/lib.sh"
 [[ -d "$JDK21" ]] || die "JDK 21 not found at $JDK21"
 [[ -d "$SQL_REPO" ]] || die "SQL repo not found at $SQL_REPO"
 
-# Clear known-corrupted transform cache (OpenSearch 3.7.0 tarball). Cluster-run modifies this
-# dir in place; gradle's immutable-workspace check then fails next build. Removing it forces
-# regeneration. Safe: gradle will re-extract the tarball on demand.
-CORRUPT_CACHE="/Users/daichen/.gradle/caches/9.2.0/transforms/e4020cbde0628d11e4e2c7d3fd72246c"
-if [[ -d "$CORRUPT_CACHE" ]]; then
-    log "Clearing known-corrupted gradle transform cache: $CORRUPT_CACHE"
-    rm -rf "$CORRUPT_CACHE"
+# Clear any gradle transform cache that the cluster-run task corrupts in place. Cluster-run
+# extracts the OpenSearch tarball into a cached transform dir and then modifies the contents
+# (logs, config, installed plugins). Gradle's immutable-workspace check then fails next build
+# with "The contents of the immutable workspace ... have been modified." We find such dirs by
+# looking for any transform cache that contains `opensearch-*-SNAPSHOT.zip/` as a directory
+# (which means it was extracted) — that's the signature of the corrupted ones.
+# Safe: gradle will re-extract on demand.
+GRADLE_CACHE="$HOME/.gradle/caches"
+if [[ -d "$GRADLE_CACHE" ]]; then
+    while IFS= read -r -d '' corrupt; do
+        log "Clearing corrupted gradle transform cache: $(dirname "$(dirname "$corrupt")")"
+        rm -rf "$(dirname "$(dirname "$corrupt")")"
+    done < <(find "$GRADLE_CACHE" -type d -name "opensearch-*-SNAPSHOT.zip" -path "*/transforms/*" -print0 2>/dev/null)
 fi
 
 export JAVA_HOME="$JDK21"
