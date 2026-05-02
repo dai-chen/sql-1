@@ -11,20 +11,13 @@ source "$SCRIPT_DIR/lib.sh"
 [[ -d "$JDK21" ]] || die "JDK 21 not found at $JDK21"
 [[ -d "$SQL_REPO" ]] || die "SQL repo not found at $SQL_REPO"
 
-# Clear any gradle transform cache that the cluster-run task corrupts in place. Cluster-run
-# extracts the OpenSearch tarball into a cached transform dir and then modifies the contents
-# (logs, config, installed plugins). Gradle's immutable-workspace check then fails next build
-# with "The contents of the immutable workspace ... have been modified." We find such dirs by
-# looking for any transform cache that contains `opensearch-*-SNAPSHOT.zip/` as a directory
-# (which means it was extracted) — that's the signature of the corrupted ones.
-# Safe: gradle will re-extract on demand.
-GRADLE_CACHE="$HOME/.gradle/caches"
-if [[ -d "$GRADLE_CACHE" ]]; then
-    while IFS= read -r -d '' corrupt; do
-        log "Clearing corrupted gradle transform cache: $(dirname "$(dirname "$corrupt")")"
-        rm -rf "$(dirname "$(dirname "$corrupt")")"
-    done < <(find "$GRADLE_CACHE" -type d -name "opensearch-*-SNAPSHOT.zip" -path "*/transforms/*" -print0 2>/dev/null)
-fi
+# NOTE: we intentionally do NOT scan for and delete corrupted gradle transform caches here.
+# Earlier versions of this script did, but the heuristic also deleted caches that the
+# integTestRemote/analyticsSqlCompatibilityTest tasks depend on — which then fail with
+# "missing: .../opensearch-*-SNAPSHOT.zip" and gradle refuses to re-extract. If you hit an
+# "immutable workspace has been modified" error, run:
+#     pkill -f GradleDaemon; rm -rf ~/.gradle/caches/*/transforms
+# That clears all transforms; gradle will regenerate them on the next run.
 
 export JAVA_HOME="$JDK21"
 export PATH="$JAVA_HOME/bin:$PATH"
