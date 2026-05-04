@@ -115,4 +115,16 @@ public class UnifiedSqlSpecTest extends UnifiedQueryTestBase {
     givenQuery("SELECT * FROM employees WHERE match_phrase(name, 'quick fox', slop=2)")
         .assertPlanContains("match_phrase(MAP('field', $1), MAP('query', 'quick fox')");
   }
+
+  @Test
+  public void libraryRtrimFunctionResolves() {
+    givenQuery("SELECT RTRIM('hello  ') FROM employees")
+        .assertPlanContains("TRIM(FLAG(TRAILING), ' ', 'hello  ')");
+  }
+
+  @Test
+  public void libraryConcatWsFunctionResolves() {
+    givenQuery("SELECT CONCAT_WS(',', name, department) FROM employees")
+        .assertPlanContains("CONCAT_WS");
+  }
 }

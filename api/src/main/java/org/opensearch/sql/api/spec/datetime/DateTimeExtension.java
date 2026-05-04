@@ -12,13 +12,21 @@ import org.opensearch.sql.api.spec.LanguageSpec;
 
 /**
  * Datetime Extension: rewrites OpenSearch SQL's legacy function-style date/time literals (e.g.,
- * {@code DATE('2020-09-16')}) into ANSI typed literals before validation. Contributes no operators
- * — purely a pre-validation AST rewrite.
+ * {@code DATE('2020-09-16')}) into ANSI typed literals before validation, then inserts explicit
+ * {@code CAST} operators into comparisons between mismatched temporal types (e.g., DATE vs
+ * TIMESTAMP) so Calcite's validator accepts them. Contributes no operators — purely pre-validation
+ * AST rewrites.
+ *
+ * @see DateTimeLiteralRewriter
+ * @see DateTimeComparisonRewriter
  */
 public class DateTimeExtension implements LanguageSpec.LanguageExtension {
 
   @Override
   public List<SqlVisitor<SqlNode>> postParseRules() {
-    return List.of(DateTimeLiteralRewriter.INSTANCE);
+    return List.of(
+        DateTimeLiteralRewriter.INSTANCE,
+        ConvertTzRewriter.INSTANCE,
+        DateTimeComparisonRewriter.INSTANCE);
   }
 }
