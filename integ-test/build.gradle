@@ -647,6 +647,8 @@ dependencies {
     testImplementation group: 'org.opensearch.client', name: 'opensearch-rest-high-level-client', version: "${opensearch_version}"
     testImplementation group: 'org.opensearch.client', name: 'opensearch-rest-client', version: "${opensearch_version}"
     testImplementation group: 'org.opensearch.driver', name: 'opensearch-sql-jdbc', version: System.getProperty("jdbcDriverVersion", '1.2.0.0')
+    // Quidem — golden-file test runner for SQL queries via JDBC. Powers analyticsAnsiQuidem task.
+    testImplementation group: 'net.hydromatic', name: 'quidem', version: '0.12'
     testImplementation group: 'org.hamcrest', name: 'hamcrest', version: "${hamcrest_version}"
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version:"${versions.log4j}"
     testImplementation project(':opensearch-sql-plugin')
@@ -1307,6 +1309,52 @@ task analyticsSqlCompatibilityTest(type: RestIntegTestTask) {
     configureAnalyticsCompatibilityTest(it,
             ["org.opensearch.sql.sql.*IT", "org.opensearch.sql.legacy.*IT"],
             "analyticsSqlCompatibility")
+}
+
+// =============================================================================
+// ANSI SQL Quidem IT
+//
+// Unlike analyticsSqlCompatibilityTest which replays the legacy v2 SQL IT suite through the
+// unified path (measuring parity between the new path and the old), this task runs a CURATED
+// set of Quidem .iq files that target ANSI SQL features directly. The goal is to track
+// new-path readiness for standard SQL independent of v2 baggage.
+//
+// Usage:
+//     ./gradlew :integ-test:analyticsAnsiQuidemReport \
+//         -Dtests.rest.cluster=localhost:9200 \
+//         -Dtests.cluster=localhost:9300 \
+//         -Dtests.clustername=runTask
+//
+// .iq files live under integ-test/src/test/resources/ansi/ and are picked up dynamically by
+// AnsiSqlQuidemIT. Output goes to integ-test/build/reports/ansi-sql-quidem/REPORT.md and the
+// standard JUnit XML / HTML reports under build/test-results/analyticsAnsiQuidem.
+// =============================================================================
+task analyticsAnsiQuidemTest(type: RestIntegTestTask) {
+    description = "Runs curated ANSI SQL Quidem .iq files through the analytics-engine path. " +
+            "Measures new-path readiness for standard SQL features."
+    group = "verification"
+    configureAnalyticsCompatibilityTest(it,
+            ["org.opensearch.sql.ansi.*IT"],
+            "analyticsAnsiQuidem")
+}
+
+task analyticsAnsiQuidemReport {
+    description = "Runs analyticsAnsiQuidemTest. The per-file pass/fail summary is written by " +
+            "AnsiSqlQuidemIT itself to build/reports/ansi-sql-quidem/REPORT.md."
+    group = "verification"
+    dependsOn analyticsAnsiQuidemTest
+
+    doLast {
+        def report = file("$buildDir/reports/ansi-sql-quidem/REPORT.md")
+        if (report.exists()) {
+            logger.lifecycle("[analyticsAnsiQuidemReport] Wrote ${report.absolutePath}")
+            // Echo the summary line so CI logs show the headline numbers.
+            def summary = report.text.readLines().find { it.startsWith("Executed ") }
+            if (summary) logger.lifecycle("[analyticsAnsiQuidemReport] ${summary}")
+        } else {
+            logger.lifecycle("[analyticsAnsiQuidemReport] No report produced at ${report.absolutePath}")
+        }
+    }
 }
 
 // Cluster log path. The cluster's testcluster log is the only source of server-side stack
