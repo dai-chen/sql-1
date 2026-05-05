@@ -1,0 +1,533 @@
+{
+  "schema": [
+    {
+      "name": "AdvEngineID",
+      "type": "short"
+    },
+    {
+      "name": "Age",
+      "type": "short"
+    },
+    {
+      "name": "BrowserCountry",
+      "type": "string"
+    },
+    {
+      "name": "BrowserLanguage",
+      "type": "string"
+    },
+    {
+      "name": "CLID",
+      "type": "integer"
+    },
+    {
+      "name": "ClientEventTime",
+      "type": "timestamp"
+    },
+    {
+      "name": "ClientIP",
+      "type": "integer"
+    },
+    {
+      "name": "ClientTimeZone",
+      "type": "short"
+    },
+    {
+      "name": "CodeVersion",
+      "type": "integer"
+    },
+    {
+      "name": "ConnectTiming",
+      "type": "integer"
+    },
+    {
+      "name": "CookieEnable",
+      "type": "short"
+    },
+    {
+      "name": "CounterClass",
+      "type": "short"
+    },
+    {
+      "name": "CounterID",
+      "type": "integer"
+    },
+    {
+      "name": "DNSTiming",
+      "type": "integer"
+    },
+    {
+      "name": "DontCountHits",
+      "type": "short"
+    },
+    {
+      "name": "EventDate",
+      "type": "timestamp"
+    },
+    {
+      "name": "EventTime",
+      "type": "timestamp"
+    },
+    {
+      "name": "FUniqID",
+      "type": "long"
+    },
+    {
+      "name": "FetchTiming",
+      "type": "integer"
+    },
+    {
+      "name": "FlashMajor",
+      "type": "short"
+    },
+    {
+      "name": "FlashMinor",
+      "type": "short"
+    },
+    {
+      "name": "FlashMinor2",
+      "type": "short"
+    },
+    {
+      "name": "FromTag",
+      "type": "string"
+    },
+    {
+      "name": "GoodEvent",
+      "type": "short"
+    },
+    {
+      "name": "HID",
+      "type": "integer"
+    },
+    {
+      "name": "HTTPError",
+      "type": "short"
+    },
+    {
+      "name": "HasGCLID",
+      "type": "short"
+    },
+    {
+      "name": "HistoryLength",
+      "type": "short"
+    },
+    {
+      "name": "HitColor",
+      "type": "string"
+    },
+    {
+      "name": "IPNetworkID",
+      "type": "integer"
+    },
+    {
+      "name": "Income",
+      "type": "short"
+    },
+    {
+      "name": "Interests",
+      "type": "short"
+    },
+    {
+      "name": "IsArtifical",
+      "type": "short"
+    },
+    {
+      "name": "IsDownload",
+      "type": "short"
+    },
+    {
+      "name": "IsEvent",
+      "type": "short"
+    },
+    {
+      "name": "IsLink",
+      "type": "short"
+    },
+    {
+      "name": "IsMobile",
+      "type": "short"
+    },
+    {
+      "name": "IsNotBounce",
+      "type": "short"
+    },
+    {
+      "name": "IsOldCounter",
+      "type": "short"
+    },
+    {
+      "name": "IsParameter",
+      "type": "short"
+    },
+    {
+      "name": "IsRefresh",
+      "type": "short"
+    },
+    {
+      "name": "JavaEnable",
+      "type": "short"
+    },
+    {
+      "name": "JavascriptEnable",
+      "type": "short"
+    },
+    {
+      "name": "LocalEventTime",
+      "type": "timestamp"
+    },
+    {
+      "name": "MobilePhone",
+      "type": "short"
+    },
+    {
+      "name": "MobilePhoneModel",
+      "type": "string"
+    },
+    {
+      "name": "NetMajor",
+      "type": "short"
+    },
+    {
+      "name": "NetMinor",
+      "type": "short"
+    },
+    {
+      "name": "OS",
+      "type": "short"
+    },
+    {
+      "name": "OpenerName",
+      "type": "integer"
+    },
+    {
+      "name": "OpenstatAdID",
+      "type": "string"
+    },
+    {
+      "name": "OpenstatCampaignID",
+      "type": "string"
+    },
+    {
+      "name": "OpenstatServiceName",
+      "type": "string"
+    },
+    {
+      "name": "OpenstatSourceID",
+      "type": "string"
+    },
+    {
+      "name": "OriginalURL",
+      "type": "string"
+    },
+    {
+      "name": "PageCharset",
+      "type": "string"
+    },
+    {
+      "name": "ParamCurrency",
+      "type": "string"
+    },
+    {
+      "name": "ParamCurrencyID",
+      "type": "short"
+    },
+    {
+      "name": "ParamOrderID",
+      "type": "string"
+    },
+    {
+      "name": "ParamPrice",
+      "type": "long"
+    },
+    {
+      "name": "Params",
+      "type": "string"
+    },
+    {
+      "name": "Referer",
+      "type": "string"
+    },
+    {
+      "name": "RefererCategoryID",
+      "type": "short"
+    },
+    {
+      "name": "RefererHash",
+      "type": "long"
+    },
+    {
+      "name": "RefererRegionID",
+      "type": "integer"
+    },
+    {
+      "name": "RegionID",
+      "type": "integer"
+    },
+    {
+      "name": "RemoteIP",
+      "type": "integer"
+    },
+    {
+      "name": "ResolutionDepth",
+      "type": "short"
+    },
+    {
+      "name": "ResolutionHeight",
+      "type": "short"
+    },
+    {
+      "name": "ResolutionWidth",
+      "type": "short"
+    },
+    {
+      "name": "ResponseEndTiming",
+      "type": "integer"
+    },
+    {
+      "name": "ResponseStartTiming",
+      "type": "integer"
+    },
+    {
+      "name": "Robotness",
+      "type": "short"
+    },
+    {
+      "name": "SearchEngineID",
+      "type": "short"
+    },
+    {
+      "name": "SearchPhrase",
+      "type": "string"
+    },
+    {
+      "name": "SendTiming",
+      "type": "integer"
+    },
+    {
+      "name": "Sex",
+      "type": "short"
+    },
+    {
+      "name": "SilverlightVersion1",
+      "type": "short"
+    },
+    {
+      "name": "SilverlightVersion2",
+      "type": "short"
+    },
+    {
+      "name": "SilverlightVersion3",
+      "type": "integer"
+    },
+    {
+      "name": "SilverlightVersion4",
+      "type": "short"
+    },
+    {
+      "name": "SocialAction",
+      "type": "string"
+    },
+    {
+      "name": "SocialNetwork",
+      "type": "string"
+    },
+    {
+      "name": "SocialSourceNetworkID",
+      "type": "short"
+    },
+    {
+      "name": "SocialSourcePage",
+      "type": "string"
+    },
+    {
+      "name": "Title",
+      "type": "string"
+    },
+    {
+      "name": "TraficSourceID",
+      "type": "short"
+    },
+    {
+      "name": "URL",
+      "type": "string"
+    },
+    {
+      "name": "URLCategoryID",
+      "type": "short"
+    },
+    {
+      "name": "URLHash",
+      "type": "long"
+    },
+    {
+      "name": "URLRegionID",
+      "type": "integer"
+    },
+    {
+      "name": "UTMCampaign",
+      "type": "string"
+    },
+    {
+      "name": "UTMContent",
+      "type": "string"
+    },
+    {
+      "name": "UTMMedium",
+      "type": "string"
+    },
+    {
+      "name": "UTMSource",
+      "type": "string"
+    },
+    {
+      "name": "UTMTerm",
+      "type": "string"
+    },
+    {
+      "name": "UserAgent",
+      "type": "short"
+    },
+    {
+      "name": "UserAgentMajor",
+      "type": "short"
+    },
+    {
+      "name": "UserAgentMinor",
+      "type": "string"
+    },
+    {
+      "name": "UserID",
+      "type": "long"
+    },
+    {
+      "name": "WatchID",
+      "type": "long"
+    },
+    {
+      "name": "WindowClientHeight",
+      "type": "short"
+    },
+    {
+      "name": "WindowClientWidth",
+      "type": "short"
+    },
+    {
+      "name": "WindowName",
+      "type": "integer"
+    },
+    {
+      "name": "WithHash",
+      "type": "short"
+    }
+  ],
+  "total": 1,
+  "datarows": [[
+    1,
+    25,
+    "US",
+    "en",
+    0,
+    "2013-07-15T10:30",
+    123456789,
+    0,
+    1,
+    0,
+    1,
+    0,
+    62,
+    0,
+    0,
+    "2013-07-15T00:00",
+    "2013-07-15T10:30",
+    1,
+    0,
+    0,
+    0,
+    null,
+    "",
+    1,
+    0,
+    0,
+    1,
+    5,
+    "0",
+    12345,
+    3,
+    100,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    0,
+    0,
+    0,
+    1,
+    1,
+    "2013-07-15T10:30",
+    1,
+    "iPhone",
+    0,
+    0,
+    1,
+    0,
+    "",
+    "",
+    "",
+    "",
+    "",
+    "UTF-8",
+    "USD",
+    1,
+    "",
+    0,
+    "",
+    "https://www.google.com/",
+    1,
+    3594120000172545465,
+    1,
+    1,
+    987654321,
+    24,
+    1080,
+    1920,
+    0,
+    0,
+    0,
+    2,
+    "opensearch sql",
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    "",
+    "",
+    0,
+    "",
+    "Google Search Results",
+    2,
+    "https://www.google.com/search?q=opensearch",
+    1,
+    2868770270353813622,
+    1,
+    "test",
+    "",
+    "cpc",
+    "google",
+    "opensearch",
+    1,
+    0,
+    "0",
+    435090932899640449,
+    1234567890123456789,
+    1080,
+    1920,
+    0,
+    0
+  ]],
+  "size": 1
+}

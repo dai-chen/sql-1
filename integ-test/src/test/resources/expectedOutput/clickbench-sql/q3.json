@@ -1,0 +1,23 @@
+{
+  "schema": [
+    {
+      "name": "EXPR$0",
+      "type": "short"
+    },
+    {
+      "name": "EXPR$1",
+      "type": "long"
+    },
+    {
+      "name": "EXPR$2",
+      "type": "short"
+    }
+  ],
+  "total": 1,
+  "datarows": [[
+    1,
+    2,
+    960
+  ]],
+  "size": 1
+}

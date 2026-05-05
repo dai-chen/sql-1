@@ -1,0 +1,30 @@
+{
+  "schema": [
+    {
+      "name": "UserID",
+      "type": "long"
+    },
+    {
+      "name": "SearchPhrase",
+      "type": "string"
+    },
+    {
+      "name": "EXPR$2",
+      "type": "long"
+    }
+  ],
+  "total": 2,
+  "datarows": [
+    [
+      -2461439046089301801,
+      "",
+      1
+    ],
+    [
+      435090932899640449,
+      "opensearch sql",
+      1
+    ]
+  ],
+  "size": 2
+}

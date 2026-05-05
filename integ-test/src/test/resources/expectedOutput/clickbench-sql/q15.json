@@ -1,0 +1,23 @@
+{
+  "schema": [
+    {
+      "name": "SearchEngineID",
+      "type": "short"
+    },
+    {
+      "name": "SearchPhrase",
+      "type": "string"
+    },
+    {
+      "name": "c",
+      "type": "long"
+    }
+  ],
+  "total": 1,
+  "datarows": [[
+    2,
+    "opensearch sql",
+    1
+  ]],
+  "size": 1
+}

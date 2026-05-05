@@ -240,13 +240,14 @@ public class UnifiedQueryContext implements AutoCloseable {
               buildFrameworkConfig(langSpec), SysLimit.fromSettings(settings), queryType);
       QueryProfiling.activate(profiling);
       return new UnifiedQueryContext(
-          planContext, settings, createParser(planContext, settings), langSpec);
+          planContext, settings, createParser(planContext, settings, langSpec), langSpec);
     }
 
-    private UnifiedQueryParser<?> createParser(CalcitePlanContext planContext, Settings settings) {
+    private UnifiedQueryParser<?> createParser(
+        CalcitePlanContext planContext, Settings settings, LanguageSpec langSpec) {
       return switch (queryType) {
         case PPL -> new PPLQueryParser(settings);
-        case SQL -> new CalciteSqlQueryParser(planContext);
+        case SQL -> new CalciteSqlQueryParser(planContext, langSpec.postParseRules());
       };
     }
 

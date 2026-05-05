@@ -1,0 +1,9 @@
+{
+  "schema": [{
+    "name": "UserID",
+    "type": "long"
+  }],
+  "total": 1,
+  "datarows": [[435090932899640449]],
+  "size": 1
+}

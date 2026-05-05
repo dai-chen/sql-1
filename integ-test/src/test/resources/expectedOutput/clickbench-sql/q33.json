@@ -1,0 +1,42 @@
+{
+  "schema": [
+    {
+      "name": "WatchID",
+      "type": "long"
+    },
+    {
+      "name": "ClientIP",
+      "type": "integer"
+    },
+    {
+      "name": "c",
+      "type": "long"
+    },
+    {
+      "name": "EXPR$3",
+      "type": "short"
+    },
+    {
+      "name": "EXPR$4",
+      "type": "short"
+    }
+  ],
+  "total": 2,
+  "datarows": [
+    [
+      1234567890123456789,
+      123456789,
+      1,
+      0,
+      1920
+    ],
+    [
+      9110818468285196899,
+      -1216690514,
+      1,
+      0,
+      0
+    ]
+  ],
+  "size": 2
+}

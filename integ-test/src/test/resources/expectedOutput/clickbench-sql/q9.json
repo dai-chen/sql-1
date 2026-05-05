@@ -1,0 +1,24 @@
+{
+  "schema": [
+    {
+      "name": "RegionID",
+      "type": "integer"
+    },
+    {
+      "name": "u",
+      "type": "long"
+    }
+  ],
+  "total": 2,
+  "datarows": [
+    [
+      839,
+      1
+    ],
+    [
+      1,
+      1
+    ]
+  ],
+  "size": 2
+}

@@ -1,0 +1,9 @@
+{
+  "schema": [{
+    "name": "SearchPhrase",
+    "type": "string"
+  }],
+  "total": 1,
+  "datarows": [["opensearch sql"]],
+  "size": 1
+}

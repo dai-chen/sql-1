@@ -13,6 +13,7 @@ import java.util.Map;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.impl.AbstractSchema;
 import org.junit.Test;
+import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.executor.QueryType;
 
 public class UnifiedQueryPlannerSqlTest extends UnifiedQueryTestBase {
@@ -210,7 +211,7 @@ public class UnifiedQueryPlannerSqlTest extends UnifiedQueryTestBase {
 
   @Test
   public void testInvalidSqlThrowsException() {
-    assertThrows(IllegalStateException.class, () -> planner.plan("SELECT FROM"));
+    assertThrows(SyntaxCheckException.class, () -> planner.plan("SELECT FROM"));
   }
 
   @Test
@@ -256,5 +257,40 @@ public class UnifiedQueryPlannerSqlTest extends UnifiedQueryTestBase {
             GROUP BY department\
             """)
         .assertErrorMessage("Encountered");
+  }
+
+  @Test
+  public void testGroupByOrdinalNoAnyValueWrapping() {
+    givenQuery(
+            """
+            SELECT 1, department, COUNT(*) AS c
+            FROM catalog.employees
+            GROUP BY 1, department
+            ORDER BY c DESC\
+            """)
+        .assertPlan(
+            """
+            LogicalSort(sort0=[$2], dir0=[DESC])
+              LogicalAggregate(group=[{0, 1}], c=[COUNT()])
+                LogicalProject(EXPR$0=[1], department=[$3])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testGroupByWithCaseExpression() {
+    givenQuery(
+            """
+            SELECT CASE WHEN age > 30 THEN 'senior' ELSE 'junior' END AS seniority,
+                   COUNT(*) AS cnt
+            FROM catalog.employees
+            GROUP BY seniority\
+            """)
+        .assertPlan(
+            """
+            LogicalAggregate(group=[{0}], cnt=[COUNT()])
+              LogicalProject(seniority=[CASE(>($2, 30), 'senior', 'junior')])
+                LogicalTableScan(table=[[catalog, employees]])
+            """);
   }
 }

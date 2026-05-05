@@ -1,0 +1,18 @@
+{
+  "schema": [
+    {
+      "name": "MobilePhoneModel",
+      "type": "string"
+    },
+    {
+      "name": "u",
+      "type": "long"
+    }
+  ],
+  "total": 1,
+  "datarows": [[
+    "iPhone",
+    1
+  ]],
+  "size": 1
+}

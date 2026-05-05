@@ -7,7 +7,6 @@ package org.opensearch.sql.api;
 
 import static org.opensearch.sql.monitor.profile.MetricName.ANALYZE;
 
-import lombok.RequiredArgsConstructor;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
@@ -16,9 +15,6 @@ import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.util.SqlVisitor;
-import org.apache.calcite.tools.Frameworks;
-import org.apache.calcite.tools.Planner;
 import org.opensearch.sql.api.parser.UnifiedQueryParser;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.CalciteRelNodeVisitor;
@@ -81,29 +77,31 @@ public class UnifiedQueryPlanner {
     RelNode plan(String query) throws Exception;
   }
 
-  /** ANSI SQL planning using Calcite's native SqlParser → SqlValidator → SqlToRelConverter. */
-  @RequiredArgsConstructor
+  /**
+   * SQL planning using a custom validate+convert pipeline. Consumes pre-parsed SqlNode from
+   * UnifiedQueryParser and validates with BABEL_STRICT_GROUP_BY conformance (no ANY_VALUE
+   * wrapping, no NPE on CASE in GROUP BY).
+   */
   private static class CalciteNativeStrategy implements PlanningStrategy {
     private final UnifiedQueryContext context;
+    private final UnifiedQueryParser<SqlNode> parser;
+
+    @SuppressWarnings("unchecked")
+    CalciteNativeStrategy(UnifiedQueryContext context) {
+      this.context = context;
+      this.parser = (UnifiedQueryParser<SqlNode>) context.getParser();
+    }
 
     @Override
     public RelNode plan(String query) throws Exception {
-      try (Planner planner = Frameworks.getPlanner(context.getPlanContext().config)) {
-        SqlNode parsed = planner.parse(query);
-        if (!parsed.isA(SqlKind.QUERY)) {
-          throw new UnsupportedOperationException(
-              "Only query statements are supported. Got: " + parsed.getKind());
-        }
-
-        // TODO: move post-parse rewriting into CalciteSqlQueryParser
-        SqlNode rewritten = parsed;
-        for (SqlVisitor<SqlNode> visitor : context.getLangSpec().postParseRules()) {
-          rewritten = rewritten.accept(visitor);
-        }
-
-        SqlNode validated = planner.validate(rewritten);
-        RelRoot relRoot = planner.rel(validated);
-        return relRoot.project();
+      SqlNode parsed = parser.parse(query);
+      if (!parsed.isA(SqlKind.QUERY)) {
+        throw new UnsupportedOperationException(
+            "Only query statements are supported. Got: " + parsed.getKind());
+      }
+      try (CalcitePlanner planner = new CalcitePlanner(context.getPlanContext().config)) {
+        SqlNode validated = planner.validate(parsed);
+        return planner.convert(validated);
       }
     }
   }

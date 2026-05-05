@@ -115,6 +115,13 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
     }
   }
 
+  /** Override to properly JSON-escape SQL strings containing backslashes (e.g., regex in q29). */
+  @Override
+  protected String makeRequest(String query, int fetchSize) {
+    String escaped = query.replace("\\", "\\\\").replace("\"", "\\\"");
+    return String.format("{ \"fetch_size\": \"%s\", \"query\": \"%s\" }", fetchSize, escaped);
+  }
+
   /**
    * Override to use the new TestUtils which handles parquet indices gracefully.
    * Parquet-backed indices reject {@code refresh=wait_for} (the legacy default), causing hangs.

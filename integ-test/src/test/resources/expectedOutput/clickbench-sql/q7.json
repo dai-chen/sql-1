@@ -1,0 +1,18 @@
+{
+  "schema": [
+    {
+      "name": "EXPR$0",
+      "type": "timestamp"
+    },
+    {
+      "name": "EXPR$1",
+      "type": "timestamp"
+    }
+  ],
+  "total": 1,
+  "datarows": [[
+    "2013-07-15T00:00",
+    "2013-07-15T00:00"
+  ]],
+  "size": 1
+}

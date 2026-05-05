@@ -1,0 +1,30 @@
+{
+  "schema": [
+    {
+      "name": "EXPR$0",
+      "type": "integer"
+    },
+    {
+      "name": "URL",
+      "type": "string"
+    },
+    {
+      "name": "c",
+      "type": "long"
+    }
+  ],
+  "total": 2,
+  "datarows": [
+    [
+      1,
+      "",
+      1
+    ],
+    [
+      1,
+      "https://www.google.com/search?q=opensearch",
+      1
+    ]
+  ],
+  "size": 2
+}

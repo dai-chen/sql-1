@@ -1,0 +1,9 @@
+{
+  "schema": [{
+    "name": "EXPR$0",
+    "type": "long"
+  }],
+  "total": 1,
+  "datarows": [[1]],
+  "size": 1
+}
