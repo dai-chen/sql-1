@@ -1,8 +1,12 @@
 {
   "settings": {
     "index": {
+      "number_of_shards": 1,
       "sort.field": [ "CounterID", "EventDate", "UserID", "EventTime", "WatchID" ],
-      "sort.order": [ "desc", "desc", "desc", "desc", "desc" ]
+      "sort.order": [ "desc", "desc", "desc", "desc", "desc" ],
+      "pluggable.dataformat.enabled": true,
+      "pluggable.dataformat": "composite",
+      "composite.primary_data_format": "parquet"
     }
   },
    "mappings" : {

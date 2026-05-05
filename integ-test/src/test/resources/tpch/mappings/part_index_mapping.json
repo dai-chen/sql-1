@@ -1,4 +1,12 @@
 {
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "pluggable.dataformat.enabled": true,
+      "pluggable.dataformat": "composite",
+      "composite.primary_data_format": "parquet"
+    }
+  },
   "mappings": {
     "properties": {
       "p_partkey": {
