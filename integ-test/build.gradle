@@ -161,6 +161,449 @@ ext {
     bwcOpenSearchJSDownload = 'https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/' + baseVersion + '/latest/linux/x64/tar/builds/' +
             'opensearch/plugins/opensearch-job-scheduler-' + bwcVersion + '.zip'
     bwcJobSchedulerPath = bwcFilePath + "job-scheduler/"
+
+    // -------------------------------------------------------------------------
+    // Shared configuration for analytics-engine compatibility reports.
+    //
+    // Both PPL and SQL flavors run an externally-managed cluster the same way
+    // (force the analytics-engine path, ignore failures, emit JUnit + HTML),
+    // so the test-task wiring and the report-rendering logic live here.
+    // Callers supply the task object, a list of class-name include patterns,
+    // and a unique results subdir name.
+    // -------------------------------------------------------------------------
+    configureAnalyticsCompatibilityTest = { RestIntegTestTask task,
+                                            List<String> includePatterns,
+                                            String resultsSubdir ->
+        task.testLogging {
+            events "skipped", "failed"
+            exceptionFormat "short"
+        }
+        task.testClassesDirs = sourceSets.test.output.classesDirs
+        task.classpath = sourceSets.test.runtimeClasspath
+        task.systemProperty 'tests.security.manager', 'false'
+        task.systemProperty 'project.root', project.projectDir.absolutePath
+        // opensearch_tmp_dir is a script-local def declared lower in this file, so the closure
+        // can't reach it. Recompute it from rootProject — same path the rest of integ-test uses.
+        task.systemProperty 'java.io.tmpdir', rootProject.file('build/private/es_tmp').absoluteFile.absolutePath
+        task.systemProperty 'defaultQuerySizeLimit', '10000'
+
+        // Force every PPL/SQL query through the analytics-engine path. Picked up by
+        // PPLIntegTestCase.init() / SQLIntegTestCase.init() via the
+        // ANALYTICS_FORCE_ROUTING_PROP constant.
+        task.systemProperty 'tests.analytics.force_routing', 'true'
+
+        task.systemProperty "https", System.getProperty("https")
+        task.systemProperty "user", System.getProperty("user")
+        task.systemProperty "password", System.getProperty("password")
+
+        // Don't fail the build on test failures — failures are the report payload.
+        task.ignoreFailures = true
+
+        task.reports {
+            junitXml.required.set(true)
+            junitXml.outputLocation.set(file("$buildDir/test-results/${resultsSubdir}"))
+            html.required.set(true)
+            html.outputLocation.set(file("$buildDir/reports/tests/${resultsSubdir}"))
+        }
+
+        task.filter {
+            includePatterns.each { p -> includeTestsMatching p }
+        }
+
+        // BWC, correctness, doctest and legacy oddballs aren't in scope for the analytics report.
+        task.exclude 'org/opensearch/sql/bwc/**'
+        task.exclude 'org/opensearch/sql/doctest/**/*IT.class'
+        task.exclude 'org/opensearch/sql/correctness/**'
+        task.exclude 'org/opensearch/sql/jdbc/**'
+        task.exclude 'org/opensearch/sql/security/**'
+
+        // The test task hits whatever cluster `-Dtests.rest.cluster=...` points at; no testClusters
+        // dependency. Only run if the user supplied a cluster.
+        task.onlyIf {
+            if (System.getProperty("tests.rest.cluster") == null) {
+                task.logger.lifecycle(
+                        "[${task.name}] Skipping: pass -Dtests.rest.cluster=<host:port> " +
+                                "(and optionally -Dtests.cluster=, -Dtests.clustername=) pointing at " +
+                                "an externally-running cluster with the analytics-engine plugin set installed.")
+                return false
+            }
+            return true
+        }
+    }
+
+    // Render the markdown coverage report. Identical logic for PPL and SQL —
+    // only the report heading and the results subdir differ.
+    //
+    // ctx keys (all required):
+    //   label         — short label used in the H1 (e.g. "PPL", "SQL")
+    //   xmlDir        — JUnit XML directory written by the upstream test task
+    //   reportFile    — target REPORT.md
+    //   clusterLog    — path to cluster log for stack-frame origin classification (may be null)
+    //   resultsSubdir — subdirectory name under build/test-results and build/reports/tests
+    //   logTag        — tag used in lifecycle log lines (e.g. "analyticsCompatibilityReport")
+    renderAnalyticsReport = { Map ctx ->
+        File xmlDir = ctx.xmlDir
+        File reportFile = ctx.reportFile
+        Object clusterLog = ctx.clusterLog
+        String label = ctx.label
+        String resultsSubdir = ctx.resultsSubdir
+        String logTag = ctx.logTag
+        File reportDir = reportFile.parentFile
+
+        if (!xmlDir.exists()) {
+            logger.lifecycle("[${logTag}] No test results at ${xmlDir}; nothing to report.")
+            return
+        }
+        reportDir.mkdirs()
+
+        // Collapse variable text so similar errors land in one bucket. E.g.
+        //   "No backend can scan all requested fields on index [opensearch-sql_test_index_bank]"
+        //   "No backend can scan all requested fields on index [opensearch-sql_test_index_account]"
+        // both normalize to:
+        //   "No backend can scan all requested fields on index [<INDEX>]"
+        Closure normalize = { String s ->
+            if (s == null) return ''
+            String n = s
+            n = n.replaceAll(/(?i)on index \[[^\]]+\]/, 'on index [<INDEX>]')
+            n = n.replaceAll(/(?i)index \[[^\]]+\]/, 'index [<INDEX>]')
+            n = n.replaceAll(/Field \[[^\]]+\]/, 'Field [<FIELD>]')
+            n = n.replaceAll(/Field '[^']+'/, "Field '<FIELD>'")
+            n = n.replaceAll(/Table '[^']+'/, "Table '<TABLE>'")
+            n = n.replaceAll(/Line \d+, Column \d+/, 'Line <L>, Column <C>')
+            return n
+        }
+
+        // Map a top stack frame's package prefix to a short origin label.
+        // Order matters: most-specific prefix first.
+        Closure originFromFrame = { String fqClassMethod ->
+            if (fqClassMethod == null || fqClassMethod.isEmpty()) return '?'
+            String f = fqClassMethod
+            if (f.startsWith('org.opensearch.sql.calcite.')) return 'SQL/calcite'
+            if (f.startsWith('org.opensearch.sql.')) return 'SQL/other'
+            if (f.startsWith('org.opensearch.analytics.')) return 'AE'
+            if (f.startsWith('org.opensearch.parquet.') ||
+                f.startsWith('org.opensearch.composite.') ||
+                f.startsWith('org.opensearch.dsl.')) return 'AE/plugin'
+            if (f.startsWith('org.apache.calcite.')) return 'Calcite'
+            if (f.startsWith('org.opensearch.')) return 'OpenSearch'
+            if (f.startsWith('java.') || f.startsWith('jdk.') || f.startsWith('sun.')) return 'JDK'
+            return '?'
+        }
+
+        // Cluster-log scan: walk every exception block to recover (cause class, normalized
+        // message, top server-side stack frame). REST-side failure messages don't carry the
+        // throw frame because the SQL response formatter only emits {type, reason, details};
+        // we recover the frame from the cluster log here.
+        //
+        // Match BOTH styles a server-side exception can appear in the log:
+        //   (a) "Caused by: <fq.exc>: <msg>"     — when wrapped (e.g. by UnifiedQueryPlanner)
+        //   (b) "<fq.exc>: <msg>"                 — top-level dumps from log4j (no wrapper)
+        // For each, the next "    at <fq.class>.<method>(..." line is the throw frame we want.
+        //
+        // Map: "<simpleExc> | <normalized message>" -> top stack frame "fq.Class.method".
+        // First match wins per signature (any ambiguity surfaces in the report's '?' rows).
+        Map<String, String> sigToTopFrame = new java.util.LinkedHashMap<>()
+        if (clusterLog) {
+            File clusterLogFile = new File(clusterLog.toString())
+            if (clusterLogFile.exists()) {
+                String pendingSig = null
+                int pendingLines = 0
+                clusterLogFile.eachLine { String line ->
+                    def causedBy = line =~ /^Caused by: ([\w\.\$]+(?:Exception|Error|Failure)): ?(.*)$/
+                    def topLevel = line =~ /^((?:java|javax|jdk|sun|org|com|io|net)\.[\w\.\$]+(?:Exception|Error|Failure)): ?(.*)$/
+                    String fqExc = null
+                    String rawMsg = null
+                    if (causedBy.find()) {
+                        fqExc = causedBy.group(1)
+                        rawMsg = causedBy.group(2)
+                    } else if (topLevel.find()) {
+                        fqExc = topLevel.group(1)
+                        rawMsg = topLevel.group(2)
+                    }
+                    if (fqExc != null) {
+                        String simpleExc = fqExc.substring(fqExc.lastIndexOf('.') + 1)
+                        String normMsg = normalize(rawMsg)
+                        pendingSig = "${simpleExc} | ${normMsg}".toString()
+                        pendingLines = 0
+                        return
+                    }
+                    if (pendingSig == null) return
+                    def atFrame = line =~ /^\s+at ([\w\.\$]+)\.([\w<>\$]+)\(/
+                    if (atFrame.find()) {
+                        String topFrame = "${atFrame.group(1)}.${atFrame.group(2)}".toString()
+                        sigToTopFrame.putIfAbsent(pendingSig, topFrame)
+                        pendingSig = null
+                        return
+                    }
+                    if (++pendingLines > 200) {
+                        // Exception block ran on without a recognizable frame. 200 is generous —
+                        // Calcite ParseException continuations have a 30-40 line "Was expecting
+                        // one of:" list before the first `at` frame, so a 30-line cap drops them.
+                        pendingSig = null
+                    }
+                }
+                logger.lifecycle("[${logTag}] Cluster log: ${sigToTopFrame.size()} unique cause signatures with stack frames recovered from ${clusterLogFile.absolutePath}.")
+            } else {
+                logger.lifecycle("[${logTag}] Cluster log not found at ${clusterLog} — Origin column will mostly say '?'. Override with -PclusterLog=...")
+            }
+        } else {
+            logger.lifecycle("[${logTag}] No cluster log path resolved — Origin column will mostly say '?'. Pass -PclusterLog=...")
+        }
+
+        def parser = new groovy.xml.XmlParser(false, false)
+        int totalTests = 0
+        int totalFailures = 0
+        int totalErrors = 0
+        int totalSkipped = 0
+        long totalTimeMs = 0
+        def buckets = new java.util.LinkedHashMap<String, java.util.List<String>>()
+        def bucketOrigin = new java.util.LinkedHashMap<String, String>()
+        def perClass = new java.util.TreeMap<String, int[]>()
+
+        xmlDir.eachFileMatch(~/TEST-.*\.xml/) { xmlFile ->
+            def root
+            try {
+                root = parser.parse(xmlFile)
+            } catch (Exception e) {
+                logger.warn("[${logTag}] Failed to parse ${xmlFile.name}: ${e.message}")
+                return
+            }
+            def className = root.@name?.toString() ?: xmlFile.name
+            int classTests = (root.@tests ?: '0').toString().toInteger()
+            int classFailures = (root.@failures ?: '0').toString().toInteger()
+            int classErrors = (root.@errors ?: '0').toString().toInteger()
+            int classSkipped = (root.@skipped ?: '0').toString().toInteger()
+            double classTime = ((root.@time ?: '0') as String).replace(',', '.').toDouble()
+
+            totalTests += classTests
+            totalFailures += classFailures
+            totalErrors += classErrors
+            totalSkipped += classSkipped
+            totalTimeMs += (long) (classTime * 1000)
+            perClass[className] = [classTests, classFailures + classErrors, classSkipped] as int[]
+
+            root.testcase.each { tc ->
+                def testName = tc.@name?.toString() ?: '<unknown>'
+                def fqid = "${className}#${testName}"
+                def failureNode = tc.failure ? tc.failure[0] : (tc.error ? tc.error[0] : null)
+                if (failureNode == null) return
+
+                def excType = failureNode.@type?.toString() ?: '<unknown>'
+                def msg = failureNode.@message?.toString() ?: ''
+                def body = failureNode.text() ?: ''
+
+                // ResponseException collapses every 500/4xx into one bucket because its message
+                // starts with the same wrapper text. Reach into the response body to extract:
+                //   type    — the inner exception's simple class name
+                //   reason  — typically the formatter's wrapper "There was internal problem at backend"
+                //   details — the actual exception message text we want to bucket on
+                // Same shape applies to AssertionError that wraps a ResponseException stack trace.
+                def excLabel = excType
+                def innerExcSimple = null
+                def primary = msg
+                // The JSON-string regex must accept escaped characters (\\\", \\\\, etc.) inside
+                // the value, otherwise messages like `"Encountered \"-\" at line 1"` truncate to
+                // `Encountered \` at the first escaped quote. `(?:[^"\\]|\\.)*` matches a JSON
+                // string body: any non-quote / non-backslash character, OR a backslash followed by
+                // anything (i.e. the next char of an escape sequence).
+                def innerType = (msg =~ /"type"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+                def innerReason = (msg =~ /"reason"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+                def innerDetails = (msg =~ /"details"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+                // Unescape JSON string escapes so the bucket signature matches the cluster-log
+                // signature (which has raw unescaped text).
+                Closure unescapeJson = { String s ->
+                    if (s == null) return null
+                    s.replace('\\"', '"').replace('\\\\', '\\').replace('\\n', ' ').replace('\\t', ' ')
+                }
+                if (excType.endsWith('ResponseException') || excType.endsWith('AssertionError')) {
+                    if (innerType.find()) {
+                        innerExcSimple = unescapeJson(innerType.group(1))
+                        excLabel = "${excType} → ${innerExcSimple}"
+                    }
+                    String innerMsg = ''
+                    innerReason.reset()
+                    innerDetails.reset()
+                    if (innerReason.find()) innerMsg = unescapeJson(innerReason.group(1))
+                    // Prefer details when present — that's the actual cause text.
+                    if (innerDetails.find()) innerMsg = unescapeJson(innerDetails.group(1))
+                    if (!innerMsg.isEmpty()) primary = innerMsg
+                }
+
+                if (primary == null || primary.trim().isEmpty()) {
+                    primary = body.split(/\r?\n/).find { it != null && !it.trim().isEmpty() } ?: ''
+                }
+                primary = primary.replace('\n', ' ').replace('\r', ' ').trim()
+
+                String normalized = normalize(primary)
+                if (normalized.length() > 200) normalized = normalized.substring(0, 200) + '…'
+
+                def key = "${excLabel} | ${normalized}".toString()
+                buckets.computeIfAbsent(key, { new java.util.ArrayList<String>() }).add(fqid)
+
+                if (!bucketOrigin.containsKey(key)) {
+                    String simpleExc = innerExcSimple ?: excType
+                    String stripped = normalized
+                            .replaceFirst(/^There was internal problem at backend(: )?/, '')
+                    String sig = "${simpleExc} | ${stripped}".toString()
+                    String topFrame = sigToTopFrame.get(sig)
+                    // Cluster log captures only the first line of an exception's message; the JSON
+                    // `details` field carries the full multi-line message (continuation lines like
+                    // "Was expecting one of:" follow the first sentence). When the full-message
+                    // signature misses, retry with a first-sentence prefix that matches what the
+                    // log scanner saw.
+                    if (topFrame == null) {
+                        int firstPeriod = stripped.indexOf('. ')
+                        if (firstPeriod > 0) {
+                            String shortMsg = stripped.substring(0, firstPeriod + 1)
+                            topFrame = sigToTopFrame.get("${simpleExc} | ${shortMsg}".toString())
+                        }
+                    }
+                    if (topFrame == null) {
+                        if (simpleExc in [
+                                'SemanticCheckException',
+                                'ExpressionEvaluationException',
+                                'SqlParseException']) {
+                            bucketOrigin[key] = 'SQL/preflight'
+                        } else {
+                            bucketOrigin[key] = '?'
+                        }
+                    } else {
+                        bucketOrigin[key] = originFromFrame(topFrame)
+                    }
+                }
+            }
+        }
+
+        int totalFailed = totalFailures + totalErrors
+        int totalPassed = totalTests - totalFailed - totalSkipped
+        double passPct = totalTests == 0 ? 0.0 : (100.0 * totalPassed / totalTests)
+
+        def sb = new StringBuilder()
+        sb << "# Analytics-engine ${label} IT Compatibility Report\n\n"
+        sb << "Generated: ${new Date()}\n\n"
+        sb << "Cluster under test: `${System.getProperty('tests.rest.cluster') ?: '<unspecified>'}`\n\n"
+        sb << "Routing: every ${label} query forced through the analytics-engine path " +
+                "(`tests.analytics.force_routing=true`, which sets the cluster setting " +
+                "`plugins.calcite.analytics.force_routing=true`).\n\n"
+        sb << "## Summary\n\n"
+        sb << "| Metric | Count |\n"
+        sb << "|---|---|\n"
+        sb << "| Tests executed | ${totalTests} |\n"
+        sb << "| Passed | ${totalPassed} |\n"
+        sb << "| Failed | ${totalFailures} |\n"
+        sb << "| Errored | ${totalErrors} |\n"
+        sb << "| Skipped | ${totalSkipped} |\n"
+        sb << "| Pass rate | **${String.format('%.1f', passPct)}%** |\n"
+        sb << "| Total time | ${String.format('%.1f', totalTimeMs / 1000.0)}s |\n\n"
+
+        int TOP_BUCKETS = 25
+        Closure cell = { String s ->
+            (s ?: '').replace('|', '/').replace('\n', ' ').replace('\r', ' ').trim()
+        }
+        Closure clip = { String s, int n -> s.length() > n ? s.substring(0, n - 1) + '…' : s }
+
+        def sortedBuckets = buckets.isEmpty() ? [] : buckets.entrySet().toList().sort { -it.value.size() }
+        int totalFailedAll = (int) sortedBuckets.sum(0) { it.value.size() }
+        int remainingBuckets = Math.max(0, sortedBuckets.size() - TOP_BUCKETS)
+        int remainingFails = remainingBuckets == 0 ? 0 :
+                (int) sortedBuckets.drop(TOP_BUCKETS).sum(0) { it.value.size() }
+
+        sb << "## Top ${Math.min(TOP_BUCKETS, sortedBuckets.size())} failure buckets\n\n"
+        sb << "Cells are clipped to keep table renderers from line-wrapping. The full uncut messages live in `integ-test/build/test-results/${resultsSubdir}/`.\n\n"
+        sb << "Origin column legend: `SQL/calcite` = our SQL plugin's Calcite visitors (`org.opensearch.sql.calcite.*`); `SQL/preflight` = our SQL plugin's parser/analyzer (raised before reaching the analytics-engine path); `SQL/other` = other SQL-plugin code; `AE` = analytics-engine plugin (`org.opensearch.analytics.*`); `AE/plugin` = analytics-engine sister plugins (parquet/composite/dsl); `Calcite` = the Apache Calcite library; `OpenSearch` = OpenSearch core; `Test` = test code (assertion failure, not a server error); `?` = no matching cluster-log frame found.\n\n"
+        if (sortedBuckets.isEmpty()) {
+            sb << "_No failures._\n\n"
+        } else {
+            sb << "| # | Count | Origin | Error |\n"
+            sb << "|---:|---:|:--|---|\n"
+            int idx = 0
+            sortedBuckets.take(TOP_BUCKETS).each { entry ->
+                idx++
+                def parts = entry.key.split(/ \| /, 2)
+                def excType = parts.length > 0 ? parts[0] : '<unknown>'
+                def msgPart = parts.length > 1 ? parts[1] : ''
+                def shortExc = excType.replaceFirst(/^.*?(ResponseException|AssertionError) → /, '')
+                shortExc = shortExc.replaceFirst(/^java\.lang\./, '').replaceFirst(/^org\.opensearch\.[^ ]*\./, '')
+                def combined = "${shortExc} — ${msgPart}"
+                String origin = bucketOrigin.get(entry.key) ?: '?'
+                if (origin == '?' && (excType.endsWith('ComparisonFailure') || excType == 'java.lang.AssertionError' || excType == 'AssertionError')) {
+                    origin = 'Test'
+                }
+                sb << "| ${idx} | ${entry.value.size()} | ${origin} | ${cell(clip(combined, 80))} |\n"
+            }
+            if (remainingBuckets > 0) {
+                sb << "\n_${remainingBuckets} more buckets cover the remaining ${remainingFails} failures (long tail, each ≤${sortedBuckets.get(TOP_BUCKETS).value.size()} tests)._\n\n"
+            }
+        }
+
+        // Aggregate failure counts per origin so triagers can see at a glance which side
+        // dominates. Mirrors the per-bucket Origin classification, applied to ALL buckets.
+        if (!sortedBuckets.isEmpty()) {
+            Map<String, Integer> originCounts = new java.util.LinkedHashMap<>()
+            sortedBuckets.each { entry ->
+                String origin = bucketOrigin.get(entry.key) ?: '?'
+                if (origin == '?') {
+                    String parts0 = (entry.key.split(/ \| /, 2))[0]
+                    if (parts0.endsWith('ComparisonFailure') || parts0.endsWith('AssertionError')) {
+                        origin = 'Test'
+                    }
+                }
+                originCounts.merge(origin, entry.value.size(), Integer.&sum)
+            }
+            int originTotal = (int) originCounts.values().sum(0)
+            sb << "## Failures by origin\n\n"
+            sb << "| Origin | Failures | Share |\n"
+            sb << "|---|---:|---:|\n"
+            originCounts.entrySet().toList().sort { -it.value }.each { e ->
+                int pct = originTotal == 0 ? 0 : (int) Math.round(100.0 * e.value / originTotal)
+                sb << "| ${e.key} | ${e.value} | ${pct}% |\n"
+            }
+            sb << "\n"
+        }
+
+        def perClassActive = []
+        int perClassZeroCount = 0
+        perClass.each { className, counts ->
+            int t = counts[0], f = counts[1], s = counts[2]
+            if (s > 0 || (t - f - s) > 0) perClassActive.add([className, counts])
+            else perClassZeroCount++
+        }
+        perClassActive.sort { a, b ->
+            int[] ca = a[1], cb = b[1]
+            int pa = ca[0] - ca[1] - ca[2], pb = cb[0] - cb[1] - cb[2]
+            double pctA = ca[0] == 0 ? 0.0 : (100.0 * pa / ca[0])
+            double pctB = cb[0] == 0 ? 0.0 : (100.0 * pb / cb[0])
+            pctB <=> pctA ?: cb[0] <=> ca[0]
+        }
+        sb << "## Per-class pass-rate highlights\n\n"
+        sb << "Of ${perClass.size()} ${label} IT classes:\n\n"
+        def fullyPassing = perClassActive.findAll { row ->
+            int[] c = row[1]; int t = c[0], f = c[1], s = c[2]
+            t > 0 && f == 0 && s == 0
+        }
+        sb << "- **${fullyPassing.size()} pass 100%** — ${fullyPassing.collect { it[0].toString().replaceFirst(/^.*\./, '') }.join(', ')}\n"
+        def partial = perClassActive.findAll { row ->
+            int[] c = row[1]; int t = c[0], f = c[1], s = c[2]
+            int p = t - f - s
+            t > 0 && p > 0 && p < t
+        }
+        if (!partial.isEmpty()) {
+            sb << "- **${partial.size()} partially pass** (≥1 passing test). Top by pass-rate: " +
+                    partial.take(8).collect { row ->
+                        int[] c = row[1]
+                        int t = c[0], f = c[1], s = c[2], p = t - f - s
+                        int pct = t == 0 ? 0 : (int) Math.round(100.0 * p / t)
+                        "${row[0].toString().replaceFirst(/^.*\./, '')} ${pct}%"
+                    }.join(', ') + "\n"
+        }
+        sb << "- **${perClassZeroCount} fail every test.** Full per-class breakdown is in the JUnit HTML report at `integ-test/build/reports/tests/${resultsSubdir}/index.html`.\n"
+        sb << "\n"
+
+        reportFile.text = sb.toString()
+        logger.lifecycle("[${logTag}] Wrote ${reportFile}")
+        logger.lifecycle("[${logTag}] ${totalPassed}/${totalTests} passed " +
+                "(${String.format('%.1f', passPct)}%), ${totalFailed} failed, ${totalSkipped} skipped")
+    }
 }
 
 tasks.withType(licenseHeaders.class) {
@@ -204,6 +647,8 @@ dependencies {
     testImplementation group: 'org.opensearch.client', name: 'opensearch-rest-high-level-client', version: "${opensearch_version}"
     testImplementation group: 'org.opensearch.client', name: 'opensearch-rest-client', version: "${opensearch_version}"
     testImplementation group: 'org.opensearch.driver', name: 'opensearch-sql-jdbc', version: System.getProperty("jdbcDriverVersion", '1.2.0.0')
+    // Quidem — golden-file test runner for SQL queries via JDBC. Powers analyticsAnsiQuidem task.
+    testImplementation group: 'net.hydromatic', name: 'quidem', version: '0.12'
     testImplementation group: 'org.hamcrest', name: 'hamcrest', version: "${hamcrest_version}"
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version:"${versions.log4j}"
     testImplementation project(':opensearch-sql-plugin')
@@ -867,4 +1312,288 @@ task integTestRemote(type: RestIntegTestTask) {
     exclude 'org/opensearch/sql/legacy/QueryAnalysisIT.class'
     exclude 'org/opensearch/sql/legacy/OrderIT.class'
     exclude 'org/opensearch/sql/jdbc/**'
+}
+
+// =============================================================================
+// Analytics-engine compatibility reports (PPL + SQL)
+//
+// Runs every PPL/SQL IT through the analytics-engine path against an
+// externally-managed cluster (started with the analytics-engine plugin set
+// installed), then post-processes the JUnit XMLs into a markdown coverage
+// report bucketed by exception type, normalized error message, and Origin
+// (SQL plugin / analytics engine / Calcite library / OpenSearch / Test)
+// recovered from the cluster log's first server-side stack frame.
+//
+// End-to-end usage:
+//
+//   1. Start an OpenSearch node with the analytics-engine plugin set
+//      installed and the SQL plugin built locally.
+//
+//   2. Run one or both:
+//        ./gradlew :integ-test:analyticsCompatibilityReport \
+//            -Dtests.rest.cluster=localhost:9200 \
+//            -Dtests.cluster=localhost:9300 \
+//            -Dtests.clustername=runTask
+//
+//        ./gradlew :integ-test:analyticsSqlCompatibilityReport \
+//            -Dtests.rest.cluster=localhost:9200 \
+//            -Dtests.cluster=localhost:9300 \
+//            -Dtests.clustername=runTask
+//
+//   3. Read the report at:
+//        integ-test/build/reports/analytics-compatibility/REPORT.md       (PPL)
+//        integ-test/build/reports/analytics-sql-compatibility/REPORT.md   (SQL)
+//
+// Both test tasks always succeed (`ignoreFailures = true`) so the report is
+// produced even when the analytics path can't yet handle a command — failures
+// are the signal we're after, not a build break.
+//
+// How the test-side hook works (PPLIntegTestCase.java / SQLIntegTestCase.java):
+//   - The test tasks set `-Dtests.analytics.force_routing=true`.
+//   - {PPL,SQL}IntegTestCase.init() reads that property and calls
+//     enableAnalyticsForceRouting() during setup, which flips the cluster
+//     setting plugins.calcite.analytics.force_routing=true.
+//   - RestUnifiedQueryAction.isAnalyticsIndex() honors that setting and
+//     returns true unconditionally — so every query routes through the
+//     analytics-engine planner regardless of index name.
+//
+// Configuration & rendering logic is shared via two ext closures defined at the
+// top of this file: configureAnalyticsCompatibilityTest, renderAnalyticsReport.
+// =============================================================================
+task analyticsCompatibilityTest(type: RestIntegTestTask) {
+    description = "Runs all PPL ITs through the analytics-engine path. Always succeeds; results " +
+            "are post-processed by analyticsCompatibilityReport."
+    group = "verification"
+    // PPL ITs: both the calcite remote suite and the legacy ppl/ package.
+    configureAnalyticsCompatibilityTest(it,
+            ["org.opensearch.sql.calcite.remote.*IT", "org.opensearch.sql.ppl.*IT"],
+            "analyticsCompatibility")
+}
+
+task analyticsSqlCompatibilityTest(type: RestIntegTestTask) {
+    description = "Runs all SQL ITs through the analytics-engine path. Always succeeds; results " +
+            "are post-processed by analyticsSqlCompatibilityReport."
+    group = "verification"
+    // SQL ITs live under org.opensearch.sql.sql.* and the legacy SQL suite under
+    // org.opensearch.sql.legacy.* — both go through SQLIntegTestCase, which honors
+    // the same tests.analytics.force_routing toggle as PPLIntegTestCase.
+    configureAnalyticsCompatibilityTest(it,
+            ["org.opensearch.sql.sql.*IT", "org.opensearch.sql.legacy.*IT"],
+            "analyticsSqlCompatibility")
+}
+
+// =============================================================================
+// ANSI SQL Quidem IT
+//
+// Unlike analyticsSqlCompatibilityTest which replays the legacy v2 SQL IT suite through the
+// unified path (measuring parity between the new path and the old), this task runs a CURATED
+// set of Quidem .iq files that target ANSI SQL features directly. The goal is to track
+// new-path readiness for standard SQL independent of v2 baggage.
+//
+// Usage:
+//     ./gradlew :integ-test:analyticsAnsiQuidemReport \
+//         -Dtests.rest.cluster=localhost:9200 \
+//         -Dtests.cluster=localhost:9300 \
+//         -Dtests.clustername=runTask
+//
+// .iq files live under integ-test/src/test/resources/ansi/ and are picked up dynamically by
+// AnsiSqlQuidemIT. Output goes to integ-test/build/reports/ansi-sql-quidem/REPORT.md and the
+// standard JUnit XML / HTML reports under build/test-results/analyticsAnsiQuidem.
+// =============================================================================
+task analyticsAnsiQuidemTest(type: RestIntegTestTask) {
+    description = "Runs curated ANSI SQL Quidem .iq files through the analytics-engine path. " +
+            "Measures new-path readiness for standard SQL features."
+    group = "verification"
+    configureAnalyticsCompatibilityTest(it,
+            ["org.opensearch.sql.ansi.*IT"],
+            "analyticsAnsiQuidem")
+}
+
+task analyticsAnsiQuidemReport {
+    description = "Runs analyticsAnsiQuidemTest. The per-file pass/fail summary is written by " +
+            "AnsiSqlQuidemIT itself to build/reports/ansi-sql-quidem/REPORT.md."
+    group = "verification"
+    dependsOn analyticsAnsiQuidemTest
+
+    doLast {
+        def report = file("$buildDir/reports/ansi-sql-quidem/REPORT.md")
+        if (report.exists()) {
+            logger.lifecycle("[analyticsAnsiQuidemReport] Wrote ${report.absolutePath}")
+            // Echo the summary line so CI logs show the headline numbers.
+            def summary = report.text.readLines().find { it.startsWith("Executed ") }
+            if (summary) logger.lifecycle("[analyticsAnsiQuidemReport] ${summary}")
+        } else {
+            logger.lifecycle("[analyticsAnsiQuidemReport] No report produced at ${report.absolutePath}")
+        }
+    }
+}
+
+// =============================================================================
+// ClickBench SQL Correctness (snapshot-based)
+//
+// Usage:
+//     # Capture snapshots (one-time):
+//     ./gradlew :integ-test:analyticsSqlClickBenchCorrectnessReport \
+//         -Dtests.rest.cluster=localhost:9200 \
+//         -Dtests.cluster=localhost:9300 \
+//         -Dtests.clustername=runTask \
+//         -Dtests.snapshot.write=true \
+//         -Dproject.root=<path-to-integ-test>
+//
+//     # Validate against snapshots:
+//     ./gradlew :integ-test:analyticsSqlClickBenchCorrectnessReport \
+//         -Dtests.rest.cluster=localhost:9200 \
+//         -Dtests.cluster=localhost:9300 \
+//         -Dtests.clustername=runTask \
+//         -Dproject.root=<path-to-integ-test>
+//
+// Snapshots live at integ-test/src/test/resources/expectedOutput/clickbench-sql/q{N}.json.
+// Output goes to integ-test/build/reports/clickbench-sql-correctness/REPORT.md.
+// =============================================================================
+task analyticsSqlClickBenchCorrectnessTest(type: RestIntegTestTask) {
+    description = "Runs SQLClickBenchCorrectnessIT: replays every ClickBench SQL query through the " +
+            "unified path and asserts each response against a committed snapshot at " +
+            "src/test/resources/expectedOutput/clickbench-sql/q{N}.json."
+    configureAnalyticsCompatibilityTest(it,
+            ["org.opensearch.sql.sql.clickbench.SQLClickBenchCorrectnessIT"],
+            "analyticsSqlClickBenchCorrectness")
+    // Pass through snapshot-write flag so the IT can capture expected outputs.
+    systemProperty 'tests.snapshot.write', System.getProperty('tests.snapshot.write', 'false')
+}
+
+task analyticsSqlClickBenchCorrectnessReport {
+    description = "Runs analyticsSqlClickBenchCorrectnessTest. Per-query report is written by " +
+            "SQLClickBenchCorrectnessIT itself to build/reports/clickbench-sql-correctness/REPORT.md."
+    group = 'verification'
+    dependsOn analyticsSqlClickBenchCorrectnessTest
+    doLast {
+        def report = file("$buildDir/reports/clickbench-sql-correctness/REPORT.md")
+        if (report.exists()) {
+            logger.lifecycle("[analyticsSqlClickBenchCorrectnessReport] Wrote ${report}")
+            def summary = report.readLines().find { it.contains('Pass rate') || it.contains('Summary') }
+            if (summary != null) {
+                logger.lifecycle("[analyticsSqlClickBenchCorrectnessReport] ${summary.trim()}")
+            }
+        } else {
+            logger.warn("[analyticsSqlClickBenchCorrectnessReport] Report file not found: ${report}")
+        }
+    }
+}
+
+// =============================================================================
+// SQL TPC-H Correctness IT — Goal 2 of docs/mustang-followup-ansi-sql-it.md.
+//
+// Runs the 22 TPC-H SQL queries through the unified path (force_routing=true by default) and
+// asserts each response against a committed JSON snapshot. Parquet-backed indices are created
+// at init() time for all 8 TPC-H tables (customer, lineitem, orders, supplier, part, partsupp,
+// nation, region). REPORT.md is the deliverable — the task never fails the build on per-query
+// mismatches or init-level failures (ignoreFailures=true, init-failure guard in the IT).
+//
+// Capture / re-capture snapshots:
+//     ./gradlew :integ-test:analyticsSqlTpchCorrectnessReport \
+//         -Dtests.rest.cluster=localhost:9200 \
+//         -Dtests.cluster=localhost:9300 \
+//         -Dtests.clustername=runTask \
+//         -Dtests.snapshot.write=true \
+//         -Dproject.root=<path-to-integ-test>
+//
+// Validate against snapshots:
+//     ./gradlew :integ-test:analyticsSqlTpchCorrectnessReport \
+//         -Dtests.rest.cluster=localhost:9200 \
+//         -Dtests.cluster=localhost:9300 \
+//         -Dtests.clustername=runTask \
+//         -Dproject.root=<path-to-integ-test>
+//
+// Snapshots live at integ-test/src/test/resources/expectedOutput/tpch-sql/q{N}.json.
+// Output goes to integ-test/build/reports/tpch-sql-correctness/REPORT.md.
+// =============================================================================
+task analyticsSqlTpchCorrectnessTest(type: RestIntegTestTask) {
+    description = "Runs SQLTpchCorrectnessIT: replays every TPC-H SQL query through the " +
+            "unified path and asserts each response against a committed snapshot at " +
+            "src/test/resources/expectedOutput/tpch-sql/q{N}.json."
+    configureAnalyticsCompatibilityTest(it,
+            ["org.opensearch.sql.sql.tpch.SQLTpchCorrectnessIT"],
+            "analyticsSqlTpchCorrectness")
+    // Pass through snapshot-write flag so the IT can capture expected outputs.
+    systemProperty 'tests.snapshot.write', System.getProperty('tests.snapshot.write', 'false')
+}
+
+task analyticsSqlTpchCorrectnessReport {
+    description = "Runs analyticsSqlTpchCorrectnessTest. Per-query report is written by " +
+            "SQLTpchCorrectnessIT itself to build/reports/tpch-sql-correctness/REPORT.md."
+    group = 'verification'
+    dependsOn analyticsSqlTpchCorrectnessTest
+    doLast {
+        def report = file("$buildDir/reports/tpch-sql-correctness/REPORT.md")
+        if (report.exists()) {
+            logger.lifecycle("[analyticsSqlTpchCorrectnessReport] Wrote ${report}")
+            def summary = report.readLines().find { it.contains('Pass rate') || it.contains('Summary') }
+            if (summary != null) {
+                logger.lifecycle("[analyticsSqlTpchCorrectnessReport] ${summary.trim()}")
+            }
+        } else {
+            logger.warn("[analyticsSqlTpchCorrectnessReport] Report file not found: ${report}")
+        }
+    }
+}
+
+// Cluster log path. The cluster's testcluster log is the only source of server-side stack
+// traces — the SQL plugin's REST formatter only sends `type` + `reason` + `details` to the
+// client, never the throw-site frame. We need the frame to classify whether a failure is
+// from our SQL plugin's Calcite layer, the analytics-engine, the Calcite library itself, or
+// OpenSearch core. Override with -PclusterLog=/abs/path/to/cluster.log.
+//
+// Probes both common locations: the SQL plugin's own integTest-0 cluster (used when
+// `:opensearch-sql-plugin:run` brings the cluster up locally), and OpenSearch's runTask-0
+// cluster (used when the OpenSearch repo brings the cluster up).
+def analyticsClusterLog = project.findProperty('clusterLog') ?: {
+    ['plugin/build/testclusters/integTest-0/logs/integTest.log',
+     '../OpenSearch/build/testclusters/runTask-0/logs/runTask.log'].collect {
+        file("${rootDir}/${it}")
+    }.find { it.exists() }?.absolutePath
+}()
+
+task analyticsCompatibilityReport {
+    description = "Generates a markdown coverage report classifying analyticsCompatibilityTest " +
+            "failures by exception type, with messages normalized so per-index/per-field " +
+            "variations collapse into a single bucket. Each bucket is annotated with an Origin " +
+            "(SQL plugin / analytics engine / Calcite library / OpenSearch / Test) recovered from " +
+            "the cluster log's first server-side stack frame."
+    group = "verification"
+    dependsOn analyticsCompatibilityTest
+
+    // No inputs/outputs declared on purpose: the upstream test task is gated on
+    // -Dtests.rest.cluster and may produce no XMLs. Up-to-date checks would
+    // suppress the "no results" log line we want users to see.
+    doLast {
+        renderAnalyticsReport(
+                xmlDir: file("$buildDir/test-results/analyticsCompatibility"),
+                reportFile: file("$buildDir/reports/analytics-compatibility/REPORT.md"),
+                clusterLog: analyticsClusterLog,
+                label: "PPL",
+                resultsSubdir: "analyticsCompatibility",
+                logTag: "analyticsCompatibilityReport",
+        )
+    }
+}
+
+task analyticsSqlCompatibilityReport {
+    description = "Generates a markdown coverage report classifying analyticsSqlCompatibilityTest " +
+            "failures by exception type, with messages normalized so per-index/per-field " +
+            "variations collapse into a single bucket. Each bucket is annotated with an Origin " +
+            "(SQL plugin / analytics engine / Calcite library / OpenSearch / Test) recovered from " +
+            "the cluster log's first server-side stack frame."
+    group = "verification"
+    dependsOn analyticsSqlCompatibilityTest
+
+    doLast {
+        renderAnalyticsReport(
+                xmlDir: file("$buildDir/test-results/analyticsSqlCompatibility"),
+                reportFile: file("$buildDir/reports/analytics-sql-compatibility/REPORT.md"),
+                clusterLog: analyticsClusterLog,
+                label: "SQL",
+                resultsSubdir: "analyticsSqlCompatibility",
+                logTag: "analyticsSqlCompatibilityReport",
+        )
+    }
 }

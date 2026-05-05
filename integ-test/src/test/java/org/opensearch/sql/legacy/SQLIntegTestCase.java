@@ -10,7 +10,10 @@ import static org.opensearch.sql.legacy.TestUtils.*;
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.CURSOR_CLOSE_ENDPOINT;
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.EXPLAIN_API_ENDPOINT;
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.QUERY_API_ENDPOINT;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.ANALYTICS_FORCE_ROUTING_PROP;
 import static org.opensearch.sql.ppl.PPLIntegTestCase.disableCalcite;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.enableAnalyticsForceRouting;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.enableCalcite;
 
 import com.google.common.base.Strings;
 import java.io.IOException;
@@ -195,6 +198,13 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
   protected void init() throws Exception {
     disableCalcite();
     increaseMaxCompilationsRate();
+    // Analytics-engine compatibility report hook. Same toggle as PPLIntegTestCase — when the
+    // system property is set, every SQL IT routes through the analytics-engine path. Subclasses
+    // (e.g. PPLIntegTestCase) that disableCalcite later in their own init() must re-enable too.
+    if (Boolean.parseBoolean(System.getProperty(ANALYTICS_FORCE_ROUTING_PROP, "false"))) {
+      enableCalcite();
+      enableAnalyticsForceRouting();
+    }
   }
 
   /**
