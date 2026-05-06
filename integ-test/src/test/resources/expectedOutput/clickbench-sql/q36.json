@@ -1,0 +1,42 @@
+{
+  "schema": [
+    {
+      "name": "ClientIP",
+      "type": "integer"
+    },
+    {
+      "name": "EXPR$1",
+      "type": "integer"
+    },
+    {
+      "name": "EXPR$2",
+      "type": "integer"
+    },
+    {
+      "name": "EXPR$3",
+      "type": "integer"
+    },
+    {
+      "name": "c",
+      "type": "long"
+    }
+  ],
+  "total": 2,
+  "datarows": [
+    [
+      123456789,
+      123456788,
+      123456787,
+      123456786,
+      1
+    ],
+    [
+      -1216690514,
+      -1216690515,
+      -1216690516,
+      -1216690517,
+      1
+    ]
+  ],
+  "size": 2
+}

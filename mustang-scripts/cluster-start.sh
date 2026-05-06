@@ -39,7 +39,7 @@ rm -f "$CLUSTER_LOG"
 # Install order matters: analytics-engine must come before its extenders (opensearch-sql,
 # analytics-backend-datafusion). See plugin-descriptor extended.plugins fields.
 nohup ./gradlew run -Dsandbox.enabled=true \
-    -PinstalledPlugins="['opensearch-job-scheduler:3.7.0.0-SNAPSHOT', 'analytics-engine', 'analytics-backend-lucene', 'analytics-backend-datafusion', 'parquet-data-format', 'composite-engine', 'opensearch-sql-plugin:3.7.0.0-SNAPSHOT']" \
+    -PinstalledPlugins="['opensearch-job-scheduler:3.7.0.0-SNAPSHOT', 'arrow-flight-rpc', 'analytics-engine', 'analytics-backend-lucene', 'analytics-backend-datafusion', 'parquet-data-format', 'composite-engine', 'opensearch-sql-plugin:3.7.0.0-SNAPSHOT']" \
     -Dtests.jvm.argline="-Djava.library.path=$OS_REPO/sandbox/libs/dataformat-native/rust/target/release -Dopensearch.experimental.feature.pluggable.dataformat.enabled=true" \
     > "$CLUSTER_LOG" 2>&1 &
 GRADLE_PID=$!

@@ -148,7 +148,7 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
     // deliverable" contract from docs/mustang-followup-ansi-sql-it.md constraint #2.
     if (initFailure != null) {
       for (int i = 1; i <= N_QUERIES; i++) {
-        results.add(Result.of(i, Status.FAIL, null, 0, "init failed: " + initFailure, null));
+        results.add(Result.of(i, Status.FAIL, null, 0, 0, "init failed: " + initFailure, null));
       }
       writeReport(results);
       return;
@@ -157,7 +157,7 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
       String fileBody = loadFromFile("clickbench/queries/q" + i + ".ppl");
       String sql = extractSqlFromComment(fileBody);
       if (sql == null || sql.isBlank()) {
-        results.add(Result.of(i, Status.SKIP, null, 0, "no SQL block in q" + i + ".ppl", null));
+        results.add(Result.of(i, Status.SKIP, null, 0, 0, "no SQL block in q" + i + ".ppl", null));
         continue;
       }
       long start = System.currentTimeMillis();
@@ -167,7 +167,7 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
         processResponse(i, sql, response, elapsedMs, results);
       } catch (Exception e) {
         long elapsedMs = System.currentTimeMillis() - start;
-        results.add(Result.of(i, Status.FAIL, sql, elapsedMs, summarize(e), null));
+        results.add(Result.of(i, Status.FAIL, sql, elapsedMs, 0, summarize(e), null));
       }
     }
     writeReport(results);
@@ -182,32 +182,34 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
       String errText = response.get("error") instanceof JSONObject
           ? errorSummary(response.getJSONObject("error"))
           : response.get("error").toString();
-      results.add(Result.of(id, Status.FAIL, sql, elapsedMs, errText, null));
+      results.add(Result.of(id, Status.FAIL, sql, elapsedMs, 0, errText, null));
       return;
     }
 
     // Verify the query actually returned data — an empty result set indicates the test data
     // does not satisfy the query's filter conditions.
     if (response.has("datarows") && response.getJSONArray("datarows").length() == 0) {
-      results.add(Result.of(id, Status.FAIL, sql, elapsedMs,
+      results.add(Result.of(id, Status.FAIL, sql, elapsedMs, 0,
           "empty result set (0 rows) — test data may not satisfy query filters", null));
       return;
     }
 
     JSONObject normalized = normalize(response);
+    int rowCount = normalized.optInt("total",
+        normalized.has("datarows") ? normalized.getJSONArray("datarows").length() : 0);
 
     if (WRITE_SNAPSHOTS) {
       writeSnapshot(id, normalized);
-      results.add(Result.of(id, Status.SNAPSHOT, sql, elapsedMs, null, null));
+      results.add(Result.of(id, Status.SNAPSHOT, sql, elapsedMs, rowCount, null, null));
     } else {
       JSONObject expected = loadSnapshot(id);
       if (expected == null) {
-        results.add(Result.of(id, Status.NO_REFERENCE, sql, elapsedMs, null, null));
+        results.add(Result.of(id, Status.NO_REFERENCE, sql, elapsedMs, rowCount, null, null));
       } else if (expected.similar(normalized)) {
-        results.add(Result.of(id, Status.PASS, sql, elapsedMs, null, null));
+        results.add(Result.of(id, Status.PASS, sql, elapsedMs, rowCount, null, null));
       } else {
         String diff = diffSummary(expected, normalized);
-        results.add(Result.of(id, Status.FAIL, sql, elapsedMs, null, diff));
+        results.add(Result.of(id, Status.FAIL, sql, elapsedMs, rowCount, null, diff));
       }
     }
   }
@@ -344,16 +346,20 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
     sb.append(String.format(Locale.ENGLISH, "| Total time | %.1fs |%n%n", totalMs / 1000.0));
 
     sb.append("## Per-query results\n\n");
-    sb.append("| # | Status | Time (ms) | SQL | Diff summary |\n");
-    sb.append("|---:|:--|---:|---|---|\n");
+    sb.append("| # | Status | SQL | Test Results |\n");
+    sb.append("|---:|:--|---|---|\n");
     for (Result r : results) {
       String sqlCell = r.sql == null ? "" : cell(clip(r.sql, 100));
-      String diffCell = "";
-      if (r.error != null) diffCell = cell(clip(r.error, 100));
-      else if (r.diff != null) diffCell = cell(clip(r.diff, 100));
-      String time = r.status == Status.SKIP ? "" : Long.toString(r.elapsedMs);
+      String resultCell = "";
+      if (r.status == Status.PASS || r.status == Status.SNAPSHOT) {
+        resultCell = r.rowCount + " row(s) returned";
+      } else if (r.error != null) {
+        resultCell = cell(clip(r.error, 200));
+      } else if (r.diff != null) {
+        resultCell = cell(clip(r.diff, 200));
+      }
       sb.append("| ").append(r.id).append(" | ").append(r.status.label).append(" | ")
-          .append(time).append(" | ").append(sqlCell).append(" | ").append(diffCell)
+          .append(sqlCell).append(" | ").append(resultCell)
           .append(" |\n");
     }
     sb.append("\n");
@@ -402,19 +408,60 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
     return body;
   }
 
-  /** Pull "{type}: {reason/details}" from the error JSON. Caller clips for table cells. */
+  /** Pull concise error reason from the error JSON. */
   private static String errorSummary(JSONObject error) {
-    String type = error.optString("type", "<unknown>");
-    String details = error.optString("details", "");
-    if (details.isEmpty()) details = error.optString("reason", "");
-    return type + ": " + details;
+    String reason = error.optString("reason", "");
+    if (reason.isEmpty()) reason = error.optString("details", "");
+    return reason;
   }
 
   private static String summarize(Exception e) {
-    String msg = e.getMessage();
-    if (msg == null) msg = "";
-    msg = msg.replace('\n', ' ').replace('\r', ' ').trim();
-    return e.getClass().getSimpleName() + ": " + msg;
+    // Extract meaningful error from the exception message.
+    // The RuntimeException wraps a ResponseException whose message format is:
+    // "method [...], host [...], URI [...], status line [HTTP/1.1 NNN Reason] actual error text"
+    // We extract just the "actual error text" part.
+    String fullMsg = e.getMessage();
+    if (fullMsg == null) fullMsg = "";
+
+    // Try to extract from the message directly (works for both ResponseException and RuntimeException wrapping it)
+    if (fullMsg.contains("status line [")) {
+      int statusIdx = fullMsg.indexOf("status line [");
+      // Find the closing "] " of the status line bracket
+      int bracketStart = statusIdx + "status line [".length();
+      int bracketEnd = fullMsg.indexOf(']', bracketStart);
+      if (bracketEnd >= 0) {
+        String afterBracket = fullMsg.substring(bracketEnd + 1).trim();
+        // Response body might be JSON on next line or plain text
+        if (afterBracket.startsWith("\n") || afterBracket.startsWith("\r")) {
+          afterBracket = afterBracket.trim();
+        }
+        if (!afterBracket.isEmpty()) {
+          // Try to parse as JSON error
+          try {
+            JSONObject json = new JSONObject(afterBracket);
+            if (json.has("error")) {
+              Object err = json.get("error");
+              if (err instanceof JSONObject errObj) {
+                return errorSummary(errObj);
+              }
+              return err.toString();
+            }
+          } catch (Exception ignored) {
+            // Not JSON — use as plain text
+          }
+          return afterBracket;
+        }
+      }
+    }
+
+    // Also try getCause() for ResponseException
+    Throwable cause = e.getCause();
+    if (cause != null && cause.getMessage() != null && cause.getMessage().contains("status line [")) {
+      return summarize(new RuntimeException(cause.getMessage()));
+    }
+
+    fullMsg = fullMsg.replace('\n', ' ').replace('\r', ' ').trim();
+    return e.getClass().getSimpleName() + ": " + fullMsg;
   }
 
   private static String clip(String s, int max) {
@@ -452,18 +499,19 @@ public class SQLClickBenchCorrectnessIT extends SQLIntegTestCase {
   // ── PODs ───────────────────────────────────────────────────────────────────
 
   private record Result(
-      int id, Status status, String sql, long elapsedMs, String error, String diff) {
-    static Result of(int id, Status status, String sql, long ms, String error, String diff) {
-      return new Result(id, status, sql, ms, error, diff);
+      int id, Status status, String sql, long elapsedMs, int rowCount, String error, String diff) {
+    static Result of(
+        int id, Status status, String sql, long ms, int rowCount, String error, String diff) {
+      return new Result(id, status, sql, ms, rowCount, error, diff);
     }
   }
 
   private enum Status {
-    PASS("✓ pass"),
-    FAIL("✗ fail"),
-    SKIP("- skip"),
-    NO_REFERENCE("? no-ref"),
-    SNAPSHOT("⬇ snapshot");
+    PASS("✓"),
+    FAIL("✗"),
+    SKIP("-"),
+    NO_REFERENCE("?"),
+    SNAPSHOT("✓");
 
     final String label;
 

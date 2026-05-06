@@ -220,54 +220,6 @@ Report output: `integ-test/build/reports/clickbench-sql-correctness/REPORT.md`
 | Failed | 14 |
 | Pass rate | **67.4%** |
 
-### ClickBench per-query results
-
-| # | Status | SQL (abbreviated) |
-|---:|:--|---|
-| 1 | ✓ pass | `SELECT COUNT(*) FROM hits` |
-| 2 | ✓ pass | `SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0` |
-| 3 | ✓ pass | `SELECT SUM(AdvEngineID), COUNT(*), AVG(ResolutionWidth) FROM hits` |
-| 4 | ✓ pass | `SELECT AVG(UserID) FROM hits` |
-| 5 | ✓ pass | `SELECT COUNT(DISTINCT UserID) FROM hits` |
-| 6 | ✓ pass | `SELECT COUNT(DISTINCT SearchPhrase) FROM hits` |
-| 7 | ✓ pass | `SELECT MIN(EventDate), MAX(EventDate) FROM hits` |
-| 8 | ✓ pass | `SELECT AdvEngineID, COUNT(*) ... GROUP BY ... ORDER BY ...` |
-| 9 | ✓ pass | `SELECT RegionID, COUNT(DISTINCT UserID) AS u ... GROUP BY ... ORDER BY u DESC LIMIT 10` |
-| 10 | ✓ pass | `SELECT RegionID, SUM(...), COUNT(*), AVG(...), COUNT(DISTINCT ...) ... GROUP BY ...` |
-| 11 | ✓ pass | `SELECT MobilePhoneModel, COUNT(DISTINCT UserID) ... WHERE ... <> '' GROUP BY ...` |
-| 12 | ✓ pass | `SELECT MobilePhone, MobilePhoneModel, COUNT(DISTINCT UserID) ...` |
-| 13 | ✓ pass | `SELECT SearchPhrase, COUNT(*) ... WHERE SearchPhrase <> '' GROUP BY ... ORDER BY ...` |
-| 14 | ✓ pass | `SELECT SearchPhrase, COUNT(DISTINCT UserID) ...` |
-| 15 | ✓ pass | `SELECT SearchEngineID, SearchPhrase, COUNT(*) ...` |
-| 16 | ✓ pass | `SELECT UserID, COUNT(*) ... GROUP BY UserID ORDER BY COUNT(*) DESC LIMIT 10` |
-| 17 | ✓ pass | `SELECT UserID, SearchPhrase, COUNT(*) ... ORDER BY COUNT(*) DESC LIMIT 10` |
-| 18 | ✓ pass | `SELECT UserID, SearchPhrase, COUNT(*) ... LIMIT 10` |
-| 19 | ✗ fail | `SELECT UserID, extract(minute FROM EventTime) ...` |
-| 20 | ✓ pass | `SELECT UserID FROM hits WHERE UserID = 435090932899640449` |
-| 21 | ✓ pass | `SELECT COUNT(*) FROM hits WHERE URL LIKE '%google%'` |
-| 22 | ✗ fail | `SELECT SearchPhrase, MIN(URL), COUNT(*) ... WHERE URL LIKE '%google%'` |
-| 23 | ✗ fail | `SELECT SearchPhrase, MIN(URL), MIN(Title), COUNT(*), COUNT(DISTINCT UserID) ...` |
-| 24 | ✓ pass | `SELECT * FROM hits WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10` |
-| 25 | ✓ pass | `SELECT SearchPhrase ... ORDER BY EventTime LIMIT 10` |
-| 26 | ✓ pass | `SELECT SearchPhrase ... ORDER BY SearchPhrase LIMIT 10` |
-| 27 | ✓ pass | `SELECT SearchPhrase ... ORDER BY EventTime, SearchPhrase LIMIT 10` |
-| 28 | ✗ fail | `SELECT CounterID, AVG(length(URL)) ...` |
-| 29 | ✗ fail | `SELECT REGEXP_REPLACE(Referer, ...) ...` |
-| 30 | ✗ fail | `SELECT SUM(ResolutionWidth), SUM(ResolutionWidth + 1), ... SUM(ResolutionWidth + 89)` |
-| 31 | ✓ pass | `SELECT SearchEngineID, ClientIP, COUNT(*), SUM(IsRefresh), AVG(ResolutionWidth) ...` |
-| 32 | ✓ pass | `SELECT WatchID, ClientIP, COUNT(*), SUM(IsRefresh), AVG(ResolutionWidth) ... WHERE ...` |
-| 33 | ✓ pass | `SELECT WatchID, ClientIP, COUNT(*), SUM(IsRefresh), AVG(ResolutionWidth) ... GROUP BY ...` |
-| 34 | ✓ pass | `SELECT URL, COUNT(*) AS c ... GROUP BY URL ORDER BY c DESC LIMIT 10` |
-| 35 | ✓ pass | `SELECT 1, URL, COUNT(*) ... GROUP BY 1, URL ORDER BY c DESC LIMIT 10` |
-| 36 | ✗ fail | `SELECT ClientIP, ClientIP - 1, ClientIP - 2, ClientIP - 3, COUNT(*) ...` |
-| 37 | ✗ fail | `SELECT URL, COUNT(*) ... WHERE CounterID = 62 AND EventDate >= '2013-07-01' ...` |
-| 38 | ✗ fail | `SELECT Title, COUNT(*) ... WHERE CounterID = 62 AND EventDate >= '2013-07-01' ...` |
-| 39 | ✗ fail | `SELECT URL, COUNT(*) ... WHERE CounterID = 62 AND EventDate >= '2013-07-01' ... OFFSET 1000` |
-| 40 | ✗ fail | `SELECT TraficSourceID, ..., CASE WHEN ... END AS Src ...` |
-| 41 | ✗ fail | `SELECT URLHash, EventDate, COUNT(*) ... WHERE CounterID = 62 ... OFFSET 100` |
-| 42 | ✗ fail | `SELECT WindowClientWidth, WindowClientHeight, COUNT(*) ... OFFSET 100` |
-| 43 | ✗ fail | `SELECT DATE_TRUNC('minute', EventTime) ...` |
-
 ### ClickBench failure categories
 
 | Root Cause | Queries | Count |
