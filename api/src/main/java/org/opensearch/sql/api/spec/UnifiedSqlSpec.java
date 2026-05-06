@@ -14,7 +14,9 @@ import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserImplFactory;
 import org.apache.calcite.sql.parser.babel.SqlBabelParserImpl;
+import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
+import org.apache.calcite.sql.validate.SqlDelegatingConformance;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.opensearch.sql.api.spec.search.SearchExtension;
 
@@ -28,6 +30,19 @@ import org.opensearch.sql.api.spec.search.SearchExtension;
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 @Accessors(fluent = true)
 public class UnifiedSqlSpec implements LanguageSpec {
+
+  /**
+   * BABEL conformance with strict GROUP BY validation. Delegates all behavior to BABEL except
+   * isNonStrictGroupBy which returns false — preventing the validator from wrapping non-grouped
+   * expressions in ANY_VALUE and avoiding a NPE on CASE expressions in GROUP BY.
+   */
+  private static final SqlConformance BABEL_STRICT_GROUP_BY =
+      new SqlDelegatingConformance(SqlConformanceEnum.BABEL) {
+        @Override
+        public boolean isNonStrictGroupBy() {
+          return false;
+        }
+      };
 
   /** Lexical rules: identifier quoting, character escaping, and special identifier support. */
   private final Lex lex;
@@ -63,6 +78,6 @@ public class UnifiedSqlSpec implements LanguageSpec {
 
   @Override
   public SqlValidator.Config validatorConfig() {
-    return SqlValidator.Config.DEFAULT.withConformance(conformance);
+    return SqlValidator.Config.DEFAULT.withConformance(BABEL_STRICT_GROUP_BY);
   }
 }
