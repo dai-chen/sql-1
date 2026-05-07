@@ -1,0 +1,18 @@
+{
+  "schema": [
+    {
+      "name": "Title",
+      "type": "string"
+    },
+    {
+      "name": "PageViews",
+      "type": "long"
+    }
+  ],
+  "total": 1,
+  "datarows": [[
+    "Google Search Results",
+    1
+  ]],
+  "size": 1
+}

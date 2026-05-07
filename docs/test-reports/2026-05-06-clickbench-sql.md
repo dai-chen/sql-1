@@ -1,6 +1,6 @@
 # ClickBench SQL Correctness Report
 
-Generated: Wed May 06 23:20:21 GMT+01:00 2026
+Generated: Wed May 06 17:44:54 CDT 2026
 
 Cluster: `localhost:9200`
 
@@ -16,11 +16,11 @@ Snapshot mode: **WRITE** (capturing)
 |---|---:|
 | Total queries | 43 |
 | Passed | 0 |
-| Failed | 12 |
+| Failed | 10 |
 | No reference | 0 |
-| Snapshots written | 31 |
-| Pass rate | **0.0%** (of 12 comparable) |
-| Total time | 2.4s |
+| Snapshots written | 33 |
+| Pass rate | **0.0%** (of 10 comparable) |
+| Total time | 2.0s |
 
 ## Per-query results
 
@@ -62,13 +62,13 @@ Snapshot mode: **WRITE** (capturing)
 | 34 | ✓ | SELECT URL, COUNT(*) AS c FROM hits GROUP BY URL ORDER BY c DESC LIMIT 10 | 2 row(s) returned |
 | 35 | ✓ | SELECT 1, URL, COUNT(*) AS c FROM hits GROUP BY 1, URL ORDER BY c DESC LIMIT 10 | 2 row(s) returned |
 | 36 | ✓ | SELECT ClientIP, ClientIP - 1, ClientIP - 2, ClientIP - 3, COUNT(*) AS c FROM hits GROUP BY ClientI… | 2 row(s) returned |
-| 37 | ✗ | SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND … | RuntimeException: org.apache.hc.core5.http.ConnectionClosedException: Connection closed by peer |
-| 38 | ✗ | SELECT Title, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AN… | RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused |
-| 39 | ✗ | SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND … | RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused |
-| 40 | ✗ | SELECT TraficSourceID, SearchEngineID, AdvEngineID, CASE WHEN (SearchEngineID = 0 AND AdvEngineID =… | RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused |
-| 41 | ✗ | SELECT URLHash, EventDate, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2… | RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused |
-| 42 | ✗ | SELECT WindowClientWidth, WindowClientHeight, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 … | RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused |
-| 43 | ✗ | SELECT DATE_TRUNC('minute', EventTime) AS M, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 A… | RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused |
+| 37 | ✓ | SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND … | 1 row(s) returned |
+| 38 | ✓ | SELECT Title, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AN… | 1 row(s) returned |
+| 39 | ✗ | SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND … | empty result set (0 rows) — test data may not satisfy query filters |
+| 40 | ✗ | SELECT TraficSourceID, SearchEngineID, AdvEngineID, CASE WHEN (SearchEngineID = 0 AND AdvEngineID =… | No backend supports scalar function [CASE] among [datafusion] |
+| 41 | ✗ | SELECT URLHash, EventDate, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2… | empty result set (0 rows) — test data may not satisfy query filters |
+| 42 | ✗ | SELECT WindowClientWidth, WindowClientHeight, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 … | empty result set (0 rows) — test data may not satisfy query filters |
+| 43 | ✗ | SELECT DATE_TRUNC('minute', EventTime) AS M, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 A… | No enum constant org.opensearch.analytics.spi.ScalarFunction.DATE_TRUNC |
 
 ## Errors
 
@@ -122,26 +122,6 @@ SELECT REGEXP_REPLACE(Referer, '^https?://(?:www\.)?([^/]+)/.*$', '\1') AS k, AV
 No enum constant org.opensearch.analytics.spi.ScalarFunction.REGEXP_REPLACE
 ```
 
-### q37
-
-```sql
-SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND EventDate <= '2013-07-31' AND DontCountHits = 0 AND IsRefresh = 0 AND URL <> '' GROUP BY URL ORDER BY PageViews DESC LIMIT 10
-```
-
-```
-RuntimeException: org.apache.hc.core5.http.ConnectionClosedException: Connection closed by peer
-```
-
-### q38
-
-```sql
-SELECT Title, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND EventDate <= '2013-07-31' AND DontCountHits = 0 AND IsRefresh = 0 AND Title <> '' GROUP BY Title ORDER BY PageViews DESC LIMIT 10
-```
-
-```
-RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused
-```
-
 ### q39
 
 ```sql
@@ -149,7 +129,7 @@ SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >
 ```
 
 ```
-RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused
+empty result set (0 rows) — test data may not satisfy query filters
 ```
 
 ### q40
@@ -159,7 +139,7 @@ SELECT TraficSourceID, SearchEngineID, AdvEngineID, CASE WHEN (SearchEngineID = 
 ```
 
 ```
-RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused
+No backend supports scalar function [CASE] among [datafusion]
 ```
 
 ### q41
@@ -169,7 +149,7 @@ SELECT URLHash, EventDate, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 
 ```
 
 ```
-RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused
+empty result set (0 rows) — test data may not satisfy query filters
 ```
 
 ### q42
@@ -179,7 +159,7 @@ SELECT WindowClientWidth, WindowClientHeight, COUNT(*) AS PageViews FROM hits WH
 ```
 
 ```
-RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused
+empty result set (0 rows) — test data may not satisfy query filters
 ```
 
 ### q43
@@ -189,6 +169,6 @@ SELECT DATE_TRUNC('minute', EventTime) AS M, COUNT(*) AS PageViews FROM hits WHE
 ```
 
 ```
-RuntimeException: java.net.ConnectException: Connect to http://localhost:9200 [localhost/127.0.0.1, localhost/0:0:0:0:0:0:0:1] failed: Connection refused
+No enum constant org.opensearch.analytics.spi.ScalarFunction.DATE_TRUNC
 ```
 

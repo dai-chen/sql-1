@@ -1,0 +1,18 @@
+{
+  "schema": [
+    {
+      "name": "URL",
+      "type": "string"
+    },
+    {
+      "name": "PageViews",
+      "type": "long"
+    }
+  ],
+  "total": 1,
+  "datarows": [[
+    "https://www.google.com/search?q=opensearch",
+    1
+  ]],
+  "size": 1
+}

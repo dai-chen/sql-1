@@ -131,8 +131,9 @@ public class RestUnifiedQueryAction {
                     plan = addQuerySizeLimit(plan, planContext);
                     analyticsEngine.execute(
                         plan, planContext, createQueryListener(queryType, listener));
-                  } catch (Exception e) {
-                    listener.onFailure(e);
+                  } catch (Throwable t) {
+                    listener.onFailure(
+                        t instanceof Exception ex ? ex : new RuntimeException(t.getMessage(), t));
                   }
                 }),
             new TimeValue(0),
@@ -159,8 +160,9 @@ public class RestUnifiedQueryAction {
                     CalcitePlanContext planContext = context.getPlanContext();
                     plan = addQuerySizeLimit(plan, planContext);
                     analyticsEngine.explain(plan, mode, planContext, listener);
-                  } catch (Exception e) {
-                    listener.onFailure(e);
+                  } catch (Throwable t) {
+                    listener.onFailure(
+                        t instanceof Exception ex ? ex : new RuntimeException(t.getMessage(), t));
                   }
                 }),
             new TimeValue(0),

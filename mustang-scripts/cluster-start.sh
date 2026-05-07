@@ -40,7 +40,7 @@ rm -f "$CLUSTER_LOG"
 # analytics-backend-datafusion). See plugin-descriptor extended.plugins fields.
 nohup ./gradlew run -Dsandbox.enabled=true \
     -PinstalledPlugins="['opensearch-job-scheduler:3.7.0.0-SNAPSHOT', 'arrow-flight-rpc', 'analytics-engine', 'analytics-backend-lucene', 'analytics-backend-datafusion', 'parquet-data-format', 'composite-engine', 'opensearch-sql-plugin:3.7.0.0-SNAPSHOT']" \
-    -Dtests.jvm.argline="-Djava.library.path=$OS_REPO/sandbox/libs/dataformat-native/rust/target/release -Dopensearch.experimental.feature.pluggable.dataformat.enabled=true" \
+    -Dtests.jvm.argline="-Djava.library.path=$OS_REPO/sandbox/libs/dataformat-native/rust/target/release -Dopensearch.experimental.feature.pluggable.dataformat.enabled=true -da:org.apache.calcite..." \
     > "$CLUSTER_LOG" 2>&1 &
 GRADLE_PID=$!
 echo "$GRADLE_PID" > "$CLUSTER_GRADLE_PID_FILE"

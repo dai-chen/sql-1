@@ -10,7 +10,6 @@ import static org.opensearch.sql.monitor.profile.MetricName.ANALYZE;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.sql.SqlKind;
@@ -79,8 +78,8 @@ public class UnifiedQueryPlanner {
 
   /**
    * SQL planning using a custom validate+convert pipeline. Consumes pre-parsed SqlNode from
-   * UnifiedQueryParser and validates with BABEL_STRICT_GROUP_BY conformance (no ANY_VALUE
-   * wrapping, no NPE on CASE in GROUP BY).
+   * UnifiedQueryParser and validates with BABEL_STRICT_GROUP_BY conformance (no ANY_VALUE wrapping,
+   * no NPE on CASE in GROUP BY).
    */
   private static class CalciteNativeStrategy implements PlanningStrategy {
     private final UnifiedQueryContext context;
