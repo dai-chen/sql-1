@@ -25,6 +25,11 @@ public class DatetimeExtension implements LanguageExtension {
     return List.of(DatetimeUdtNormalizeRule.INSTANCE, DatetimeOutputCastRule.INSTANCE);
   }
 
+  @Override
+  public List<RelShuttle> preCompilationRules() {
+    return List.of(DatetimeUdfCompilationAdapterRule.INSTANCE);
+  }
+
   /** Maps datetime UDT types to their standard Calcite equivalents. */
   @Getter
   @RequiredArgsConstructor
