@@ -53,6 +53,7 @@ import org.opensearch.sql.executor.ExecutionContext;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
 import org.opensearch.sql.executor.Explain;
+import org.opensearch.sql.executor.pagination.Cursor;
 import org.opensearch.sql.executor.pagination.PlanSerializer;
 import org.opensearch.sql.expression.function.BuiltinFunctionName;
 import org.opensearch.sql.expression.function.PPLFuncImpTable;
@@ -321,7 +322,7 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       columns.add(new Column(columnName, null, exprType));
     }
     Schema schema = new Schema(columns);
-    QueryResponse response = new QueryResponse(schema, values, null);
+    QueryResponse response = new QueryResponse(schema, values, Cursor.None);
     return response;
   }
 

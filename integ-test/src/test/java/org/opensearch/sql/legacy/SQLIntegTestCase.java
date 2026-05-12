@@ -11,6 +11,8 @@ import static org.opensearch.sql.legacy.plugin.RestSqlAction.CURSOR_CLOSE_ENDPOI
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.EXPLAIN_API_ENDPOINT;
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.QUERY_API_ENDPOINT;
 import static org.opensearch.sql.ppl.PPLIntegTestCase.disableCalcite;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.disallowCalciteFallback;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.enableCalcite;
 
 import com.google.common.base.Strings;
 import java.io.IOException;
@@ -193,7 +195,8 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
 
   /** Provide for each test to load test index, data and other setup work */
   protected void init() throws Exception {
-    disableCalcite();
+    enableCalcite();
+    disallowCalciteFallback();
     increaseMaxCompilationsRate();
   }
 
