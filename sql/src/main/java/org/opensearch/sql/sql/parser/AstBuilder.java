@@ -23,7 +23,6 @@ import com.google.common.collect.ImmutableList;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.Optional;
-import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.opensearch.sql.ast.expression.Alias;
 import org.opensearch.sql.ast.expression.AllFields;
@@ -32,6 +31,7 @@ import org.opensearch.sql.ast.expression.UnresolvedArgument;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.DescribeRelation;
 import org.opensearch.sql.ast.tree.Filter;
+import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Limit;
 import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.Relation;
@@ -50,10 +50,18 @@ import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParserBaseVisitor;
 import org.opensearch.sql.sql.parser.context.ParsingContext;
 
 /** Abstract syntax tree (AST) builder. */
-@RequiredArgsConstructor
 public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
 
-  private final AstExpressionBuilder expressionBuilder = new AstExpressionBuilder();
+  private final AstExpressionBuilder expressionBuilder = createExpressionBuilder();
+
+  /** Factory method for expression builder. Override to provide subquery-capable builder. */
+  protected AstExpressionBuilder createExpressionBuilder() {
+    return new AstExpressionBuilder();
+  }
+
+  public AstBuilder(String query) {
+    this.query = query;
+  }
 
   /** Parsing context stack that contains context for current query parsing. */
   private final ParsingContext context = new ParsingContext();
@@ -139,6 +147,13 @@ public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
   public UnresolvedPlan visitFromClause(FromClauseContext ctx) {
     UnresolvedPlan result = visit(ctx.relation());
 
+    // Let ANTLR visitor dispatch handle each joinClause
+    for (var joinCtx : ctx.joinClause()) {
+      UnresolvedPlan joinPlan = visit(joinCtx);
+      ((Join) joinPlan).attach(result);
+      result = joinPlan;
+    }
+
     if (ctx.whereClause() != null) {
       result = visit(ctx.whereClause()).attach(result);
     }
@@ -161,6 +176,24 @@ public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
       result = sortBuilder.visit(ctx.orderByClause()).attach(result);
     }
     return result;
+  }
+
+  @Override
+  public UnresolvedPlan visitJoinClause(OpenSearchSQLParser.JoinClauseContext ctx) {
+    throw new SyntaxCheckException(
+        "JOIN is not supported in the V2 SQL engine. Falling back to legacy engine.");
+  }
+
+  @Override
+  public UnresolvedPlan visitUnionSelect(OpenSearchSQLParser.UnionSelectContext ctx) {
+    throw new SyntaxCheckException(
+        "UNION is not supported in the V2 SQL engine. Falling back to legacy engine.");
+  }
+
+  @Override
+  public UnresolvedPlan visitExceptSelect(OpenSearchSQLParser.ExceptSelectContext ctx) {
+    throw new SyntaxCheckException(
+        "EXCEPT is not supported in the V2 SQL engine. Falling back to legacy engine.");
   }
 
   /**
@@ -261,7 +294,7 @@ public class AstBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedPlan> {
     return nextResult != null ? nextResult : aggregate;
   }
 
-  private UnresolvedExpression visitAstExpression(ParseTree tree) {
+  protected UnresolvedExpression visitAstExpression(ParseTree tree) {
     return expressionBuilder.visit(tree);
   }
 

@@ -291,6 +291,20 @@ public class AstExpressionBuilder extends OpenSearchSQLParserBaseVisitor<Unresol
   }
 
   @Override
+  public UnresolvedExpression visitInSubqueryPredicate(
+      OpenSearchSQLParser.InSubqueryPredicateContext ctx) {
+    throw new org.opensearch.sql.common.antlr.SyntaxCheckException(
+        "IN subquery is not supported in the V2 SQL engine. Falling back to legacy engine.");
+  }
+
+  @Override
+  public UnresolvedExpression visitExistsExpressionAtom(
+      OpenSearchSQLParser.ExistsExpressionAtomContext ctx) {
+    throw new org.opensearch.sql.common.antlr.SyntaxCheckException(
+        "EXISTS is not supported in the V2 SQL engine. Falling back to legacy engine.");
+  }
+
+  @Override
   public UnresolvedExpression visitAndExpression(AndExpressionContext ctx) {
     return new And(visit(ctx.left), visit(ctx.right));
   }
