@@ -125,7 +125,10 @@ public class RestUnifiedQueryAction {
             withCurrentContext(
                 () -> {
                   try (UnifiedQueryContext context = buildContext(queryType, profiling)) {
-                    UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
+                    UnifiedQueryPlanner planner =
+                        queryType == QueryType.SQL
+                            ? new UnifiedQueryPlanner(context, new SqlV2QueryParser())
+                            : new UnifiedQueryPlanner(context);
                     RelNode plan = planner.plan(query);
                     CalcitePlanContext planContext = context.getPlanContext();
                     plan = addQuerySizeLimit(plan, planContext);
@@ -155,7 +158,10 @@ public class RestUnifiedQueryAction {
             withCurrentContext(
                 () -> {
                   try (UnifiedQueryContext context = buildContext(queryType, false)) {
-                    UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
+                    UnifiedQueryPlanner planner =
+                        queryType == QueryType.SQL
+                            ? new UnifiedQueryPlanner(context, new SqlV2QueryParser())
+                            : new UnifiedQueryPlanner(context);
                     RelNode plan = planner.plan(query);
                     CalcitePlanContext planContext = context.getPlanContext();
                     plan = addQuerySizeLimit(plan, planContext);

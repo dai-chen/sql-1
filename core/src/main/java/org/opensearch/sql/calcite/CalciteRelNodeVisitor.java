@@ -541,6 +541,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
               .filter(addedFields::add)
               .forEach(field -> expandedFields.add(context.relBuilder.field(field)));
         }
+        case Alias alias -> {
+          RexNode resolved = rexVisitor.analyze(alias.getDelegated(), context);
+          String displayName = alias.getAlias() != null ? alias.getAlias() : alias.getName();
+          if (addedFields.add(displayName)) {
+            expandedFields.add(context.relBuilder.alias(resolved, displayName));
+          }
+        }
         default ->
             throw new IllegalStateException(
                 "Unexpected expression type in project list: " + expr.getClass().getSimpleName());
@@ -4122,7 +4129,10 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
 
   @Override
   public RelNode visitValues(Values values, CalcitePlanContext context) {
-    if (values.getValues() == null || values.getValues().isEmpty()) {
+    if (values.getValues() == null
+        || values.getValues().isEmpty()
+        || (values.getValues().size() == 1 && values.getValues().get(0).isEmpty())) {
+      // Single empty row = dual table (SELECT without FROM)
       context.relBuilder.values(context.relBuilder.getTypeFactory().builder().build());
       return context.relBuilder.peek();
     } else {

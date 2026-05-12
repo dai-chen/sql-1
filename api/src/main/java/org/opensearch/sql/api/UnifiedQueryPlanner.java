@@ -47,6 +47,20 @@ public class UnifiedQueryPlanner {
   }
 
   /**
+   * Constructs a UnifiedQueryPlanner that uses the custom visitor strategy (V2 parser frontend)
+   * with the given parser, regardless of query type. This allows SQL queries to be parsed by the V2
+   * ANTLR parser and converted to RelNode via CalciteRelNodeVisitor.
+   *
+   * @param context the unified query context
+   * @param v2Parser a parser that produces UnresolvedPlan (e.g., SQL V2 ANTLR parser)
+   */
+  public UnifiedQueryPlanner(
+      UnifiedQueryContext context, UnifiedQueryParser<UnresolvedPlan> v2Parser) {
+    this.context = context;
+    this.strategy = new CustomVisitorStrategy(context, v2Parser);
+  }
+
+  /**
    * Parses and analyzes a query string into a Calcite logical plan (RelNode). TODO: Generate
    * optimal physical plan to fully unify query execution and leverage Calcite's optimizer.
    *
@@ -67,7 +81,7 @@ public class UnifiedQueryPlanner {
     } catch (SyntaxCheckException | UnsupportedOperationException e) {
       throw e;
     } catch (Exception e) {
-      throw new IllegalStateException("Failed to plan query", e);
+      throw new IllegalStateException("Failed to plan query: " + e.getMessage(), e);
     }
   }
 
@@ -116,6 +130,11 @@ public class UnifiedQueryPlanner {
     CustomVisitorStrategy(UnifiedQueryContext context) {
       this.context = context;
       this.parser = (UnifiedQueryParser<UnresolvedPlan>) context.getParser();
+    }
+
+    CustomVisitorStrategy(UnifiedQueryContext context, UnifiedQueryParser<UnresolvedPlan> parser) {
+      this.context = context;
+      this.parser = parser;
     }
 
     @Override
