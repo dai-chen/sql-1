@@ -358,10 +358,10 @@ public class QueryService {
   }
 
   // TODO https://github.com/opensearch-project/sql/issues/3457
-  // Route SQL V2 AST through CalciteRelNodeVisitor for gap analysis
+  // TODO: PoC only — in production, SQL routes through unified query API (RestUnifiedQueryAction),
+  //  not through this flag. Remove this change when migrating to the unified query path.
   private boolean shouldUseCalcite(QueryType queryType) {
-    return isCalciteEnabled(settings)
-        && (queryType == QueryType.PPL || queryType == QueryType.SQL);
+    return isCalciteEnabled(settings) && (queryType == QueryType.PPL || queryType == QueryType.SQL);
   }
 
   private FrameworkConfig buildFrameworkConfig() {
