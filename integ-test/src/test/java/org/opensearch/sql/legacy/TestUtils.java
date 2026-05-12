@@ -65,6 +65,11 @@ public class TestUtils {
     JSONObject indexSettings =
         settings.has("index") ? settings.getJSONObject("index") : new JSONObject();
     indexSettings.put("number_of_replicas", 0);
+    if (Boolean.parseBoolean(System.getProperty("tests.analytics.force_routing", "false"))) {
+      indexSettings.put("pluggable.dataformat.enabled", true);
+      indexSettings.put("pluggable.dataformat", "composite");
+      indexSettings.put("composite.primary_data_format", "parquet");
+    }
     settings.put("index", indexSettings);
     jsonObject.put("settings", settings);
   }
@@ -82,9 +87,19 @@ public class TestUtils {
       RestClient client, String indexName, String mapping) {
     Request request = new Request("PUT", "/" + indexName);
     JSONObject jsonObject = isNullOrEmpty(mapping) ? new JSONObject() : new JSONObject(mapping);
-    jsonObject.put("settings", new JSONObject("{\"index\":{\"hidden\":true}}"));
+    JSONObject settings =
+        jsonObject.has("settings") ? jsonObject.getJSONObject("settings") : new JSONObject();
+    JSONObject indexSettings =
+        settings.has("index") ? settings.getJSONObject("index") : new JSONObject();
+    indexSettings.put("hidden", true);
+    if (Boolean.parseBoolean(System.getProperty("tests.analytics.force_routing", "false"))) {
+      indexSettings.put("pluggable.dataformat.enabled", true);
+      indexSettings.put("pluggable.dataformat", "composite");
+      indexSettings.put("composite.primary_data_format", "parquet");
+    }
+    settings.put("index", indexSettings);
+    jsonObject.put("settings", settings);
     request.setJsonEntity(jsonObject.toString());
-
     performRequest(client, request);
   }
 
@@ -116,10 +131,18 @@ public class TestUtils {
   public static void loadDataByRestClient(
       RestClient client, String indexName, String dataSetFilePath) throws IOException {
     Path path = Paths.get(getResourceFilePath(dataSetFilePath));
+    String body = new String(Files.readAllBytes(path));
     Request request =
         new Request("POST", "/" + indexName + "/_bulk?refresh=wait_for&wait_for_active_shards=all");
-    request.setJsonEntity(new String(Files.readAllBytes(path)));
-    performRequest(client, request);
+    request.setJsonEntity(body);
+    try {
+      performRequest(client, request);
+    } catch (IllegalStateException e) {
+      // Parquet indices may not support refresh=wait_for; retry without it
+      Request retry = new Request("POST", "/" + indexName + "/_bulk");
+      retry.setJsonEntity(body);
+      performRequest(client, retry);
+    }
   }
 
   /**

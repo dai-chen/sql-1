@@ -56,7 +56,13 @@ public class TestUtils {
   public static void createIndexByRestClient(RestClient client, String indexName, String mapping) {
     Request request = new Request("PUT", "/" + indexName);
     if (!isNullOrEmpty(mapping)) {
-      request.setJsonEntity(mapping);
+      JSONObject jsonObject = new JSONObject(mapping);
+      injectParquetSettings(jsonObject);
+      request.setJsonEntity(jsonObject.toString());
+    } else if (Boolean.parseBoolean(System.getProperty("tests.analytics.force_routing", "false"))) {
+      JSONObject jsonObject = new JSONObject();
+      injectParquetSettings(jsonObject);
+      request.setJsonEntity(jsonObject.toString());
     }
     performRequest(client, request);
   }
@@ -74,9 +80,19 @@ public class TestUtils {
       RestClient client, String indexName, String mapping) {
     Request request = new Request("PUT", "/" + indexName);
     JSONObject jsonObject = isNullOrEmpty(mapping) ? new JSONObject() : new JSONObject(mapping);
-    jsonObject.put("settings", new JSONObject("{\"index\":{\"hidden\":true}}"));
+    JSONObject settings =
+        jsonObject.has("settings") ? jsonObject.getJSONObject("settings") : new JSONObject();
+    JSONObject indexSettings =
+        settings.has("index") ? settings.getJSONObject("index") : new JSONObject();
+    indexSettings.put("hidden", true);
+    if (Boolean.parseBoolean(System.getProperty("tests.analytics.force_routing", "false"))) {
+      indexSettings.put("pluggable.dataformat.enabled", true);
+      indexSettings.put("pluggable.dataformat", "composite");
+      indexSettings.put("composite.primary_data_format", "parquet");
+    }
+    settings.put("index", indexSettings);
+    jsonObject.put("settings", settings);
     request.setJsonEntity(jsonObject.toString());
-
     performRequest(client, request);
   }
 
@@ -146,6 +162,20 @@ public class TestUtils {
    * @param e The IOException to check.
    * @return true if the exception is due to a refresh policy error, false otherwise.
    */
+  private static void injectParquetSettings(JSONObject jsonObject) {
+    if (Boolean.parseBoolean(System.getProperty("tests.analytics.force_routing", "false"))) {
+      JSONObject settings =
+          jsonObject.has("settings") ? jsonObject.getJSONObject("settings") : new JSONObject();
+      JSONObject indexSettings =
+          settings.has("index") ? settings.getJSONObject("index") : new JSONObject();
+      indexSettings.put("pluggable.dataformat.enabled", true);
+      indexSettings.put("pluggable.dataformat", "composite");
+      indexSettings.put("composite.primary_data_format", "parquet");
+      settings.put("index", indexSettings);
+      jsonObject.put("settings", settings);
+    }
+  }
+
   private static boolean isRefreshPolicyError(IOException e) {
     return e instanceof ResponseException
         && ((ResponseException) e).getResponse().getStatusLine().getStatusCode() == 400

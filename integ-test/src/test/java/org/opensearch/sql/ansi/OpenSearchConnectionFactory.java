@@ -31,8 +31,15 @@ public final class OpenSearchConnectionFactory implements Quidem.ConnectionFacto
   private static final String CLUSTER_PROP = "tests.rest.cluster";
 
   /** Names accepted in {@code !use <name>} directives. All map to the same OpenSearch endpoint. */
-  private static final java.util.Set<String> KNOWN_SCHEMAS =
-      java.util.Set.of("opensearch", "ansi", "scott", "post", "blank");
+  /** Accept all Calcite test schema names — they all map to the same OpenSearch endpoint. */
+  private static final java.util.Set<String> KNOWN_SCHEMAS = java.util.Set.of(
+      "opensearch", "ansi", "scott", "post", "blank",
+      "aux", "bookstore", "catchall", "foodmart", "jdbc_scott", "orinoco", "seq",
+      "mysqlfunc", "mssqlfunc", "oraclefunc",
+      "post-big-query",
+      "scott-babel", "scott-checked-rounding-half-up", "scott-lenient",
+      "scott-mssql", "scott-mysql", "scott-negative-scale",
+      "scott-negative-scale-rounding-half-up", "scott-oracle", "scott-spark");
 
   @Override
   public Connection connect(String name, boolean reference) throws Exception {

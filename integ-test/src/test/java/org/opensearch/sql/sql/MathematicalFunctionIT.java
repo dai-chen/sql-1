@@ -374,6 +374,7 @@ public class MathematicalFunctionIT extends SQLIntegTestCase {
   }
 
   protected JSONObject executeQuery(String query) throws IOException {
+    query = appendDualIfNoFrom(query);
     Request request = new Request("POST", QUERY_API_ENDPOINT);
     request.setJsonEntity(String.format(Locale.ROOT, "{\n" + "  \"query\": \"%s\"\n" + "}", query));
 

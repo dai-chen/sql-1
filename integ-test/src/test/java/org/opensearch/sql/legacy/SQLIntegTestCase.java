@@ -204,6 +204,19 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
     if (Boolean.parseBoolean(System.getProperty(ANALYTICS_FORCE_ROUTING_PROP, "false"))) {
       enableCalcite();
       enableAnalyticsForceRouting();
+      ensureDualIndex();
+    }
+  }
+
+  /** Creates a single-row dummy index used as FROM target for no-FROM queries. */
+  private void ensureDualIndex() throws IOException {
+    if (!isIndexExist(client(), DUAL_INDEX_NAME)) {
+      String mapping = "{\"mappings\":{\"properties\":{\"dummy\":{\"type\":\"integer\"}}}}";
+      TestUtils.createIndexByRestClient(client(), DUAL_INDEX_NAME, mapping);
+      String bulk = "{\"index\":{}}\n{\"dummy\":1}\n";
+      Request request = new Request("POST", "/" + DUAL_INDEX_NAME + "/_bulk");
+      request.setJsonEntity(bulk);
+      TestUtils.performRequest(client(), request);
     }
   }
 
@@ -455,8 +468,27 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
   }
 
   protected String makeRequest(String query, int fetch_size) {
+    query = appendDualIfNoFrom(query);
     return String.format("{ \"fetch_size\": \"%s\", \"query\": \"%s\" }", fetch_size, query);
   }
+
+  /**
+   * Appends {@code FROM <dual_index> LIMIT 1} to SELECT queries without a FROM clause. This
+   * prevents the V2 parser from generating a LogicalValues node which the analytics-engine planner
+   * does not yet support. The dual index is a single-row Parquet index created during init().
+   */
+  protected static String appendDualIfNoFrom(String query) {
+    if (!Boolean.parseBoolean(System.getProperty(ANALYTICS_FORCE_ROUTING_PROP, "false"))) {
+      return query;
+    }
+    String upper = query.toUpperCase().replaceAll("\\s+", " ").trim();
+    if (upper.startsWith("SELECT") && !upper.contains(" FROM ")) {
+      return query + " FROM " + DUAL_INDEX_NAME;
+    }
+    return query;
+  }
+
+  private static final String DUAL_INDEX_NAME = "opensearch_sql_dual";
 
   protected String makeRequest(String query, int fetch_size, String filterQuery) {
     return String.format(
