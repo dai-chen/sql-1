@@ -132,6 +132,7 @@ import org.opensearch.sql.ast.tree.GraphLookup.Direction;
 import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Kmeans;
+import org.opensearch.sql.ast.tree.Limit;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.Lookup.OutputStrategy;
 import org.opensearch.sql.ast.tree.ML;
@@ -246,7 +247,7 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     if (nameResolver.getSchemaName().equals(INFORMATION_SCHEMA_NAME)) {
       throw new CalciteUnsupportedException("information_schema is unsupported in Calcite");
     }
-    context.relBuilder.scan(node.getTableQualifiedName().getParts());
+    context.relBuilder.scan(List.of(nameResolver.getIdentifierName()));
     RelNode scan = context.relBuilder.peek();
 
     // Eagerly push down highlight config to the scan (highlight is a scan hint, not an operator)
@@ -763,6 +764,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   public RelNode visitHead(Head node, CalcitePlanContext context) {
     visitChildren(node, context);
     context.relBuilder.limit(node.getFrom(), node.getSize());
+    return context.relBuilder.peek();
+  }
+
+  @Override
+  public RelNode visitLimit(Limit node, CalcitePlanContext context) {
+    visitChildren(node, context);
+    context.relBuilder.limit(node.getOffset(), node.getLimit());
     return context.relBuilder.peek();
   }
 
@@ -1624,7 +1632,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   @Override
   public RelNode visitAggregation(Aggregation node, CalcitePlanContext context) {
     Argument.ArgumentMap statsArgs = Argument.ArgumentMap.of(node.getArgExprList());
-    Boolean bucketNullable = (Boolean) statsArgs.get(Argument.BUCKET_NULLABLE).getValue();
+    Literal bucketNullableLit = statsArgs.get(Argument.BUCKET_NULLABLE);
+    Boolean bucketNullable =
+        bucketNullableLit != null ? (Boolean) bucketNullableLit.getValue() : true;
     int nGroup = node.getGroupExprList().size() + (Objects.nonNull(node.getSpan()) ? 1 : 0);
     BitSet nonNullGroupMask = new BitSet(nGroup);
     if (!bucketNullable) {

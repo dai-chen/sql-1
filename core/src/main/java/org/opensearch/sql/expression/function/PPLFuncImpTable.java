@@ -92,6 +92,7 @@ import static org.opensearch.sql.expression.function.BuiltinFunctionName.INTERNA
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.INTERNAL_REGEXP_REPLACE_5;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.INTERNAL_REGEXP_REPLACE_PG_4;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.INTERNAL_TRANSLATE3;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.ISNULL;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.IS_BLANK;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.IS_EMPTY;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.IS_NOT_NULL;
@@ -133,9 +134,13 @@ import static org.opensearch.sql.expression.function.BuiltinFunctionName.MAP_APP
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MAP_CONCAT;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MAP_REMOVE;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCH;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCHPHRASE;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCHPHRASEQUERY;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCHQUERY;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCH_BOOL_PREFIX;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCH_PHRASE;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCH_PHRASE_PREFIX;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.MATCH_QUERY;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MAX;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MD5;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MEDIAN;
@@ -154,6 +159,8 @@ import static org.opensearch.sql.expression.function.BuiltinFunctionName.MONTH;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MONTHNAME;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MONTH_OF_YEAR;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MSTIME;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.MULTIMATCH;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.MULTIMATCHQUERY;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MULTIPLY;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MULTIPLYFUNCTION;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.MULTI_MATCH;
@@ -178,6 +185,7 @@ import static org.opensearch.sql.expression.function.BuiltinFunctionName.POSITIO
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.POW;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.POWER;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.QUARTER;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.QUERY;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.QUERY_STRING;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.RADIANS;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.RAND;
@@ -854,7 +862,7 @@ public class PPLFuncImpTable {
       registerOperator(SIN, SqlStdOperatorTable.SIN);
       registerOperator(CBRT, SqlStdOperatorTable.CBRT);
 
-      registerOperator(IFNULL, SqlStdOperatorTable.COALESCE);
+      registerOperator(IFNULL, PPLBuiltinOperators.ENHANCED_COALESCE);
       registerOperator(EARLIEST, PPLBuiltinOperators.EARLIEST);
       registerOperator(LATEST, PPLBuiltinOperators.LATEST);
       registerOperator(COALESCE, PPLBuiltinOperators.ENHANCED_COALESCE);
@@ -908,6 +916,14 @@ public class PPLFuncImpTable {
       registerOperator(SIMPLE_QUERY_STRING, PPLBuiltinOperators.SIMPLE_QUERY_STRING);
       registerOperator(QUERY_STRING, PPLBuiltinOperators.QUERY_STRING);
       registerOperator(MULTI_MATCH, PPLBuiltinOperators.MULTI_MATCH);
+      // Legacy relevance function aliases
+      registerOperator(MATCH_QUERY, PPLBuiltinOperators.MATCH);
+      registerOperator(MATCHQUERY, PPLBuiltinOperators.MATCH);
+      registerOperator(MATCHPHRASE, PPLBuiltinOperators.MATCH_PHRASE);
+      registerOperator(MATCHPHRASEQUERY, PPLBuiltinOperators.MATCH_PHRASE);
+      registerOperator(MULTIMATCH, PPLBuiltinOperators.MULTI_MATCH);
+      registerOperator(MULTIMATCHQUERY, PPLBuiltinOperators.MULTI_MATCH);
+      registerOperator(QUERY, PPLBuiltinOperators.QUERY_STRING);
       registerOperator(REX_EXTRACT, PPLBuiltinOperators.REX_EXTRACT);
       registerOperator(REX_EXTRACT_MULTI, PPLBuiltinOperators.REX_EXTRACT_MULTI);
       registerOperator(REX_OFFSET, PPLBuiltinOperators.REX_OFFSET);
@@ -1147,6 +1163,8 @@ public class PPLFuncImpTable {
           IS_PRESENT, SqlStdOperatorTable.IS_NOT_NULL, PPLTypeChecker.family(SqlTypeFamily.IGNORE));
       registerOperator(
           IS_NULL, SqlStdOperatorTable.IS_NULL, PPLTypeChecker.family(SqlTypeFamily.IGNORE));
+      registerOperator(
+          ISNULL, SqlStdOperatorTable.IS_NULL, PPLTypeChecker.family(SqlTypeFamily.IGNORE));
 
       // Register implementation.
       // Note, make the implementation an individual class if too complex.

@@ -42,6 +42,7 @@ import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 import org.apache.logging.log4j.util.Strings;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
+import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.Alias;
 import org.opensearch.sql.ast.expression.And;
 import org.opensearch.sql.ast.expression.Between;
@@ -563,15 +564,27 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitWindowFunction(WindowFunction node, CalcitePlanContext context) {
-    Function windowFunction = (Function) node.getFunction();
-    List<RexNode> arguments =
-        windowFunction.getFuncArgs().stream().map(arg -> analyze(arg, context)).toList();
+    String funcName;
+    List<RexNode> arguments;
+    if (node.getFunction() instanceof AggregateFunction aggFunc) {
+      funcName = aggFunc.getFuncName();
+      List<UnresolvedExpression> argExprs = new java.util.ArrayList<>();
+      if (aggFunc.getField() != null) {
+        argExprs.add(aggFunc.getField());
+      }
+      argExprs.addAll(aggFunc.getArgList());
+      arguments = argExprs.stream().map(arg -> analyze(arg, context)).toList();
+    } else {
+      Function windowFunction = (Function) node.getFunction();
+      funcName = windowFunction.getFuncName();
+      arguments = windowFunction.getFuncArgs().stream().map(arg -> analyze(arg, context)).toList();
+    }
     List<RexNode> partitions =
         node.getPartitionByList().stream()
             .map(arg -> analyze(arg, context))
             .map(this::extractRexNodeFromAlias)
             .toList();
-    return BuiltinFunctionName.ofWindowFunction(windowFunction.getFuncName())
+    return BuiltinFunctionName.ofWindowFunction(funcName)
         .map(
             functionName -> {
               RexNode field = arguments.isEmpty() ? null : arguments.getFirst();
@@ -601,9 +614,7 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
                       node.getWindowFrame());
             })
         .orElseThrow(
-            () ->
-                new UnsupportedOperationException(
-                    "Unexpected window function: " + windowFunction.getFuncName()));
+            () -> new UnsupportedOperationException("Unexpected window function: " + funcName));
   }
 
   /** extract the expression of Alias from a node */
