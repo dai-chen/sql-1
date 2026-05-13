@@ -54,7 +54,9 @@ dmlStatement
 
 // Primary DML Statements
 selectStatement
-   : querySpecification # simpleSelect
+   : querySpecification                                                     # simpleSelect
+   | querySpecification (UNION ALL? querySpecification)+  # unionSelect
+   | querySpecification EXCEPT querySpecification                            # exceptSelect
    ;
 
 adminStatement
@@ -104,8 +106,19 @@ selectElement
    ;
 
 fromClause
-   : FROM relation (whereClause)? (groupByClause)? (havingClause)? (orderByClause)? // Place it under FROM for now but actually not necessary ex. A UNION B ORDER BY
+   : FROM relation joinClause* (whereClause)? (groupByClause)? (havingClause)? (orderByClause)? // Place it under FROM for now but actually not necessary ex. A UNION B ORDER BY
    
+   ;
+
+joinClause
+   : joinType? JOIN relation (ON expression)?
+   ;
+
+joinType
+   : INNER
+   | LEFT OUTER?
+   | RIGHT OUTER?
+   | CROSS
    ;
 
 relation
@@ -641,8 +654,6 @@ textFunctionName
    | SUBSTR
    | LENGTH
    | STRCMP
-   | RIGHT
-   | LEFT
    | ASCII
    | LOCATE
    | REPLACE

@@ -158,6 +158,7 @@ import org.opensearch.sql.ast.tree.SubqueryAlias;
 import org.opensearch.sql.ast.tree.TableFunction;
 import org.opensearch.sql.ast.tree.Trendline;
 import org.opensearch.sql.ast.tree.Trendline.TrendlineType;
+import org.opensearch.sql.ast.tree.Except;
 import org.opensearch.sql.ast.tree.Union;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Values;
@@ -534,6 +535,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
             }
             expandedFields.add(resolved);
           }
+        }
+        case Alias alias -> {
+          expandedFields.add(rexVisitor.analyze(alias, context));
         }
         case AllFields ignored -> {
           currentFields.stream()
@@ -2956,6 +2960,26 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
               context.relBuilder.build(),
               context.relBuilder.literal(node.getMaxout())));
     }
+
+    return context.relBuilder.peek();
+  }
+
+  @Override
+  public RelNode visitExcept(Except node, CalcitePlanContext context) {
+    node.getLeft().accept(this, context);
+    RelNode leftNode = context.relBuilder.build();
+
+    node.getRight().accept(this, context);
+    RelNode rightNode = context.relBuilder.build();
+
+    List<RelNode> unifiedInputs =
+        SchemaUnifier.buildUnifiedSchemaWithTypeCoercion(
+            List.of(leftNode, rightNode), context);
+
+    for (RelNode input : unifiedInputs) {
+      context.relBuilder.push(input);
+    }
+    context.relBuilder.minus(false, 2);
 
     return context.relBuilder.peek();
   }
