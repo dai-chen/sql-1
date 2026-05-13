@@ -543,7 +543,14 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
               .forEach(field -> expandedFields.add(context.relBuilder.field(field)));
         }
         case Alias alias -> {
-          expandedFields.add(rexVisitor.analyze(alias, context));
+          String aliasName =
+              Strings.isNullOrEmpty(alias.getAlias()) ? alias.getName() : alias.getAlias();
+          if (alias.getDelegated() instanceof AggregateFunction
+              && currentFields.contains(aliasName)) {
+            expandedFields.add(context.relBuilder.field(aliasName));
+          } else {
+            expandedFields.add(rexVisitor.analyze(alias, context));
+          }
         }
         default ->
             throw new IllegalStateException(

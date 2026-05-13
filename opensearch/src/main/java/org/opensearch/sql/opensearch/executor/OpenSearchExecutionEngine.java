@@ -292,11 +292,14 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       Map<String, ExprValue> row = new LinkedHashMap<String, ExprValue>();
       // Loop through each column
       for (int i = 1; i <= columnCount; i++) {
-        String columnName = metaData.getColumnName(i);
-        Object value = resultSet.getObject(columnName);
+        String rawColumnName = metaData.getColumnName(i);
+        // Use alias as row key if encoded (matches getColumnName in QueryResult)
+        int sepIdx = rawColumnName.indexOf('\0');
+        String rowKey = sepIdx >= 0 ? rawColumnName.substring(sepIdx + 1) : rawColumnName;
+        Object value = resultSet.getObject(rawColumnName);
         Object converted = processValue(value, fieldTypes.get(i - 1));
         ExprValue exprValue = ExprValueUtils.fromObjectValue(converted);
-        row.put(columnName, exprValue);
+        row.put(rowKey, exprValue);
       }
       values.add(ExprTupleValue.fromExprValueMap(row));
     }
@@ -304,6 +307,14 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
     List<Column> columns = new ArrayList<>(metaData.getColumnCount());
     for (int i = 1; i <= columnCount; ++i) {
       String columnName = metaData.getColumnName(i);
+      // Decode expression name and alias encoded by CalciteRexNodeVisitor.visitAlias
+      // Format: "exprName\0alias" for SQL queries with AS-alias
+      String alias = null;
+      int sep = columnName.indexOf('\0');
+      if (sep >= 0) {
+        alias = columnName.substring(sep + 1);
+        columnName = columnName.substring(0, sep);
+      }
       RelDataType fieldType = fieldTypes.get(i - 1);
       // TODO: Correct this after fixing issue github.com/opensearch-project/sql/issues/3751
       //  The element type of struct and array is currently set to ANY.
@@ -311,7 +322,9 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       ExprType exprType;
       if (fieldType.getSqlTypeName() == SqlTypeName.ANY) {
         if (!values.isEmpty()) {
-          exprType = values.getFirst().tupleValue().get(columnName).type();
+          // Row map is keyed by alias (if present) or columnName
+          String lookupKey = alias != null ? alias : columnName;
+          exprType = values.getFirst().tupleValue().get(lookupKey).type();
         } else {
           // Using UNDEFINED instead of UNKNOWN to avoid throwing exception
           exprType = ExprCoreType.UNDEFINED;
@@ -319,7 +332,7 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       } else {
         exprType = OpenSearchTypeFactory.convertRelDataTypeToExprType(fieldType);
       }
-      columns.add(new Column(columnName, null, exprType));
+      columns.add(new Column(columnName, alias, exprType));
     }
     Schema schema = new Schema(columns);
     QueryResponse response = new QueryResponse(schema, values, Cursor.None);

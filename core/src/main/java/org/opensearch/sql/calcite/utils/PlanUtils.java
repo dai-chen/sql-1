@@ -171,6 +171,19 @@ public interface PlanUtils {
       List<RexNode> partitions,
       List<RexNode> orderKeys,
       @Nullable WindowFrame windowFrame) {
+    return makeOver(
+        context, functionName, false, field, argList, partitions, orderKeys, windowFrame);
+  }
+
+  static RexNode makeOver(
+      CalcitePlanContext context,
+      BuiltinFunctionName functionName,
+      boolean distinct,
+      RexNode field,
+      List<RexNode> argList,
+      List<RexNode> partitions,
+      List<RexNode> orderKeys,
+      @Nullable WindowFrame windowFrame) {
     if (windowFrame == null) {
       windowFrame = WindowFrame.rowsUnbounded();
     }
@@ -216,6 +229,22 @@ public interface PlanUtils {
             true,
             lowerBound,
             upperBound);
+      case RANK:
+        return withOver(
+            context.relBuilder.aggregateCall(SqlStdOperatorTable.RANK),
+            partitions,
+            orderKeys,
+            true,
+            lowerBound,
+            upperBound);
+      case DENSE_RANK:
+        return withOver(
+            context.relBuilder.aggregateCall(SqlStdOperatorTable.DENSE_RANK),
+            partitions,
+            orderKeys,
+            true,
+            lowerBound,
+            upperBound);
       case NTH_VALUE:
         return withOver(
             context.relBuilder.aggregateCall(SqlStdOperatorTable.NTH_VALUE, field, argList.get(0)),
@@ -226,7 +255,7 @@ public interface PlanUtils {
             upperBound);
       default:
         return withOver(
-            makeAggCall(context, functionName, false, field, argList),
+            makeAggCall(context, functionName, distinct, field, argList),
             partitions,
             orderKeys,
             rows,
