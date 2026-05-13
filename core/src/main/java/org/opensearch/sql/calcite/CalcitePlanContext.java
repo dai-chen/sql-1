@@ -46,6 +46,10 @@ public class CalcitePlanContext {
   private static final ThreadLocal<Boolean> legacyPreferredFlag =
       ThreadLocal.withInitial(() -> true);
 
+  /** Thread-local QueryType for use by functions that lack access to CalcitePlanContext. */
+  private static final ThreadLocal<QueryType> currentQueryType =
+      ThreadLocal.withInitial(() -> QueryType.PPL);
+
   @Getter @Setter private HighlightConfig highlightConfig;
   @Getter @Setter private boolean isResolvingJoinCondition = false;
   @Getter @Setter private boolean isResolvingSubquery = false;
@@ -78,6 +82,7 @@ public class CalcitePlanContext {
     this.config = config;
     this.sysLimit = sysLimit;
     this.queryType = queryType;
+    currentQueryType.set(queryType);
     this.connection = CalciteToolsHelper.connect(config, TYPE_FACTORY);
     this.relBuilder = CalciteToolsHelper.create(config, TYPE_FACTORY, connection);
     this.rexBuilder = new ExtendedRexBuilder(relBuilder.getRexBuilder());
@@ -158,6 +163,7 @@ public class CalcitePlanContext {
       action.run();
     } finally {
       legacyPreferredFlag.remove();
+      currentQueryType.remove();
     }
   }
 
@@ -166,6 +172,13 @@ public class CalcitePlanContext {
    */
   public static boolean isLegacyPreferred() {
     return legacyPreferredFlag.get();
+  }
+
+  /**
+   * @return the current QueryType from thread-local context.
+   */
+  public static QueryType getCurrentQueryType() {
+    return currentQueryType.get();
   }
 
   public void putRexLambdaRefMap(Map<String, RexLambdaRef> candidateMap) {

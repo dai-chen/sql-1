@@ -262,6 +262,8 @@ import static org.opensearch.sql.expression.function.BuiltinFunctionName.WEEKDAY
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.WEEKOFYEAR;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.WEEK_OF_YEAR;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.WIDTH_BUCKET;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.WILDCARDQUERY;
+import static org.opensearch.sql.expression.function.BuiltinFunctionName.WILDCARD_QUERY;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.XOR;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.YEAR;
 import static org.opensearch.sql.expression.function.BuiltinFunctionName.YEARWEEK;
@@ -514,6 +516,11 @@ public class PPLFuncImpTable {
         coercionNodes = CoercionUtils.castArguments(rexBuilder, signature.typeChecker(), fields);
       }
       if (coercionNodes == null) {
+        // For SQL queries, skip strict type validation and let Calcite handle type coercion
+        // (e.g., AVG on TIMESTAMP is valid in SQL but not in PPL).
+        if (CalcitePlanContext.getCurrentQueryType() == QueryType.SQL) {
+          return null;
+        }
         String errorMessagePattern =
             argTypes.size() <= 1
                 ? "Aggregation function %s expects field type {%s}, but got %s"
@@ -924,6 +931,8 @@ public class PPLFuncImpTable {
       registerOperator(MULTIMATCH, PPLBuiltinOperators.MULTI_MATCH);
       registerOperator(MULTIMATCHQUERY, PPLBuiltinOperators.MULTI_MATCH);
       registerOperator(QUERY, PPLBuiltinOperators.QUERY_STRING);
+      registerOperator(WILDCARD_QUERY, PPLBuiltinOperators.WILDCARD_QUERY);
+      registerOperator(WILDCARDQUERY, PPLBuiltinOperators.WILDCARD_QUERY);
       registerOperator(REX_EXTRACT, PPLBuiltinOperators.REX_EXTRACT);
       registerOperator(REX_EXTRACT_MULTI, PPLBuiltinOperators.REX_EXTRACT_MULTI);
       registerOperator(REX_OFFSET, PPLBuiltinOperators.REX_OFFSET);
@@ -1266,7 +1275,8 @@ public class PPLFuncImpTable {
           TYPEOF,
           (FunctionImp1)
               (builder, arg) ->
-                  builder.makeLiteral(getLegacyTypeName(arg.getType(), QueryType.PPL)),
+                  builder.makeLiteral(
+                      getLegacyTypeName(arg.getType(), CalcitePlanContext.getCurrentQueryType())),
           null);
       register(
           NULLIF,
