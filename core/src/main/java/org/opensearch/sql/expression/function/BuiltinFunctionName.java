@@ -428,6 +428,8 @@ public enum BuiltinFunctionName {
           .put("row_number", BuiltinFunctionName.ROW_NUMBER)
           .put("rank", BuiltinFunctionName.RANK)
           .put("dense_rank", BuiltinFunctionName.DENSE_RANK)
+          .put("percentile", BuiltinFunctionName.PERCENTILE_APPROX)
+          .put("percentile_approx", BuiltinFunctionName.PERCENTILE_APPROX)
           .build();
 
   public static Optional<BuiltinFunctionName> of(String str) {
