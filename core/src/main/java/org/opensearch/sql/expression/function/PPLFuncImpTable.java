@@ -308,6 +308,8 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.sql.calcite.CalcitePlanContext;
+import org.opensearch.sql.calcite.type.AbstractExprRelDataType;
+import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
 import org.opensearch.sql.calcite.utils.PPLOperandTypes;
 import org.opensearch.sql.calcite.utils.PlanUtils;
 import org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils;
@@ -1390,7 +1392,18 @@ public class PPLFuncImpTable {
 
       register(
           AVG,
-          (distinct, field, argList, ctx) -> ctx.relBuilder.avg(distinct, null, field),
+          (distinct, field, argList, ctx) -> {
+            // For temporal types (UDT or standard), cast to BIGINT before AVG
+            if (field != null
+                && CalcitePlanContext.getCurrentQueryType() == QueryType.SQL
+                && isTemporalType(field.getType())) {
+              RexNode castField =
+                  ctx.rexBuilder.makeCast(
+                      ctx.rexBuilder.getTypeFactory().createSqlType(SqlTypeName.BIGINT), field);
+              return ctx.relBuilder.avg(distinct, null, castField);
+            }
+            return ctx.relBuilder.avg(distinct, null, field);
+          },
           wrapSqlOperandTypeChecker(
               SqlStdOperatorTable.AVG.getOperandTypeChecker(), AVG.name(), false));
 
@@ -1489,6 +1502,15 @@ public class PPLFuncImpTable {
           wrapSqlOperandTypeChecker(
               PPLBuiltinOperators.LAST.getOperandTypeChecker(), LAST.name(), false));
     }
+  }
+
+  /** Returns true if the type is a datetime UDT or standard datetime SqlTypeName. */
+  private static boolean isTemporalType(RelDataType type) {
+    if (type instanceof AbstractExprRelDataType<?> udt) {
+      ExprUDT u = udt.getUdt();
+      return u == ExprUDT.EXPR_DATE || u == ExprUDT.EXPR_TIME || u == ExprUDT.EXPR_TIMESTAMP;
+    }
+    return SqlTypeFamily.DATETIME.getTypeNames().contains(type.getSqlTypeName());
   }
 
   static List<RexNode> resolveTimeField(List<RexNode> argList, CalcitePlanContext ctx) {
