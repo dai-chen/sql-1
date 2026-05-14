@@ -132,4 +132,104 @@ public class UnifiedRelevanceSearchSqlV2Test extends UnifiedQueryTestBase {
               LogicalTableScan(table=[[catalog, employees]])
             """);
   }
+
+  // Alias tests for single-field relevance functions
+
+  @Test
+  public void matchQuery() {
+    givenQuery("SELECT * FROM catalog.employees WHERE match_query(name, 'John')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[match_query(MAP('field', $1), MAP('query', 'John':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void matchquery() {
+    givenQuery("SELECT * FROM catalog.employees WHERE matchquery(name, 'John')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[matchquery(MAP('field', $1), MAP('query', 'John':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void matchphrase() {
+    givenQuery("SELECT * FROM catalog.employees WHERE matchphrase(name, 'John Doe')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[matchphrase(MAP('field', $1), MAP('query', 'John Doe':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void matchphrasequery() {
+    givenQuery("SELECT * FROM catalog.employees WHERE matchphrasequery(name, 'John Doe')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[matchphrasequery(MAP('field', $1), MAP('query', 'John Doe':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void multimatch() {
+    givenQuery("SELECT * FROM catalog.employees WHERE multimatch(['name', 'department'], 'John')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[multimatch(MAP('fields', MAP('name':VARCHAR, 1.0E0:DOUBLE, 'department':VARCHAR, 1.0E0:DOUBLE)), MAP('query', 'John':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void multimatchquery() {
+    givenQuery(
+            "SELECT * FROM catalog.employees WHERE multimatchquery(['name', 'department'], 'John')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[multimatchquery(MAP('fields', MAP('name':VARCHAR, 1.0E0:DOUBLE, 'department':VARCHAR, 1.0E0:DOUBLE)), MAP('query', 'John':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  // No-field relevance function
+
+  @Test
+  public void query() {
+    givenQuery("SELECT * FROM catalog.employees WHERE query('name:John')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[query(MAP('query', 'name:John':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  // Single-field: wildcard_query
+
+  @Test
+  public void wildcardQuery() {
+    givenQuery("SELECT * FROM catalog.employees WHERE wildcard_query(name, 'John*')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[wildcard_query(MAP('field', $1), MAP('query', 'John*':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void wildcardquery() {
+    givenQuery("SELECT * FROM catalog.employees WHERE wildcardquery(name, 'John*')")
+        .assertPlan(
+            """
+            LogicalFilter(condition=[wildcardquery(MAP('field', $1), MAP('query', 'John*':VARCHAR))])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  // Score wrapper function — requires special AstBuilder handling (wraps inner relevance function)
+  // Not yet supported in the unified Calcite path; tracked separately.
 }

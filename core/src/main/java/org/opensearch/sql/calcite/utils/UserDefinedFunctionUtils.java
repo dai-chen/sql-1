@@ -81,19 +81,23 @@ public class UserDefinedFunctionUtils {
           "match_phrase",
           "match_bool_prefix",
           "match_phrase_prefix",
+          // TODO: Functions below are registered for SQL V2 AstBuilder compatibility but lack
+          //  PredicateAnalyzer pushdown handlers. Only reachable from SQL (not PPL grammar).
           "query",
           "wildcard_query",
           "wildcardquery",
-          "score",
-          "scorequery",
-          "score_query",
           "match_query",
           "matchquery",
           "matchphrase",
           "matchphrasequery");
   public static Set<String> MULTI_FIELDS_RELEVANCE_FUNCTION_SET =
       ImmutableSet.of(
-          "simple_query_string", "query_string", "multi_match", "multimatch", "multimatchquery");
+          "simple_query_string",
+          "query_string",
+          "multi_match",
+          // TODO: Same as above — registered for SQL V2 but lack pushdown handlers.
+          "multimatch",
+          "multimatchquery");
   public static String IP_FUNCTION_NAME = "IP";
 
   /**

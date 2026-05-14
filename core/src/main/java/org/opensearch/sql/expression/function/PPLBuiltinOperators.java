@@ -429,11 +429,6 @@ public class PPLBuiltinOperators extends ReflectiveSqlOperatorTable {
       RELEVANCE_QUERY_FUNCTION_INSTANCE.toUDF("wildcard_query");
   public static final SqlOperator WILDCARDQUERY =
       RELEVANCE_QUERY_FUNCTION_INSTANCE.toUDF("wildcardquery");
-  public static final SqlOperator SCORE = RELEVANCE_QUERY_FUNCTION_INSTANCE.toUDF("score");
-  public static final SqlOperator SCOREQUERY =
-      RELEVANCE_QUERY_FUNCTION_INSTANCE.toUDF("scorequery");
-  public static final SqlOperator SCORE_QUERY =
-      RELEVANCE_QUERY_FUNCTION_INSTANCE.toUDF("score_query");
   public static final SqlOperator MATCH_QUERY =
       RELEVANCE_QUERY_FUNCTION_INSTANCE.toUDF("match_query");
   public static final SqlOperator MATCHQUERY =
