@@ -358,9 +358,10 @@ public class QueryService {
   }
 
   // TODO https://github.com/opensearch-project/sql/issues/3457
-  // Calcite is not available for SQL query now. Maybe release in 3.1.0?
+  // TODO: PoC only — in production, SQL routes through unified query API (RestUnifiedQueryAction),
+  //  not through this flag. Remove this change when migrating to the unified query path.
   private boolean shouldUseCalcite(QueryType queryType) {
-    return isCalciteEnabled(settings) && queryType == QueryType.PPL;
+    return isCalciteEnabled(settings) && (queryType == QueryType.PPL || queryType == QueryType.SQL);
   }
 
   private FrameworkConfig buildFrameworkConfig() {

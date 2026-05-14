@@ -9,7 +9,11 @@ import static org.opensearch.sql.executor.execution.QueryPlanFactory.NO_CONSUMER
 
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.opensearch.sql.ast.expression.Argument;
+import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.statement.Statement;
+import org.opensearch.sql.ast.tree.Join;
+import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.executor.ExecutionEngine.ExplainResponse;
 import org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
@@ -20,6 +24,7 @@ import org.opensearch.sql.executor.execution.QueryPlanFactory;
 import org.opensearch.sql.sql.antlr.SQLSyntaxParser;
 import org.opensearch.sql.sql.domain.SQLQueryRequest;
 import org.opensearch.sql.sql.parser.AstBuilder;
+import org.opensearch.sql.sql.parser.AstExpressionBuilder;
 import org.opensearch.sql.sql.parser.AstStatementBuilder;
 
 /** SQL service. */
@@ -95,7 +100,92 @@ public class SQLService {
       Statement statement =
           cst.accept(
               new AstStatementBuilder(
-                  new AstBuilder(request.getQuery()),
+                  new AstBuilder(request.getQuery()) {
+                    @Override
+                    protected AstExpressionBuilder createExpressionBuilder() {
+                      final var planBuilder = this;
+                      return new AstExpressionBuilder() {
+                        @Override
+                        public UnresolvedExpression visitInSubqueryPredicate(
+                            org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser
+                                    .InSubqueryPredicateContext
+                                ctx) {
+                          UnresolvedExpression field = visit(ctx.predicate());
+                          UnresolvedPlan subquery = planBuilder.visit(ctx.selectStatement());
+                          UnresolvedExpression inSub =
+                              new org.opensearch.sql.ast.expression.subquery.InSubquery(
+                                  java.util.List.of(field), subquery);
+                          return ctx.NOT() != null
+                              ? org.opensearch.sql.ast.dsl.AstDSL.not(inSub)
+                              : inSub;
+                        }
+
+                        @Override
+                        public UnresolvedExpression visitExistsExpressionAtom(
+                            org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser
+                                    .ExistsExpressionAtomContext
+                                ctx) {
+                          UnresolvedPlan subquery = planBuilder.visit(ctx.selectStatement());
+                          return new org.opensearch.sql.ast.expression.subquery.ExistsSubquery(
+                              subquery);
+                        }
+                      };
+                    }
+
+                    @Override
+                    public UnresolvedPlan visitJoinClause(
+                        org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.JoinClauseContext
+                            ctx) {
+                      UnresolvedPlan rightRelation = visit(ctx.relation());
+                      Join.JoinType joinType = resolveJoinType(ctx.joinType());
+                      java.util.Optional<UnresolvedExpression> joinCondition =
+                          ctx.expression() != null
+                              ? java.util.Optional.of(visitAstExpression(ctx.expression()))
+                              : java.util.Optional.empty();
+                      return new Join(
+                          rightRelation,
+                          java.util.Optional.empty(),
+                          java.util.Optional.empty(),
+                          joinType,
+                          joinCondition,
+                          new Join.JoinHint(),
+                          java.util.Optional.empty(),
+                          Argument.ArgumentMap.empty());
+                    }
+
+                    private Join.JoinType resolveJoinType(
+                        org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.JoinTypeContext
+                            ctx) {
+                      if (ctx == null) return Join.JoinType.INNER;
+                      if (ctx.LEFT() != null) return Join.JoinType.LEFT;
+                      if (ctx.RIGHT() != null) return Join.JoinType.RIGHT;
+                      if (ctx.CROSS() != null) return Join.JoinType.CROSS;
+                      return Join.JoinType.INNER;
+                    }
+
+                    @Override
+                    public UnresolvedPlan visitUnionSelect(
+                        org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.UnionSelectContext
+                            ctx) {
+                      java.util.List<UnresolvedPlan> plans =
+                          ctx.querySpecification().stream()
+                              .map(this::visit)
+                              .collect(java.util.stream.Collectors.toList());
+                      UnresolvedPlan first = plans.remove(0);
+                      org.opensearch.sql.ast.tree.Union union =
+                          new org.opensearch.sql.ast.tree.Union(plans, 0);
+                      union.attach(first);
+                      return union;
+                    }
+
+                    @Override
+                    public UnresolvedPlan visitExceptSelect(
+                        org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.ExceptSelectContext
+                            ctx) {
+                      throw new org.opensearch.sql.common.antlr.SyntaxCheckException(
+                          "EXCEPT is not yet supported. Falling back to legacy engine.");
+                    }
+                  },
                   AstStatementBuilder.StatementBuilderContext.builder()
                       .isExplain(isExplainRequest)
                       .fetchSize(request.getFetchSize())

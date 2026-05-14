@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
@@ -42,6 +43,7 @@ import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 import org.apache.logging.log4j.util.Strings;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
+import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.Alias;
 import org.opensearch.sql.ast.expression.And;
 import org.opensearch.sql.ast.expression.Between;
@@ -83,12 +85,17 @@ import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.exception.CalciteUnsupportedException;
 import org.opensearch.sql.exception.ExpressionEvaluationException;
 import org.opensearch.sql.exception.SemanticCheckException;
+import org.opensearch.sql.executor.QueryType;
 import org.opensearch.sql.expression.function.BuiltinFunctionName;
 import org.opensearch.sql.expression.function.PPLFuncImpTable;
 
 @RequiredArgsConstructor
 public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalcitePlanContext> {
   private final CalciteRelNodeVisitor planVisitor;
+
+  private static final Set<BuiltinFunctionName> PURE_WINDOW_FUNCTIONS =
+      Set.of(
+          BuiltinFunctionName.ROW_NUMBER, BuiltinFunctionName.RANK, BuiltinFunctionName.DENSE_RANK);
 
   public RexNode analyze(UnresolvedExpression unresolved, CalcitePlanContext context) {
     return unresolved.accept(this, context);
@@ -338,8 +345,14 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
   public RexNode visitAlias(Alias node, CalcitePlanContext context) {
     RexNode expr = analyze(node.getDelegated(), context);
     // Only OpenSearch SQL uses node.getAlias, OpenSearch PPL uses node.getName.
-    return context.relBuilder.alias(
-        expr, Strings.isEmpty(node.getAlias()) ? node.getName() : node.getAlias());
+    String aliasName = Strings.isEmpty(node.getAlias()) ? node.getName() : node.getAlias();
+    // For SQL queries, encode expression name and alias in field name so the response
+    // builder can reconstruct both (V2 compatibility: name=expr, alias=AS-alias).
+    if (context.queryType == QueryType.SQL && !Strings.isEmpty(node.getAlias())) {
+      String exprName = node.getName() != null ? node.getName() : aliasName;
+      aliasName = exprName + "\u0000" + node.getAlias();
+    }
+    return context.relBuilder.alias(expr, aliasName);
   }
 
   @Override
@@ -563,15 +576,49 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitWindowFunction(WindowFunction node, CalcitePlanContext context) {
-    Function windowFunction = (Function) node.getFunction();
-    List<RexNode> arguments =
-        windowFunction.getFuncArgs().stream().map(arg -> analyze(arg, context)).toList();
+    String funcName;
+    List<RexNode> arguments;
+    final boolean isDistinct;
+    if (node.getFunction() instanceof AggregateFunction aggFunc) {
+      funcName = aggFunc.getFuncName();
+      isDistinct = Boolean.TRUE.equals(aggFunc.getDistinct());
+      List<UnresolvedExpression> argExprs = new java.util.ArrayList<>();
+      if (aggFunc.getField() != null) {
+        argExprs.add(aggFunc.getField());
+      }
+      argExprs.addAll(aggFunc.getArgList());
+      arguments = argExprs.stream().map(arg -> analyze(arg, context)).toList();
+    } else {
+      Function windowFunction = (Function) node.getFunction();
+      funcName = windowFunction.getFuncName();
+      isDistinct = false;
+      arguments = windowFunction.getFuncArgs().stream().map(arg -> analyze(arg, context)).toList();
+    }
     List<RexNode> partitions =
         node.getPartitionByList().stream()
             .map(arg -> analyze(arg, context))
             .map(this::extractRexNodeFromAlias)
             .toList();
-    return BuiltinFunctionName.ofWindowFunction(windowFunction.getFuncName())
+    List<RexNode> orderKeys =
+        node.getSortList().stream()
+            .map(
+                pair -> {
+                  RexNode sortField = analyze(pair.getRight(), context);
+                  if (pair.getLeft().getSortOrder()
+                      == org.opensearch.sql.ast.tree.Sort.SortOrder.DESC) {
+                    sortField = context.relBuilder.desc(sortField);
+                  }
+                  if (pair.getLeft().getNullOrder()
+                      == org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_LAST) {
+                    sortField = context.relBuilder.nullsLast(sortField);
+                  } else if (pair.getLeft().getNullOrder()
+                      == org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_FIRST) {
+                    sortField = context.relBuilder.nullsFirst(sortField);
+                  }
+                  return sortField;
+                })
+            .toList();
+    return BuiltinFunctionName.ofWindowFunction(funcName)
         .map(
             functionName -> {
               RexNode field = arguments.isEmpty() ? null : arguments.getFirst();
@@ -579,6 +626,18 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
                   (arguments.isEmpty() || arguments.size() == 1)
                       ? Collections.emptyList()
                       : arguments.subList(1, arguments.size());
+              // Pure window functions (ROW_NUMBER, RANK, DENSE_RANK) are not registered
+              // in aggFunctionRegistry, so skip validation for them.
+              if (PURE_WINDOW_FUNCTIONS.contains(functionName)) {
+                return PlanUtils.makeOver(
+                    context,
+                    functionName,
+                    field,
+                    args,
+                    partitions,
+                    orderKeys,
+                    node.getWindowFrame());
+              }
               List<RexNode> nodes =
                   PPLFuncImpTable.INSTANCE.validateAggFunctionSignature(
                       functionName, field, args, context.rexBuilder);
@@ -586,24 +645,24 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
                   ? PlanUtils.makeOver(
                       context,
                       functionName,
+                      isDistinct,
                       nodes.getFirst(),
                       nodes.size() <= 1 ? Collections.emptyList() : nodes.subList(1, nodes.size()),
                       partitions,
-                      List.of(),
+                      orderKeys,
                       node.getWindowFrame())
                   : PlanUtils.makeOver(
                       context,
                       functionName,
+                      isDistinct,
                       field,
                       args,
                       partitions,
-                      List.of(),
+                      orderKeys,
                       node.getWindowFrame());
             })
         .orElseThrow(
-            () ->
-                new UnsupportedOperationException(
-                    "Unexpected window function: " + windowFunction.getFuncName()));
+            () -> new UnsupportedOperationException("Unexpected window function: " + funcName));
   }
 
   /** extract the expression of Alias from a node */
