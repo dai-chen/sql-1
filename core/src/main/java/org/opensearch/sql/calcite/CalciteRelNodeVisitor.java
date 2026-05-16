@@ -132,6 +132,7 @@ import org.opensearch.sql.ast.tree.GraphLookup.Direction;
 import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Kmeans;
+import org.opensearch.sql.ast.tree.Limit;
 import org.opensearch.sql.ast.tree.Lookup;
 import org.opensearch.sql.ast.tree.Lookup.OutputStrategy;
 import org.opensearch.sql.ast.tree.ML;
@@ -146,6 +147,7 @@ import org.opensearch.sql.ast.tree.Project;
 import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Regex;
 import org.opensearch.sql.ast.tree.Relation;
+import org.opensearch.sql.ast.tree.RelationSubquery;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Replace;
 import org.opensearch.sql.ast.tree.ReplacePair;
@@ -541,6 +543,25 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
               .filter(addedFields::add)
               .forEach(field -> expandedFields.add(context.relBuilder.field(field)));
         }
+        case Alias alias -> {
+          String aliasName =
+              Strings.isNullOrEmpty(alias.getAlias()) ? alias.getName() : alias.getAlias();
+          // When an aggregate was already computed (its output name matches a current field),
+          // reference the existing field instead of re-analyzing (which would return null).
+          if (alias.getDelegated() instanceof AggregateFunction) {
+            String aggFieldName = alias.getName();
+            if (currentFields.contains(aliasName)) {
+              expandedFields.add(context.relBuilder.field(aliasName));
+            } else if (aggFieldName != null && currentFields.contains(aggFieldName)) {
+              expandedFields.add(
+                  context.relBuilder.alias(context.relBuilder.field(aggFieldName), aliasName));
+            } else {
+              expandedFields.add(rexVisitor.analyze(alias, context));
+            }
+          } else {
+            expandedFields.add(rexVisitor.analyze(alias, context));
+          }
+        }
         default ->
             throw new IllegalStateException(
                 "Unexpected expression type in project list: " + expr.getClass().getSimpleName());
@@ -760,6 +781,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   public RelNode visitHead(Head node, CalcitePlanContext context) {
     visitChildren(node, context);
     context.relBuilder.limit(node.getFrom(), node.getSize());
+    return context.relBuilder.peek();
+  }
+
+  @Override
+  public RelNode visitLimit(Limit node, CalcitePlanContext context) {
+    visitChildren(node, context);
+    context.relBuilder.limit(node.getOffset(), node.getLimit());
     return context.relBuilder.peek();
   }
 
@@ -1621,7 +1649,8 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   @Override
   public RelNode visitAggregation(Aggregation node, CalcitePlanContext context) {
     Argument.ArgumentMap statsArgs = Argument.ArgumentMap.of(node.getArgExprList());
-    Boolean bucketNullable = (Boolean) statsArgs.get(Argument.BUCKET_NULLABLE).getValue();
+    boolean bucketNullable =
+        (Boolean) statsArgs.getOrDefault(Argument.BUCKET_NULLABLE, Literal.TRUE).getValue();
     int nGroup = node.getGroupExprList().size() + (Objects.nonNull(node.getSpan()) ? 1 : 0);
     BitSet nonNullGroupMask = new BitSet(nGroup);
     if (!bucketNullable) {
@@ -1925,6 +1954,15 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
   public RelNode visitSubqueryAlias(SubqueryAlias node, CalcitePlanContext context) {
     visitChildren(node, context);
     context.relBuilder.as(node.getAlias());
+    return context.relBuilder.peek();
+  }
+
+  @Override
+  public RelNode visitRelationSubquery(RelationSubquery node, CalcitePlanContext context) {
+    // Derived table in FROM clause: SELECT ... FROM (SELECT ...) AS t
+    // Visit the inner query, then apply the alias as the relation name.
+    visitChildren(node, context);
+    context.relBuilder.as(node.getAliasAsTableName());
     return context.relBuilder.peek();
   }
 
@@ -4122,12 +4160,14 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
 
   @Override
   public RelNode visitValues(Values values, CalcitePlanContext context) {
-    if (values.getValues() == null || values.getValues().isEmpty()) {
+    List<List<Literal>> rows = values.getValues();
+    if (rows == null || rows.isEmpty() || (rows.size() == 1 && rows.get(0).isEmpty())) {
+      // Single empty row (dual table) = SELECT without FROM. Provide a 0-column relation
+      // so subsequent Project can evaluate constant expressions.
       context.relBuilder.values(context.relBuilder.getTypeFactory().builder().build());
       return context.relBuilder.peek();
-    } else {
-      throw new CalciteUnsupportedException("Explicit values node is unsupported in Calcite");
     }
+    throw new CalciteUnsupportedException("Inline VALUES with literal rows is unsupported");
   }
 
   @Override

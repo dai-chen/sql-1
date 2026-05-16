@@ -69,6 +69,7 @@ import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.Node;
 import org.opensearch.sql.ast.expression.IntervalUnit;
 import org.opensearch.sql.ast.expression.SpanUnit;
+import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.expression.WindowBound;
 import org.opensearch.sql.ast.expression.WindowFrame;
 import org.opensearch.sql.ast.tree.Relation;
@@ -163,9 +164,54 @@ public interface PlanUtils {
     }
   }
 
+  /**
+   * Translates a list of (SortOption, UnresolvedExpression) pairs into Calcite RexNodes suitable
+   * for use as window function ORDER BY keys, applying DESC and NULL FIRST/LAST directives via
+   * RelBuilder.
+   */
+  static List<RexNode> translateOrderKeys(
+      List<
+              org.apache.commons.lang3.tuple.Pair<
+                  org.opensearch.sql.ast.tree.Sort.SortOption, UnresolvedExpression>>
+          sortList,
+      java.util.function.Function<UnresolvedExpression, RexNode> analyzer,
+      CalcitePlanContext context) {
+    return sortList.stream()
+        .map(
+            pair -> {
+              RexNode sortField = analyzer.apply(pair.getRight());
+              if (pair.getLeft().getSortOrder()
+                  == org.opensearch.sql.ast.tree.Sort.SortOrder.DESC) {
+                sortField = context.relBuilder.desc(sortField);
+              }
+              if (pair.getLeft().getNullOrder()
+                  == org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_LAST) {
+                sortField = context.relBuilder.nullsLast(sortField);
+              } else if (pair.getLeft().getNullOrder()
+                  == org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_FIRST) {
+                sortField = context.relBuilder.nullsFirst(sortField);
+              }
+              return sortField;
+            })
+        .toList();
+  }
+
   static RexNode makeOver(
       CalcitePlanContext context,
       BuiltinFunctionName functionName,
+      RexNode field,
+      List<RexNode> argList,
+      List<RexNode> partitions,
+      List<RexNode> orderKeys,
+      @Nullable WindowFrame windowFrame) {
+    return makeOver(
+        context, functionName, false, field, argList, partitions, orderKeys, windowFrame);
+  }
+
+  static RexNode makeOver(
+      CalcitePlanContext context,
+      BuiltinFunctionName functionName,
+      boolean distinct,
       RexNode field,
       List<RexNode> argList,
       List<RexNode> partitions,
@@ -216,6 +262,22 @@ public interface PlanUtils {
             true,
             lowerBound,
             upperBound);
+      case RANK:
+        return withOver(
+            context.relBuilder.aggregateCall(SqlStdOperatorTable.RANK),
+            partitions,
+            orderKeys,
+            true,
+            lowerBound,
+            upperBound);
+      case DENSE_RANK:
+        return withOver(
+            context.relBuilder.aggregateCall(SqlStdOperatorTable.DENSE_RANK),
+            partitions,
+            orderKeys,
+            true,
+            lowerBound,
+            upperBound);
       case NTH_VALUE:
         return withOver(
             context.relBuilder.aggregateCall(SqlStdOperatorTable.NTH_VALUE, field, argList.get(0)),
@@ -226,7 +288,7 @@ public interface PlanUtils {
             upperBound);
       default:
         return withOver(
-            makeAggCall(context, functionName, false, field, argList),
+            makeAggCall(context, functionName, distinct, field, argList),
             partitions,
             orderKeys,
             rows,
