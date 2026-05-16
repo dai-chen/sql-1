@@ -259,4 +259,105 @@ public class UnifiedQueryPlannerSqlTest extends UnifiedQueryTestBase {
             """)
         .assertErrorMessage("Encountered");
   }
+
+  @Test
+  public void testSqlLimitOffset() {
+    givenQuery(
+            """
+            SELECT name
+            FROM catalog.employees
+            LIMIT 10 OFFSET 5\
+            """)
+        .assertPlanContains("LogicalSort(offset=[5], fetch=[10])");
+  }
+
+  @Test
+  public void testSqlAggregateWithAlias() {
+    givenQuery(
+            """
+            SELECT department, COUNT(*) AS cnt
+            FROM catalog.employees
+            GROUP BY department\
+            """)
+        .assertPlanContains("LogicalAggregate(group=[{0}]")
+        .assertPlanContains("COUNT()");
+  }
+
+  @Test
+  public void testSqlWindowFunctionWithOrderBy() {
+    givenQuery(
+            """
+            SELECT name, SUM(age) OVER (PARTITION BY department ORDER BY id) AS running_sum
+            FROM catalog.employees\
+            """)
+        .assertPlanContains("OVER")
+        .assertPlanContains("ORDER BY");
+  }
+
+  @Test
+  public void testSqlWindowRankFunction() {
+    givenQuery(
+            """
+            SELECT name, RANK() OVER (ORDER BY age DESC) AS rnk
+            FROM catalog.employees\
+            """)
+        .assertPlanContains("RANK() OVER");
+  }
+
+  @Test
+  public void testSqlWindowDistinctAggregate() {
+    givenQuery(
+            """
+            SELECT name, COUNT(DISTINCT department) OVER (PARTITION BY department) AS dist_cnt
+            FROM catalog.employees\
+            """)
+        .assertPlanContains("OVER")
+        .assertPlanContains("COUNT");
+  }
+
+  @Test
+  public void testSqlGroupByWithoutBucketNullable() {
+    givenQuery(
+            """
+            SELECT age, COUNT(*) AS cnt
+            FROM catalog.employees
+            GROUP BY age\
+            """)
+        .assertPlanContains("LogicalAggregate(group=[{0}]")
+        .assertPlanContains("COUNT()");
+  }
+
+  @Test
+  public void testSqlSelectWithAlias() {
+    givenQuery(
+            """
+            SELECT age AS employee_age, name AS employee_name
+            FROM catalog.employees\
+            """)
+        .assertPlanContains("LogicalProject")
+        .assertPlanContains("LogicalTableScan");
+  }
+
+  @Test
+  public void testSqlDerivedTableInFromClause() {
+    // SELECT ... FROM (SELECT ...) AS t — exercises visitRelationSubquery override.
+    givenQuery(
+            """
+            SELECT t.id
+            FROM (SELECT id, name FROM catalog.employees WHERE age > 30) AS t\
+            """)
+        .assertPlanContains("LogicalProject")
+        .assertPlanContains("LogicalFilter")
+        .assertPlanContains("LogicalTableScan");
+  }
+
+  @Test
+  public void testSqlSelectWithoutFromClause() {
+    // SELECT 1 — exercises visitValues dual-table case (single empty row).
+    givenQuery(
+            """
+            SELECT 1\
+            """)
+        .assertPlanContains("LogicalValues");
+  }
 }

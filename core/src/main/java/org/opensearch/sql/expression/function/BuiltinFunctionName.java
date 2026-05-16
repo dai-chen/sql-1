@@ -425,6 +425,9 @@ public enum BuiltinFunctionName {
           .put("dc", BuiltinFunctionName.DISTINCT_COUNT_APPROX)
           .put("distinct_count", BuiltinFunctionName.DISTINCT_COUNT_APPROX)
           .put("pattern", BuiltinFunctionName.INTERNAL_PATTERN)
+          .put("row_number", BuiltinFunctionName.ROW_NUMBER)
+          .put("rank", BuiltinFunctionName.RANK)
+          .put("dense_rank", BuiltinFunctionName.DENSE_RANK)
           .build();
 
   public static Optional<BuiltinFunctionName> of(String str) {
@@ -439,6 +442,17 @@ public enum BuiltinFunctionName {
   public static Optional<BuiltinFunctionName> ofWindowFunction(String functionName) {
     return Optional.ofNullable(
         WINDOW_FUNC_MAPPING.getOrDefault(functionName.toLowerCase(Locale.ROOT), null));
+  }
+
+  /**
+   * Pure window functions (no aggregate semantics, take no field argument). They are not registered
+   * in the aggregate function registry, so callers must skip aggregate validation.
+   */
+  private static final Set<BuiltinFunctionName> PURE_WINDOW_FUNCTIONS =
+      Set.of(ROW_NUMBER, RANK, DENSE_RANK);
+
+  public static boolean isPureWindowFunction(BuiltinFunctionName functionName) {
+    return PURE_WINDOW_FUNCTIONS.contains(functionName);
   }
 
   public static final Set<BuiltinFunctionName> COMPARATORS =
