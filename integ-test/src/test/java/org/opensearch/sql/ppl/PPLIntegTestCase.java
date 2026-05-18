@@ -42,12 +42,17 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
   @Rule public final RetryProcessor retryProcessor = new RetryProcessor();
   public static final Integer DEFAULT_SUBSEARCH_MAXOUT = 10000;
   public static final Integer DEFAULT_JOIN_SUBSEARCH_MAXOUT = 50000;
+  public static final String ANALYTICS_FORCE_ROUTING_PROP = "tests.analytics.force_routing";
 
   @Override
   protected void init() throws Exception {
     super.init();
     updatePushdownSettings();
     disableCalcite(); // calcite is enabled by default from 3.3.0
+    if (Boolean.parseBoolean(System.getProperty(ANALYTICS_FORCE_ROUTING_PROP, "false"))) {
+      enableCalcite();
+      enableAnalyticsForceRouting();
+    }
   }
 
   /**
@@ -243,6 +248,12 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     updateClusterSettings(
         new SQLIntegTestCase.ClusterSetting(
             "persistent", Settings.Key.CALCITE_ENGINE_ENABLED.getKeyValue(), "false"));
+  }
+
+  public static void enableAnalyticsForceRouting() throws IOException {
+    updateClusterSettings(
+        new SQLIntegTestCase.ClusterSetting(
+            "persistent", Settings.Key.CALCITE_ANALYTICS_FORCE_ROUTING.getKeyValue(), "true"));
   }
 
   public static void withCalciteEnabled(Runnable f) throws IOException {

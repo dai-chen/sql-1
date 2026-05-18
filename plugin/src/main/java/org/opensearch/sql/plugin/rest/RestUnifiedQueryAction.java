@@ -88,6 +88,12 @@ public class RestUnifiedQueryAction {
     if (query == null || query.isEmpty()) {
       return false;
     }
+    // When force_routing is enabled, route ALL queries to analytics-engine unconditionally.
+    if (Boolean.TRUE.equals(
+        pluginSettings.getSettingValue(
+            org.opensearch.sql.common.setting.Settings.Key.CALCITE_ANALYTICS_FORCE_ROUTING))) {
+      return true;
+    }
     try (UnifiedQueryContext context = buildParsingContext(queryType)) {
       return extractIndexName(query, queryType, context)
           .map(this::stripSchemaPrefix)

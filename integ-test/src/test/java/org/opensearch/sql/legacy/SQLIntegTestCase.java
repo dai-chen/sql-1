@@ -11,6 +11,9 @@ import static org.opensearch.sql.legacy.plugin.RestSqlAction.CURSOR_CLOSE_ENDPOI
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.EXPLAIN_API_ENDPOINT;
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.QUERY_API_ENDPOINT;
 import static org.opensearch.sql.ppl.PPLIntegTestCase.disableCalcite;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.ANALYTICS_FORCE_ROUTING_PROP;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.enableAnalyticsForceRouting;
+import static org.opensearch.sql.ppl.PPLIntegTestCase.enableCalcite;
 
 import com.google.common.base.Strings;
 import java.io.IOException;
@@ -195,6 +198,10 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
   protected void init() throws Exception {
     disableCalcite();
     increaseMaxCompilationsRate();
+    if (Boolean.parseBoolean(System.getProperty(ANALYTICS_FORCE_ROUTING_PROP, "false"))) {
+      enableCalcite();
+      enableAnalyticsForceRouting();
+    }
   }
 
   /**
