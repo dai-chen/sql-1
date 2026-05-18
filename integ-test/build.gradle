@@ -216,6 +216,9 @@ ext {
         task.exclude 'org/opensearch/sql/correctness/**'
         task.exclude 'org/opensearch/sql/jdbc/**'
         task.exclude 'org/opensearch/sql/security/**'
+        // Branch-only ITs not on main — exclude for comparable results.
+        task.exclude 'org/opensearch/sql/sql/clickbench/**'
+        task.exclude 'org/opensearch/sql/sql/tpch/**'
 
         // The test task hits whatever cluster `-Dtests.rest.cluster=...` points at; no testClusters
         // dependency. Only run if the user supplied a cluster.
