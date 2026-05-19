@@ -13,9 +13,11 @@ Run the full SQL V2 + Legacy IT suite against the analytics-engine (DataFusion) 
 ## How It Works
 
 1. Every test index is created with parquet-backed settings (`tests.analytics.parquet_indices=true`)
-2. The cluster setting `plugins.calcite.analytics.force_routing=true` routes ALL queries through analytics-engine
+2. `RestUnifiedQueryAction.isAnalyticsIndex()` detects composite/parquet index metadata and routes data queries to analytics-engine
 3. The analytics-engine (DataFusion) executes queries instead of the standard Calcite/DSL path
 4. Tests that pass = compatible with analytics-engine; tests that fail = gaps to fill
+
+> **Note:** Metadata, explain, and validation tests that don't hit data indices bypass the analytics-engine path entirely — those passes don't reflect DataFusion compatibility.
 
 ## Quick Start
 
@@ -66,7 +68,6 @@ cargo build --release
 | Setting | Where | Purpose |
 |---------|-------|---------|
 | `tests.analytics.parquet_indices=true` | Gradle sys prop | Inject parquet settings into all test indices |
-| `plugins.calcite.analytics.force_routing=true` | Cluster setting | Route ALL queries through analytics-engine |
 | `opensearch.experimental.feature.transport.stream.enabled=true` | JVM flag (run.gradle patch) | Enable StreamTransportService for analytics-engine |
 | `opensearch.experimental.feature.pluggable.dataformat.enabled=true` | JVM flag (auto-set) | Enable parquet data format |
 

@@ -25,12 +25,9 @@ echo "=== Cluster plugins ==="
 curl -s "http://$CLUSTER/_cat/plugins?v"
 echo ""
 
-# Enable force routing — route ALL queries through analytics-engine
-echo "=== Enabling analytics force routing ==="
-curl -sf -X PUT "http://$CLUSTER/_cluster/settings" \
-  -H 'Content-Type: application/json' \
-  -d '{"persistent":{"plugins.calcite.analytics.force_routing":true}}'
-echo ""
+# Routing is handled by tests.analytics.parquet_indices=true which injects
+# composite/parquet index settings — RestUnifiedQueryAction.isAnalyticsIndex()
+# detects these and routes data queries to analytics-engine automatically.
 
 # Run tests
 echo ""

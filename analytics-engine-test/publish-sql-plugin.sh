@@ -11,7 +11,7 @@ M2_DIR="$HOME/.m2/repository/$GROUP_PATH/$ARTIFACT/$VERSION"
 
 echo "=== Building SQL plugin ==="
 cd "$SQL_REPO"
-./gradlew :plugin:bundlePlugin
+./gradlew :opensearch-sql-plugin:bundlePlugin
 
 # The zip is named opensearch-sql-<version>.zip (not opensearch-sql-plugin-)
 ZIP="plugin/build/distributions/opensearch-sql-$VERSION.zip"
