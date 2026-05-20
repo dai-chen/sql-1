@@ -51,7 +51,7 @@ public class ConditionalIT extends SQLIntegTestCase {
                 + " GROUP BY name");
     assertEquals("IFNULL(lastname, 'unknown')", response.query("/schema/0/name"));
     assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    assertEquals("string", response.query("/schema/0/type"));
   }
 
   @Test
@@ -69,8 +69,8 @@ public class ConditionalIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("IFNULL(null, firstname)", "IFNULL1", "keyword"),
-        schema("IFNULL(firstname, null)", "IFNULL2", "keyword"),
+        schema("IFNULL(null, firstname)", "IFNULL1", "string"),
+        schema("IFNULL(firstname, null)", "IFNULL2", "string"),
         schema("IFNULL(null, null)", "IFNULL3", "byte"));
     // Retrieve the actual data rows
     JSONArray dataRows = response.getJSONArray("datarows");
@@ -111,7 +111,7 @@ public class ConditionalIT extends SQLIntegTestCase {
         executeJdbcRequest("SELECT NULLIF(lastname, 'unknown') AS name FROM " + TEST_INDEX_ACCOUNT);
     assertEquals("NULLIF(lastname, 'unknown')", response.query("/schema/0/name"));
     assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    assertEquals("string", response.query("/schema/0/type"));
   }
 
   @Test
@@ -124,7 +124,7 @@ public class ConditionalIT extends SQLIntegTestCase {
                     + TEST_INDEX_BANK_WITH_NULL_VALUES
                     + " limit 2 ",
                 "jdbc"));
-    verifySchema(response, schema("NULLIF(firstname, 'Amber JOHnny')", "testnullif", "keyword"));
+    verifySchema(response, schema("NULLIF(firstname, 'Amber JOHnny')", "testnullif", "string"));
     verifyDataRows(response, rows(LITERAL_NULL.value()), rows("Hattie"));
   }
 
@@ -210,7 +210,7 @@ public class ConditionalIT extends SQLIntegTestCase {
         executeJdbcRequest("SELECT IF(2 > 0, 'hello', 'world') AS name FROM " + TEST_INDEX_ACCOUNT);
     assertEquals("IF(2 > 0, 'hello', 'world')", response.query("/schema/0/name"));
     assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    assertEquals("string", response.query("/schema/0/type"));
   }
 
   @Test
@@ -228,10 +228,10 @@ public class ConditionalIT extends SQLIntegTestCase {
                 "jdbc"));
     verifySchema(
         response,
-        schema("IF(2 < 0, firstname, lastname)", "IF0", "keyword"),
-        schema("IF(2 > 0, firstname, lastname)", "IF1", "keyword"),
-        schema("firstname", "IF2", "text"),
-        schema("lastname", "IF3", "keyword"));
+        schema("IF(2 < 0, firstname, lastname)", "IF0", "string"),
+        schema("IF(2 > 0, firstname, lastname)", "IF1", "string"),
+        schema("firstname", "IF2", "string"),
+        schema("lastname", "IF3", "string"));
 
     // Retrieve the actual data rows
     JSONArray dataRows = response.getJSONArray("datarows");

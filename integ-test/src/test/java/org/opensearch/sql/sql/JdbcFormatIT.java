@@ -33,12 +33,12 @@ public class JdbcFormatIT extends SQLIntegTestCase {
     verifySchema(
         response,
         schema("account_number", "long"),
-        schema("address", "text"),
+        schema("address", "string"),
         schema("age", "integer"),
         schema("birthdate", "timestamp"),
-        schema("city", "keyword"),
+        schema("city", "string"),
         schema("male", "boolean"),
-        schema("state", "text"));
+        schema("state", "string"));
   }
 
   @Test

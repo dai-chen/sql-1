@@ -64,7 +64,7 @@ public class TypeInformationIT extends SQLIntegTestCase {
                 + TestsConstants.TEST_INDEX_ACCOUNT
                 + " ORDER BY firstname_alias LIMIT 2");
 
-    verifySchema(response, schema("UPPER(firstname)", "firstname_alias", "keyword"));
+    verifySchema(response, schema("UPPER(firstname)", "firstname_alias", "string"));
   }
 
   @Test
@@ -75,7 +75,7 @@ public class TypeInformationIT extends SQLIntegTestCase {
                 + TestsConstants.TEST_INDEX_ACCOUNT
                 + " ORDER BY firstname LIMIT 2");
 
-    verifySchema(response, schema("LOWER(firstname)", null, "keyword"));
+    verifySchema(response, schema("LOWER(firstname)", null, "string"));
   }
 
   /*
