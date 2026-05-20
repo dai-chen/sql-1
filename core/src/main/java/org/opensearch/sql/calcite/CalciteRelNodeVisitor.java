@@ -4184,7 +4184,7 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     // Accept SQL SELECT without FROM (dual table), encoded as Values([[]]) — one row, zero columns.
     List<List<Literal>> rows = values.getValues();
     if (rows == null || rows.isEmpty() || (rows.size() == 1 && rows.get(0).isEmpty())) {
-      context.relBuilder.values(context.relBuilder.getTypeFactory().builder().build());
+      context.relBuilder.push(LogicalValues.createOneRow(context.relBuilder.getCluster()));
       return context.relBuilder.peek();
     }
     throw new CalciteUnsupportedException("Inline VALUES with literal rows is unsupported");

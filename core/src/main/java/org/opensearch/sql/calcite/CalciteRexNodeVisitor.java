@@ -46,6 +46,7 @@ import org.apache.logging.log4j.util.Strings;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.Alias;
+import org.opensearch.sql.ast.expression.AllFields;
 import org.opensearch.sql.ast.expression.And;
 import org.opensearch.sql.ast.expression.Between;
 import org.opensearch.sql.ast.expression.Case;
@@ -345,6 +346,35 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
     // Only OpenSearch SQL uses node.getAlias, OpenSearch PPL uses node.getName.
     return context.relBuilder.alias(
         expr, Strings.isEmpty(node.getAlias()) ? node.getName() : node.getAlias());
+  }
+
+  @Override
+  public RexNode visitAggregateFunction(AggregateFunction node, CalcitePlanContext context) {
+    // In HAVING context, the aggregate is already computed — resolve to a field reference
+    // by matching the function name against the current output row type field names.
+    List<String> fieldNames = context.relBuilder.peek().getRowType().getFieldNames();
+    String funcName = node.getFuncName();
+    UnresolvedExpression fieldExpr = node.getField();
+    // Try canonical forms: "COUNT(*)", "SUM(age)", etc.
+    String canonicalName =
+        funcName + "(" + (fieldExpr instanceof AllFields ? "*" : fieldExpr.toString()) + ")";
+    for (int i = 0; i < fieldNames.size(); i++) {
+      String name = fieldNames.get(i);
+      if (name.equalsIgnoreCase(canonicalName)
+          || name.equalsIgnoreCase(funcName.toLowerCase(Locale.ROOT) + "(" + fieldExpr + ")")) {
+        return context.relBuilder.field(i);
+      }
+    }
+    // Fallback: try case-insensitive prefix match
+    String prefix = funcName.toLowerCase(Locale.ROOT) + "(";
+    for (int i = 0; i < fieldNames.size(); i++) {
+      if (fieldNames.get(i).toLowerCase(Locale.ROOT).startsWith(prefix)) {
+        return context.relBuilder.field(i);
+      }
+    }
+    throw new IllegalStateException(
+        "Cannot resolve aggregate function " + canonicalName + " in HAVING clause. "
+            + "Available fields: " + fieldNames);
   }
 
   @Override
@@ -650,6 +680,9 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
               RexNode field = analyze(p.getRight(), context);
               if (opt.getSortOrder() == SortOrder.DESC) {
                 field = b.desc(field);
+              }
+              if (opt.getNullOrder() == null) {
+                return field;
               }
               return switch (opt.getNullOrder()) {
                 case NULL_LAST -> b.nullsLast(field);
