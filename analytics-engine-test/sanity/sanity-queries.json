@@ -1,0 +1,1197 @@
+[
+  {
+    "category": "SELECT",
+    "name": "select_where",
+    "query": "SELECT * FROM sanity_test WHERE age > 30",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          32,
+          "Seattle",
+          1,
+          "Alice"
+        ],
+        [
+          35,
+          "Portland",
+          2,
+          "Dave"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_star",
+    "query": "SELECT * FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          32,
+          "Seattle",
+          1,
+          "Alice"
+        ],
+        [
+          25,
+          "Portland",
+          2,
+          "Bob"
+        ],
+        [
+          28,
+          "Seattle",
+          1,
+          "Carol"
+        ],
+        [
+          35,
+          "Portland",
+          2,
+          "Dave"
+        ],
+        [
+          22,
+          "Denver",
+          1,
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_expression",
+    "query": "SELECT name, age * 2 AS double_age, age + 10 AS age_plus FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          64,
+          42
+        ],
+        [
+          "Bob",
+          50,
+          35
+        ],
+        [
+          "Carol",
+          56,
+          38
+        ],
+        [
+          "Dave",
+          70,
+          45
+        ],
+        [
+          "Eve",
+          44,
+          32
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_distinct",
+    "query": "SELECT DISTINCT city FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle"
+        ],
+        [
+          "Portland"
+        ],
+        [
+          "Denver"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_alias",
+    "query": "SELECT name AS employee_name, city AS location FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Seattle"
+        ],
+        [
+          "Bob",
+          "Portland"
+        ],
+        [
+          "Carol",
+          "Seattle"
+        ],
+        [
+          "Dave",
+          "Portland"
+        ],
+        [
+          "Eve",
+          "Denver"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_literal",
+    "query": "SELECT 1 + 1 AS two, 'hello' AS greeting",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          2,
+          "hello"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_in",
+    "query": "SELECT name, city FROM sanity_test WHERE city IN ('Seattle', 'Denver')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Seattle"
+        ],
+        [
+          "Carol",
+          "Seattle"
+        ],
+        [
+          "Eve",
+          "Denver"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_between",
+    "query": "SELECT name, age FROM sanity_test WHERE age BETWEEN 25 AND 32",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          32
+        ],
+        [
+          "Bob",
+          25
+        ],
+        [
+          "Carol",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_and_or",
+    "query": "SELECT name FROM sanity_test WHERE (city = 'Seattle' OR city = 'Denver') AND age > 25",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_not",
+    "query": "SELECT name FROM sanity_test WHERE NOT city = 'Portland'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_is_null",
+    "query": "SELECT name FROM sanity_test WHERE city IS NOT NULL",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Bob"
+        ],
+        [
+          "Carol"
+        ],
+        [
+          "Dave"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "ORDER BY",
+    "name": "order_by_limit",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age DESC LIMIT 3",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Dave",
+          35
+        ],
+        [
+          "Alice",
+          32
+        ],
+        [
+          "Carol",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "ORDER BY",
+    "name": "order_by_multi",
+    "query": "SELECT name, city, age FROM sanity_test ORDER BY city ASC, age DESC",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Eve",
+          "Denver",
+          22
+        ],
+        [
+          "Dave",
+          "Portland",
+          35
+        ],
+        [
+          "Bob",
+          "Portland",
+          25
+        ],
+        [
+          "Alice",
+          "Seattle",
+          32
+        ],
+        [
+          "Carol",
+          "Seattle",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "ORDER BY",
+    "name": "order_by_asc",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age ASC LIMIT 3",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Eve",
+          22
+        ],
+        [
+          "Bob",
+          25
+        ],
+        [
+          "Carol",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIMIT / OFFSET",
+    "name": "limit_only",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age LIMIT 2",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Eve",
+          22
+        ],
+        [
+          "Bob",
+          25
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIMIT / OFFSET",
+    "name": "offset_skip",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age LIMIT 2 OFFSET 2",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Carol",
+          28
+        ],
+        [
+          "Alice",
+          32
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIMIT / OFFSET",
+    "name": "offset_zero",
+    "query": "SELECT name FROM sanity_test ORDER BY name LIMIT 3 OFFSET 0",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Bob"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "GROUP BY",
+    "name": "group_by_sum_count",
+    "query": "SELECT city, SUM(age), COUNT(*) FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          60,
+          2
+        ],
+        [
+          "Portland",
+          60,
+          2
+        ],
+        [
+          "Denver",
+          22,
+          1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "GROUP BY",
+    "name": "group_by_max",
+    "query": "SELECT city, MAX(age) FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          32
+        ],
+        [
+          "Portland",
+          35
+        ],
+        [
+          "Denver",
+          22
+        ]
+      ]
+    }
+  },
+  {
+    "category": "GROUP BY",
+    "name": "filtered_agg",
+    "query": "SELECT city, SUM(age) FILTER(WHERE age > 25) FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          60
+        ],
+        [
+          "Portland",
+          60
+        ],
+        [
+          "Denver",
+          22
+        ]
+      ]
+    }
+  },
+  {
+    "category": "HAVING",
+    "name": "group_by_having",
+    "query": "SELECT city, COUNT(*) AS cnt FROM sanity_test GROUP BY city HAVING cnt > 1",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          2
+        ],
+        [
+          "Portland",
+          2
+        ]
+      ]
+    }
+  },
+  {
+    "category": "CASE",
+    "name": "case_simple",
+    "query": "SELECT name, CASE WHEN age > 30 THEN 'senior' ELSE 'junior' END AS level FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "senior"
+        ],
+        [
+          "Bob",
+          "junior"
+        ],
+        [
+          "Carol",
+          "junior"
+        ],
+        [
+          "Dave",
+          "senior"
+        ],
+        [
+          "Eve",
+          "junior"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "CASE",
+    "name": "case_in_agg",
+    "query": "SELECT city, SUM(CASE WHEN age > 30 THEN 1 ELSE 0 END) AS senior_count FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          1
+        ],
+        [
+          "Portland",
+          1
+        ],
+        [
+          "Denver",
+          0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIKE / REGEXP",
+    "name": "like_prefix",
+    "query": "SELECT name FROM sanity_test WHERE city LIKE 'Sea%'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIKE / REGEXP",
+    "name": "like_contains",
+    "query": "SELECT name FROM sanity_test WHERE city LIKE '%ort%'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Bob"
+        ],
+        [
+          "Dave"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIKE / REGEXP",
+    "name": "like_negated",
+    "query": "SELECT name FROM sanity_test WHERE NOT city LIKE 'Sea%'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Bob"
+        ],
+        [
+          "Dave"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Set Operations",
+    "name": "union_basic",
+    "query": "SELECT name, age FROM sanity_test WHERE city = 'Seattle' UNION SELECT name, age FROM sanity_test WHERE age > 30",
+    "expected": null
+  },
+  {
+    "category": "Set Operations",
+    "name": "union_all_basic",
+    "query": "SELECT name, age FROM sanity_test WHERE city = 'Seattle' UNION ALL SELECT name, age FROM sanity_test WHERE city = 'Portland'",
+    "expected": null
+  },
+  {
+    "category": "Set Operations",
+    "name": "minus_basic",
+    "query": "SELECT name FROM sanity_test WHERE city = 'Seattle' MINUS SELECT name FROM sanity_test WHERE age < 30",
+    "expected": null
+  },
+  {
+    "category": "JOIN",
+    "name": "inner_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Engineering"
+        ],
+        [
+          "Bob",
+          "Marketing"
+        ],
+        [
+          "Carol",
+          "Engineering"
+        ],
+        [
+          "Dave",
+          "Marketing"
+        ],
+        [
+          "Eve",
+          "Engineering"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "JOIN",
+    "name": "left_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a LEFT JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Engineering"
+        ],
+        [
+          "Bob",
+          "Marketing"
+        ],
+        [
+          "Carol",
+          "Engineering"
+        ],
+        [
+          "Dave",
+          "Marketing"
+        ],
+        [
+          "Eve",
+          "Engineering"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "JOIN",
+    "name": "right_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a RIGHT JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Engineering"
+        ],
+        [
+          "Bob",
+          "Marketing"
+        ],
+        [
+          "Carol",
+          "Engineering"
+        ],
+        [
+          "Dave",
+          "Marketing"
+        ],
+        [
+          "Eve",
+          "Engineering"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "JOIN",
+    "name": "cross_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a CROSS JOIN sanity_dept b LIMIT 3",
+    "expected": null
+  },
+  {
+    "category": "Subqueries",
+    "name": "subquery_where",
+    "query": "SELECT name FROM sanity_test WHERE dept_id IN (SELECT id FROM sanity_dept WHERE dept = 'Engineering')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Subqueries",
+    "name": "subquery_from",
+    "query": "SELECT t.city, t.total FROM (SELECT city, COUNT(*) AS total FROM sanity_test GROUP BY city) t",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          2
+        ],
+        [
+          "Portland",
+          2
+        ],
+        [
+          "Denver",
+          1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Subqueries",
+    "name": "exists_subquery",
+    "query": "SELECT name FROM sanity_test a WHERE EXISTS (SELECT 1 FROM sanity_dept b WHERE b.id = a.dept_id AND b.dept = 'Engineering')",
+    "expected": null
+  },
+  {
+    "category": "EXPLAIN",
+    "name": "explain_select",
+    "query": "SELECT name, age FROM sanity_test WHERE age > 25",
+    "expected": null
+  },
+  {
+    "category": "EXPLAIN",
+    "name": "explain_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": null
+  },
+  {
+    "category": "Full-text search",
+    "name": "match_query",
+    "query": "SELECT name FROM sanity_test WHERE match(name, 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "match_phrase",
+    "query": "SELECT name FROM sanity_test WHERE match_phrase(name, 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "match_bool_prefix",
+    "query": "SELECT name FROM sanity_test WHERE match_bool_prefix(name, 'Ali')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "match_phrase_prefix",
+    "query": "SELECT name FROM sanity_test WHERE match_phrase_prefix(name, 'Ali')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "multi_match",
+    "query": "SELECT name FROM sanity_test WHERE multi_match(['name', 'city'], 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "simple_query_string",
+    "query": "SELECT name FROM sanity_test WHERE simple_query_string(['name'], 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "query_string",
+    "query": "SELECT name FROM sanity_test WHERE query_string(['name'], 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "query_func",
+    "query": "SELECT name FROM sanity_test WHERE query('name:Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Full-text search",
+    "name": "wildcard_query",
+    "query": "SELECT name FROM sanity_test WHERE wildcard_query(city, 'Sea*')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "string_upper_lower_length",
+    "query": "SELECT UPPER('hello'), LOWER('WORLD'), LENGTH('test')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "HELLO",
+          "world",
+          4
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "string_concat_substring",
+    "query": "SELECT CONCAT('hello', ' ', 'world'), SUBSTRING('hello', 2, 3), TRIM(' hello ')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hello world",
+          "ell",
+          "hello"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "string_replace",
+    "query": "SELECT REPLACE('hello world', 'world', 'there')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hello there"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "math_abs_ceil_floor",
+    "query": "SELECT ABS(-5), CEIL(3.2), FLOOR(3.8)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          5,
+          4,
+          3
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "math_round_mod_sqrt",
+    "query": "SELECT ROUND(3.56, 1), MOD(10, 3), SQRT(16)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3.6,
+          1,
+          4.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "math_pow",
+    "query": "SELECT POW(2, 3)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          8.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "datetime_now_curdate",
+    "query": "SELECT DATE_FORMAT(NOW(), '%H:%i:%s') IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "datetime_date_format",
+    "query": "SELECT DATE_FORMAT('2024-01-15', '%Y-%m')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "2024-01"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "datetime_col_filter",
+    "query": "SELECT event, ts FROM sanity_datetime WHERE ts > '2024-03-16 00:00:00'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "login",
+          "2024-03-16 09:00:00"
+        ],
+        [
+          "purchase",
+          "2024-03-16 11:30:00"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "agg_avg_min_max",
+    "query": "SELECT AVG(age), MIN(age), MAX(age) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          28.4,
+          22,
+          35
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "agg_count_sum",
+    "query": "SELECT COUNT(*), SUM(age) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          5,
+          142
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "agg_count_distinct",
+    "query": "SELECT COUNT(DISTINCT city) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "conditional_isnull",
+    "query": "SELECT ISNULL(NULL)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "conditional_case",
+    "query": "SELECT CASE WHEN 1 > 0 THEN 'yes' ELSE 'no' END",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "yes"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "conditional_nullif",
+    "query": "SELECT NULLIF(1, 1)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "window_row_number",
+    "query": "SELECT name, city, ROW_NUMBER() OVER(PARTITION BY city ORDER BY age DESC) AS rn FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Eve",
+          "Denver",
+          1
+        ],
+        [
+          "Dave",
+          "Portland",
+          1
+        ],
+        [
+          "Bob",
+          "Portland",
+          2
+        ],
+        [
+          "Alice",
+          "Seattle",
+          1
+        ],
+        [
+          "Carol",
+          "Seattle",
+          2
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "window_sum_over",
+    "query": "SELECT name, SUM(age) OVER(PARTITION BY city) AS city_total FROM sanity_test ORDER BY name",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Alice",
+          60
+        ],
+        [
+          "Bob",
+          60
+        ],
+        [
+          "Carol",
+          60
+        ],
+        [
+          "Dave",
+          60
+        ],
+        [
+          "Eve",
+          22
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "window_rank",
+    "query": "SELECT name, RANK() OVER(ORDER BY age DESC) AS rnk FROM sanity_test",
+    "expected": null
+  },
+  {
+    "category": "Functions",
+    "name": "window_dense_rank",
+    "query": "SELECT name, DENSE_RANK() OVER(ORDER BY age DESC) AS dr FROM sanity_test",
+    "expected": null
+  },
+  {
+    "category": "Functions",
+    "name": "conversion_typeof",
+    "query": "SELECT TYPEOF(123)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "INT"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions",
+    "name": "conversion_cast",
+    "query": "SELECT CAST('123' AS INT)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          123
+        ]
+      ]
+    }
+  }
+]
