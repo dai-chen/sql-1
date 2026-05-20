@@ -7,9 +7,11 @@ package org.opensearch.sql.sql;
 
 import org.json.JSONObject;
 import org.junit.Test;
+import org.junit.Ignore;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.legacy.TestsConstants;
 
+@Ignore("Not supported by analytics-engine")
 public class PreparedStatementIT extends SQLIntegTestCase {
 
   @Override

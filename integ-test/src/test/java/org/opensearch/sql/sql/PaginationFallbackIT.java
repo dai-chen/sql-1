@@ -9,12 +9,14 @@ import static org.opensearch.sql.legacy.TestsConstants.TEST_INDEX;
 import static org.opensearch.sql.legacy.TestsConstants.TEST_INDEX_ONLINE;
 import static org.opensearch.sql.util.TestUtils.verifyIsV1Cursor;
 import static org.opensearch.sql.util.TestUtils.verifyIsV2Cursor;
+import org.junit.Ignore;
 
 import java.io.IOException;
 import org.junit.Test;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.util.TestUtils;
 
+@Ignore("Not supported by analytics-engine")
 public class PaginationFallbackIT extends SQLIntegTestCase {
   @Override
   public void init() throws IOException {

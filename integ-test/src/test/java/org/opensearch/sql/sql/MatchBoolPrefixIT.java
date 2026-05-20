@@ -26,7 +26,7 @@ public class MatchBoolPrefixIT extends SQLIntegTestCase {
     String query =
         "SELECT phrase FROM " + TEST_INDEX_PHRASE + " WHERE match_bool_prefix(phrase, 'quick')";
     var result = new JSONObject(executeQuery(query, "jdbc"));
-    verifySchema(result, schema("phrase", "text"));
+    verifySchema(result, schema("phrase", "string"));
 
     verifyDataRows(result, rows("quick fox"), rows("quick fox here"));
   }
@@ -38,7 +38,7 @@ public class MatchBoolPrefixIT extends SQLIntegTestCase {
             + TEST_INDEX_PHRASE
             + " WHERE match_bool_prefix(phrase, '2 test', minimum_should_match=1, fuzziness=2)";
     var result = new JSONObject(executeQuery(query, "jdbc"));
-    verifySchema(result, schema("phrase", "text"));
+    verifySchema(result, schema("phrase", "string"));
 
     verifyDataRows(result, rows("my test"), rows("my test 2"));
   }

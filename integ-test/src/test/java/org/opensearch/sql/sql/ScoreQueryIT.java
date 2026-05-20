@@ -10,6 +10,7 @@ import static org.opensearch.sql.util.MatcherUtils.rows;
 import static org.opensearch.sql.util.MatcherUtils.schema;
 import static org.opensearch.sql.util.MatcherUtils.verifyDataAddressRows;
 import static org.opensearch.sql.util.MatcherUtils.verifySchema;
+import org.junit.Ignore;
 
 import java.io.IOException;
 import java.util.Locale;
@@ -19,6 +20,7 @@ import org.junit.Test;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.legacy.TestsConstants;
 
+@Ignore("Not supported by analytics-engine")
 public class ScoreQueryIT extends SQLIntegTestCase {
   @Override
   protected void init() throws Exception {

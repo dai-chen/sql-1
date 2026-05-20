@@ -32,7 +32,7 @@ public class MatchIT extends SQLIntegTestCase {
     JSONObject result =
         executeJdbcRequest(
             "SELECT firstname FROM " + TEST_INDEX_ACCOUNT + " WHERE match(lastname, 'Bates')");
-    verifySchema(result, schema("firstname", "text"));
+    verifySchema(result, schema("firstname", "string"));
     verifyDataRows(result, rows("Nanette"));
   }
 
@@ -41,7 +41,7 @@ public class MatchIT extends SQLIntegTestCase {
     JSONObject result =
         executeJdbcRequest(
             "SELECT lastname FROM " + TEST_INDEX_ACCOUNT + " HAVING match(firstname, 'Nanette')");
-    verifySchema(result, schema("lastname", "text"));
+    verifySchema(result, schema("lastname", "string"));
     verifyDataRows(result, rows("Bates"));
   }
 
@@ -95,7 +95,7 @@ public class MatchIT extends SQLIntegTestCase {
     JSONObject result =
         executeJdbcRequest(
             "SELECT firstname FROM " + TEST_INDEX_ACCOUNT + " WHERE matchquery(lastname, 'Bates')");
-    verifySchema(result, schema("firstname", "text"));
+    verifySchema(result, schema("firstname", "string"));
     verifyDataRows(result, rows("Nanette"));
   }
 
@@ -106,7 +106,7 @@ public class MatchIT extends SQLIntegTestCase {
             "SELECT lastname FROM "
                 + TEST_INDEX_ACCOUNT
                 + " HAVING matchquery(firstname, 'Nanette')");
-    verifySchema(result, schema("lastname", "text"));
+    verifySchema(result, schema("lastname", "string"));
     verifyDataRows(result, rows("Bates"));
   }
 
@@ -117,7 +117,7 @@ public class MatchIT extends SQLIntegTestCase {
             "SELECT firstname FROM "
                 + TEST_INDEX_ACCOUNT
                 + " WHERE match_query(lastname, 'Bates')");
-    verifySchema(result, schema("firstname", "text"));
+    verifySchema(result, schema("firstname", "string"));
     verifyDataRows(result, rows("Nanette"));
   }
 
@@ -128,7 +128,7 @@ public class MatchIT extends SQLIntegTestCase {
             "SELECT lastname FROM "
                 + TEST_INDEX_ACCOUNT
                 + " HAVING match_query(firstname, 'Nanette')");
-    verifySchema(result, schema("lastname", "text"));
+    verifySchema(result, schema("lastname", "string"));
     verifyDataRows(result, rows("Bates"));
   }
 
@@ -154,7 +154,7 @@ public class MatchIT extends SQLIntegTestCase {
             "SELECT lastname FROM "
                 + TEST_INDEX_ACCOUNT
                 + " WHERE lastname = match_query('Bates')");
-    verifySchema(result, schema("lastname", "text"));
+    verifySchema(result, schema("lastname", "string"));
     verifyDataRows(result, rows("Bates"));
   }
 
@@ -163,7 +163,7 @@ public class MatchIT extends SQLIntegTestCase {
     JSONObject result =
         executeJdbcRequest(
             "SELECT lastname FROM " + TEST_INDEX_ACCOUNT + " WHERE lastname = matchquery('Bates')");
-    verifySchema(result, schema("lastname", "text"));
+    verifySchema(result, schema("lastname", "string"));
     verifyDataRows(result, rows("Bates"));
   }
 

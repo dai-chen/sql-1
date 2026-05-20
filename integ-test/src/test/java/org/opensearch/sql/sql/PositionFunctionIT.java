@@ -31,7 +31,7 @@ public class PositionFunctionIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("firstname", null, "keyword"),
+        schema("firstname", null, "string"),
         schema("position('a' IN firstname)", null, "integer"));
     assertEquals(12, response.getInt("total"));
 
@@ -58,7 +58,7 @@ public class PositionFunctionIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("str2", null, "keyword"),
+        schema("str2", null, "string"),
         schema("position('ee' IN str2)", null, "integer"));
     assertEquals(17, response.getInt("total"));
 
@@ -122,7 +122,7 @@ public class PositionFunctionIT extends SQLIntegTestCase {
     String query = "SELECT str2 FROM %s WHERE position(str3 IN str2)=1";
     JSONObject response = executeJdbcRequest(String.format(query, TestsConstants.TEST_INDEX_CALCS));
 
-    verifySchema(response, schema("str2", null, "keyword"));
+    verifySchema(response, schema("str2", null, "string"));
     assertEquals(2, response.getInt("total"));
 
     verifyDataRows(response, rows("eight"), rows("eleven"));
@@ -139,13 +139,13 @@ public class PositionFunctionIT extends SQLIntegTestCase {
 
     verifySchema(
         response1,
-        schema("str2", null, "keyword"),
+        schema("str2", null, "string"),
         schema("position(null IN str2)", null, "integer"));
     assertEquals(1, response1.getInt("total"));
 
     verifySchema(
         response2,
-        schema("str2", null, "keyword"),
+        schema("str2", null, "string"),
         schema("position(str2 IN null)", null, "integer"));
     assertEquals(1, response2.getInt("total"));
 

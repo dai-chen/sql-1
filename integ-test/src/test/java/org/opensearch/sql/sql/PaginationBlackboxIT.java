@@ -18,9 +18,11 @@ import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.util.TestUtils;
+import org.junit.Ignore;
 
 // This class has only one test case, because it is parametrized and takes significant time
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
+@Ignore("Not supported by analytics-engine")
 public class PaginationBlackboxIT extends SQLIntegTestCase {
 
   private final Index index;

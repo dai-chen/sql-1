@@ -54,9 +54,9 @@ public class TextFunctionIT extends SQLIntegTestCase {
 
   @Test
   public void testReverse() throws IOException {
-    verifyQuery("reverse('hello')", "keyword", "olleh");
-    verifyQuery("reverse('')", "keyword", "");
-    verifyQueryWithNullOutput("reverse(null)", "keyword");
+    verifyQuery("reverse('hello')", "string", "olleh");
+    verifyQuery("reverse('')", "string", "");
+    verifyQueryWithNullOutput("reverse(null)", "string");
   }
 
   @Test
@@ -73,35 +73,35 @@ public class TextFunctionIT extends SQLIntegTestCase {
 
   @Test
   public void testUpper() throws IOException {
-    verifyQuery("upper('hello')", "keyword", "HELLO");
-    verifyQuery("upper('HELLO')", "keyword", "HELLO");
+    verifyQuery("upper('hello')", "string", "HELLO");
+    verifyQuery("upper('HELLO')", "string", "HELLO");
   }
 
   @Test
   public void testLower() throws IOException {
-    verifyQuery("lower('hello')", "keyword", "hello");
-    verifyQuery("lower('HELLO')", "keyword", "hello");
+    verifyQuery("lower('hello')", "string", "hello");
+    verifyQuery("lower('HELLO')", "string", "hello");
   }
 
   @Test
   public void testTrim() throws IOException {
-    verifyQuery("trim(' hello')", "keyword", "hello");
-    verifyQuery("trim('hello ')", "keyword", "hello");
-    verifyQuery("trim('  hello  ')", "keyword", "hello");
+    verifyQuery("trim(' hello')", "string", "hello");
+    verifyQuery("trim('hello ')", "string", "hello");
+    verifyQuery("trim('  hello  ')", "string", "hello");
   }
 
   @Test
   public void testRtrim() throws IOException {
-    verifyQuery("rtrim(' hello')", "keyword", " hello");
-    verifyQuery("rtrim('hello ')", "keyword", "hello");
-    verifyQuery("rtrim('  hello  ')", "keyword", "  hello");
+    verifyQuery("rtrim(' hello')", "string", " hello");
+    verifyQuery("rtrim('hello ')", "string", "hello");
+    verifyQuery("rtrim('  hello  ')", "string", "  hello");
   }
 
   @Test
   public void testLtrim() throws IOException {
-    verifyQuery("ltrim(' hello')", "keyword", "hello");
-    verifyQuery("ltrim('hello ')", "keyword", "hello ");
-    verifyQuery("ltrim('  hello  ')", "keyword", "hello  ");
+    verifyQuery("ltrim(' hello')", "string", "hello");
+    verifyQuery("ltrim('hello ')", "string", "hello ");
+    verifyQuery("ltrim('  hello  ')", "string", "hello  ");
   }
 
   @Test

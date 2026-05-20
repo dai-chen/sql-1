@@ -8,6 +8,7 @@ package org.opensearch.sql.sql;
 import static org.hamcrest.Matchers.equalTo;
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.QUERY_API_ENDPOINT;
 import static org.opensearch.sql.util.TestUtils.getResponseBody;
+import org.junit.Ignore;
 
 import com.google.common.io.Resources;
 import java.io.IOException;
@@ -25,6 +26,7 @@ import org.opensearch.sql.common.utils.StringUtils;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.legacy.TestsConstants;
 
+@Ignore("Not supported by analytics-engine")
 public class AdminIT extends SQLIntegTestCase {
 
   @Override

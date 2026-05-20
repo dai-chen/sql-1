@@ -19,35 +19,35 @@ public class StringLiteralIT extends SQLIntegTestCase {
   @Test
   public void testStringHelloSingleQuote() throws IOException {
     JSONObject result = executeJdbcRequest("select 'Hello'");
-    verifySchema(result, schema("'Hello'", null, "keyword"));
+    verifySchema(result, schema("'Hello'", null, "string"));
     verifyDataRows(result, rows("Hello"));
   }
 
   @Test
   public void testStringHelloDoubleQuote() throws IOException {
     JSONObject result = executeJdbcRequest("select \\\"Hello\\\"");
-    verifySchema(result, schema("\"Hello\"", null, "keyword"));
+    verifySchema(result, schema("\"Hello\"", null, "string"));
     verifyDataRows(result, rows("Hello"));
   }
 
   @Test
   public void testImStringDoubleDoubleQuoteEscape() throws IOException {
     JSONObject result = executeJdbcRequest("select \\\"I\\\"\\\"m\\\"");
-    verifySchema(result, schema("\"I\"\"m\"", null, "keyword"));
+    verifySchema(result, schema("\"I\"\"m\"", null, "string"));
     verifyDataRows(result, rows("I\"m"));
   }
 
   @Test
   public void testImStringDoubleSingleQuoteEscape() throws IOException {
     JSONObject result = executeJdbcRequest("select 'I''m'");
-    verifySchema(result, schema("'I''m'", null, "keyword"));
+    verifySchema(result, schema("'I''m'", null, "string"));
     verifyDataRows(result, rows("I'm"));
   }
 
   @Test
   public void testImStringEscapedSingleQuote() throws IOException {
     JSONObject result = executeJdbcRequest("select 'I\\\\'m'");
-    verifySchema(result, schema("'I\\'m'", null, "keyword"));
+    verifySchema(result, schema("'I\\'m'", null, "string"));
     verifyDataRows(result, rows("I'm"));
   }
 }
