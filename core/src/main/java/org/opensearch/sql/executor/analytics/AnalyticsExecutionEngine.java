@@ -136,7 +136,13 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
     List<Schema.Column> columns = new ArrayList<>();
     for (RelDataTypeField field : fields) {
       ExprType exprType = convertType(field.getType());
-      columns.add(new Schema.Column(field.getName(), null, exprType));
+      String name = field.getName();
+      // Strip Calcite's internal "\0" separator (expression\0alias → alias)
+      int nul = name.indexOf('\0');
+      if (nul >= 0) {
+        name = name.substring(nul + 1);
+      }
+      columns.add(new Schema.Column(name, null, exprType));
     }
     return new Schema(columns);
   }

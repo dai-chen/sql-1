@@ -68,7 +68,7 @@ public class UnifiedQueryPlanner {
     } catch (SyntaxCheckException | UnsupportedOperationException e) {
       throw e;
     } catch (Exception e) {
-      throw new IllegalStateException("Failed to plan query", e);
+      throw new IllegalStateException("Failed to plan query: " + e.getMessage(), e);
     }
   }
 

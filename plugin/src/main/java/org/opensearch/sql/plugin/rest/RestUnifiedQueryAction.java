@@ -88,6 +88,9 @@ public class RestUnifiedQueryAction {
     if (query == null || query.isEmpty()) {
       return false;
     }
+
+    return true;
+    /*
     try (UnifiedQueryContext context = buildParsingContext(queryType)) {
       return extractIndexName(query, queryType, context)
           .map(this::stripSchemaPrefix)
@@ -96,6 +99,7 @@ public class RestUnifiedQueryAction {
     } catch (Exception e) {
       return false;
     }
+     */
   }
 
   private String stripSchemaPrefix(String indexName) {
@@ -131,6 +135,9 @@ public class RestUnifiedQueryAction {
                     plan = addQuerySizeLimit(plan, planContext);
                     analyticsEngine.execute(
                         plan, planContext, createQueryListener(queryType, listener));
+                  } catch (AssertionError ae) {
+                    listener.onFailure(
+                        new RuntimeException("Internal assertion error: " + ae.getMessage(), ae));
                   } catch (Exception e) {
                     listener.onFailure(e);
                   }
@@ -159,6 +166,9 @@ public class RestUnifiedQueryAction {
                     CalcitePlanContext planContext = context.getPlanContext();
                     plan = addQuerySizeLimit(plan, planContext);
                     analyticsEngine.explain(plan, mode, planContext, listener);
+                  } catch (AssertionError ae) {
+                    listener.onFailure(
+                        new RuntimeException("Internal assertion error: " + ae.getMessage(), ae));
                   } catch (Exception e) {
                     listener.onFailure(e);
                   }
