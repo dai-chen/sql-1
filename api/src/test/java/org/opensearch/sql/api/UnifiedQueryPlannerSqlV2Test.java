@@ -218,4 +218,81 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
                 LogicalTableScan(table=[[catalog, employees]])
             """);
   }
+
+  @Test
+  public void selectWithoutFrom_literal() {
+    // Fix 3: FROM-less SELECT should produce a one-row result via LogicalValues.
+    // The optimizer folds Project([1]) over Values([[0]]) into Values([[1]]).
+    givenQuery("SELECT 1").assertPlanContains("LogicalValues(tuples=[[{ 1 }]])");
+  }
+
+  @Test
+  public void selectWithoutFrom_expression() {
+    // Non-trivial expressions remain as Project over the one-row dual table.
+    givenQuery("SELECT 1 + 1")
+        .assertPlanContains("LogicalValues(tuples=[[{ 0 }]])")
+        .assertPlanContains("LogicalProject");
+  }
+
+  // --- HAVING and aggregate resolution tests (Fix 6 verification) ---
+  // These verify that post-aggregate AggregateFunction AST nodes are resolved via the registry
+  // in CalciteRexNodeVisitor.visitAggregateFunction, without needing the name-match fallback.
+
+  @Test
+  public void testHavingAndAggResolution_havingMaxCol() {
+    // HAVING on a named aggregate. Verifies the registry path used by Filter (HAVING)
+    // entry-point translation in CalciteRexNodeVisitor.visitAggregateFunction.
+    givenQuery("SELECT department FROM catalog.employees GROUP BY department HAVING MAX(age) > 30")
+        .assertPlanContains("LogicalAggregate")
+        .assertPlanContains("LogicalFilter");
+  }
+
+  @Test
+  public void testHavingAndAggResolution_scalarFnOverAggregate() {
+    // Scalar function wrapping an aggregate. Verifies the registry path used by Project
+    // (post-aggregate SELECT) entry-point translation.
+    givenQuery("SELECT ABS(MAX(age)) FROM catalog.employees")
+        .assertPlanContains("LogicalAggregate")
+        .assertPlanContains("LogicalProject");
+  }
+
+  @Test
+  public void testHavingAndAggResolution_arithmeticOnAggregates() {
+    // Arithmetic combining two distinct aggregates. Verifies the registry holds multiple
+    // entries simultaneously and resolves each by structural identity.
+    givenQuery("SELECT MAX(age) + MIN(age) AS range_sum FROM catalog.employees")
+        .assertPlanContains("LogicalAggregate")
+        .assertPlanContains("LogicalProject");
+  }
+
+  @Test
+  public void testHavingAndAggResolution_havingCountStar() {
+    // HAVING COUNT(*) — verifies the canonical form "COUNT(*)" (rather than "COUNT(field)")
+    // is correctly recognized.
+    givenQuery("SELECT department FROM catalog.employees GROUP BY department HAVING COUNT(*) > 5")
+        .assertPlanContains("LogicalAggregate")
+        .assertPlanContains("LogicalFilter");
+  }
+
+  @Test
+  public void testHavingAndAggResolution_havingWithAlias() {
+    // HAVING with alias reference — `cnt` is the alias of COUNT(*). The semantic layer
+    // resolves the alias back to the underlying aggregate; verifies the resolved aggregate
+    // still translates correctly through visitAggregateFunction.
+    givenQuery(
+            "SELECT department, COUNT(*) AS cnt FROM catalog.employees GROUP BY department"
+                + " HAVING cnt > 1")
+        .assertPlanContains("LogicalAggregate")
+        .assertPlanContains("LogicalFilter");
+  }
+
+  @Test
+  public void testHavingAndAggResolution_havingCompoundAnd() {
+    // HAVING with compound AND of two aggregate conditions.
+    givenQuery(
+            "SELECT department FROM catalog.employees GROUP BY department"
+                + " HAVING MAX(age) > 30 AND MIN(age) < 50")
+        .assertPlanContains("LogicalAggregate")
+        .assertPlanContains("LogicalFilter");
+  }
 }

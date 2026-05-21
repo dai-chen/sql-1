@@ -1748,6 +1748,24 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       reordered.addAll(aggRexList);
     }
     context.relBuilder.project(reordered);
+
+    // Register aggregate output indices for resolution in HAVING / post-aggregate SELECT exprs.
+    // Aggregates appear at known positions in the reordered output (same positions the reorder
+    // block above placed them). No name matching needed — survives any toString() drift.
+    context.getAggregateOutputIndex().clear();
+    int aggStartIdx = metricsFirst ? 0 : aliasedGroupByList.size();
+    for (int i = 0; i < aggExprList.size(); i++) {
+      AggregateFunction aggFunc = extractAggregateFunction(aggExprList.get(i));
+      if (aggFunc != null) {
+        context.getAggregateOutputIndex().put(aggFunc, aggStartIdx + i);
+      }
+    }
+  }
+
+  private static AggregateFunction extractAggregateFunction(UnresolvedExpression expr) {
+    if (expr instanceof AggregateFunction af) return af;
+    if (expr instanceof Alias alias) return extractAggregateFunction(alias.getDelegated());
+    return null;
   }
 
   private Optional<UnresolvedExpression> getTimeSpanField(UnresolvedExpression expr) {
@@ -4184,7 +4202,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     // Accept SQL SELECT without FROM (dual table), encoded as Values([[]]) — one row, zero columns.
     List<List<Literal>> rows = values.getValues();
     if (rows == null || rows.isEmpty() || (rows.size() == 1 && rows.get(0).isEmpty())) {
-      context.relBuilder.values(context.relBuilder.getTypeFactory().builder().build());
+      // Push Calcite's canonical one-row "dual table" so the downstream Project evaluates
+      // expressions over exactly one row. The dummy ZERO column is stripped by the Project.
+      context.relBuilder.push(LogicalValues.createOneRow(context.relBuilder.getCluster()));
       return context.relBuilder.peek();
     }
     throw new CalciteUnsupportedException("Inline VALUES with literal rows is unsupported");

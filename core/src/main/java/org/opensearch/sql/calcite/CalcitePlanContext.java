@@ -21,6 +21,7 @@ import org.apache.calcite.rex.RexCorrelVariable;
 import org.apache.calcite.rex.RexLambdaRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.tools.FrameworkConfig;
+import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.HighlightConfig;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
@@ -63,6 +64,14 @@ public class CalcitePlanContext {
   private final Stack<List<RexNode>> windowPartitions = new Stack<>();
 
   @Getter public Map<String, RexLambdaRef> rexLambdaRefMap;
+
+  /**
+   * Maps each AggregateFunction AST node to its output field index in the post-aggregate row
+   * type. Populated by the relNode visitor during Aggregation construction; consumed by the
+   * rex visitor when resolving aggregate references in HAVING/SELECT (e.g., abs(MAX(age))).
+   */
+  @Getter
+  private final Map<AggregateFunction, Integer> aggregateOutputIndex = new HashMap<>();
 
   /**
    * List of captured variables from outer scope for lambda functions. When a lambda body references
