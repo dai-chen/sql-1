@@ -75,6 +75,7 @@ import org.opensearch.sql.ast.expression.subquery.ExistsSubquery;
 import org.opensearch.sql.ast.expression.subquery.InSubquery;
 import org.opensearch.sql.ast.expression.subquery.ScalarSubquery;
 import org.opensearch.sql.ast.expression.subquery.SubqueryExpression;
+import org.opensearch.sql.ast.tree.Sort.NullOrder;
 import org.opensearch.sql.ast.tree.Sort.SortOption;
 import org.opensearch.sql.ast.tree.Sort.SortOrder;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
@@ -105,6 +106,20 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   public RexNode analyzeJoinCondition(UnresolvedExpression unresolved, CalcitePlanContext context) {
     return context.resolveJoinCondition(unresolved, this::analyze);
+  }
+
+  @Override
+  public RexNode visitAggregateFunction(AggregateFunction node, CalcitePlanContext context) {
+    // Post-aggregate AggregateFunction reference (e.g., HAVING, abs(MAX(...))) resolves to a
+    // field of the Aggregate's output via the registry populated by visitAggregation.
+    Integer index = context.getAggregateOutputIndex().get(node);
+    if (index == null) {
+      throw new IllegalStateException(
+          "Aggregate function " + node + " was not registered before reaching the rex visitor."
+              + " This indicates a planner bug: visitAggregation and visitAggregateFunction"
+              + " are out of sync.");
+    }
+    return context.relBuilder.field(index);
   }
 
   @Override
@@ -651,10 +666,15 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
               if (opt.getSortOrder() == SortOrder.DESC) {
                 field = b.desc(field);
               }
-              return switch (opt.getNullOrder()) {
+              NullOrder no = opt.getNullOrder();
+              if (no == null) {
+                // Match top-level ORDER BY default: treat unspecified NULLS as NULLS FIRST.
+                // (See CalciteRelNodeVisitor visitSort: null nullOrder → nullsFirst.)
+                return b.nullsFirst(field);
+              }
+              return switch (no) {
                 case NULL_LAST -> b.nullsLast(field);
                 case NULL_FIRST -> b.nullsFirst(field);
-                default -> field;
               };
             })
         .toList();
