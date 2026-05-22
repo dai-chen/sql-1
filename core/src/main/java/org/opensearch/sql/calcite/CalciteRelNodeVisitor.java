@@ -1749,9 +1749,7 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     }
     context.relBuilder.project(reordered);
 
-    // Register aggregate output indices for resolution in HAVING / post-aggregate SELECT exprs.
-    // Aggregates appear at known positions in the reordered output (same positions the reorder
-    // block above placed them). No name matching needed — survives any toString() drift.
+    // Register aggregate output indices for HAVING / post-aggregate resolution.
     context.getAggregateOutputIndex().clear();
     int aggStartIdx = metricsFirst ? 0 : aliasedGroupByList.size();
     for (int i = 0; i < aggExprList.size(); i++) {

@@ -115,7 +115,9 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
     Integer index = context.getAggregateOutputIndex().get(node);
     if (index == null) {
       throw new IllegalStateException(
-          "Aggregate function " + node + " was not registered before reaching the rex visitor."
+          "Aggregate function "
+              + node
+              + " was not registered before reaching the rex visitor."
               + " This indicates a planner bug: visitAggregation and visitAggregateFunction"
               + " are out of sync.");
     }

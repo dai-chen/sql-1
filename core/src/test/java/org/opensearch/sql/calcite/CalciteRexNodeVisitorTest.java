@@ -7,13 +7,11 @@ package org.opensearch.sql.calcite;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.TYPE_FACTORY;
 
 import java.sql.Connection;
 import java.util.List;
-import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
@@ -218,8 +216,7 @@ public class CalciteRexNodeVisitorTest {
   @Test
   public void testVisitAggregateFunction_resolvesFromRegistry() {
     // Setup: register an AggregateFunction in the context's aggregateOutputIndex
-    AggregateFunction aggFunc =
-        new AggregateFunction("MAX", new QualifiedName(List.of("age")));
+    AggregateFunction aggFunc = new AggregateFunction("MAX", new QualifiedName(List.of("age")));
     context.getAggregateOutputIndex().put(aggFunc, 0);
 
     RexInputRef expectedRef = new RexInputRef(0, TYPE_FACTORY.createSqlType(SqlTypeName.INTEGER));
@@ -232,8 +229,7 @@ public class CalciteRexNodeVisitorTest {
   @Test
   public void testVisitAggregateFunction_throwsWhenUnresolvable() {
     // Empty registry → IllegalStateException (planner-bug invariant violation).
-    AggregateFunction aggFunc =
-        new AggregateFunction("MAX", new QualifiedName(List.of("age")));
+    AggregateFunction aggFunc = new AggregateFunction("MAX", new QualifiedName(List.of("age")));
     assertThrows(
         IllegalStateException.class, () -> visitor.visitAggregateFunction(aggFunc, context));
   }
