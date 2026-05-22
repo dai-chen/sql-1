@@ -1,0 +1,85 @@
+fix(calcite): replace 3 temporary patches with clean minimal fixes
+
+Replaces fragile temp patches (originally landed in 0f40eadfc and later
+reverted) with production-quality fixes for the Calcite-based unified
+SQL/PPL query path. Each fix is the smallest change that addresses the
+root cause without changing observable behavior elsewhere.
+
+1. FROM-less SELECT returning 0 rows (CalciteRelNodeVisitor.visitValues)
+   Replace the empty-typed Values with Calcite's canonical
+   LogicalValues.createOneRow(cluster). The downstream Project strips
+   the dummy ZERO column. Fixes `SELECT 1`, `SELECT mod(3, 2)`, etc.
+
+2. HAVING / post-aggregate expression resolution
+   (CalciteRexNodeVisitor.visitAggregateFunction)
+
+   Without this fix, any aggregate AST node reached by the rex visitor
+   in a post-aggregate context (HAVING, scalar wrappers like
+   abs(MAX(...)), arithmetic between aggregates) NPEs because the
+   default visitor returns null.
+
+   The fix is a structural registry. CalciteRelNodeVisitor.visitAggregation
+   populates a Map<AggregateFunction, Integer> in CalcitePlanContext after
+   the schema-reorder Project: each aggregate's position is computed by
+   the same arithmetic that drives the reorder block (no name matching,
+   no toString() dependence). The rex visitor's visitAggregateFunction
+   does an O(1) Map.get() keyed on the AggregateFunction's structural
+   identity (@EqualsAndHashCode includes funcName, field, distinct,
+   condition, argList). A miss throws IllegalStateException with a
+   planner-bug message.
+
+   Position-based registration is essential: an earlier name-match
+   approach (compare aggFunc.toString() to row-type field names) failed
+   silently for COUNT(*) and HAVING-alias, because AllFields.toString()
+   is `"AllFields()"` while Calcite names the field `"COUNT(*)"`.
+   Structural lookup makes those cases work without any special-casing.
+
+   Fixes:
+   - SELECT abs(MAX(age)) FROM t
+   - SELECT MAX(age) + MIN(age) FROM t
+   - ... GROUP BY ... HAVING MAX(age) > N
+   - ... GROUP BY ... HAVING MAX > N AND MIN < M
+   - ... GROUP BY ... HAVING COUNT(*) > N
+   - ... GROUP BY name, COUNT(*) AS cnt ... HAVING cnt > N (alias)
+
+3. NullOrder NPE in window functions (CalciteRexNodeVisitor)
+   Window functions with ORDER BY but no explicit NULLS FIRST/LAST
+   produced a SortOption with nullOrder = null, which NPE'd at the
+   switch. Add a defensive null check that defaults to nullsFirst,
+   matching the existing top-level ORDER BY default semantics in
+   CalciteRelNodeVisitor.visitSort. Fixes
+   `SELECT ROW_NUMBER() OVER(ORDER BY age) FROM t`.
+
+Tests added:
+- CalciteRexNodeVisitorTest: registry hit, throws on unresolvable.
+- UnifiedQueryPlannerSqlV2Test: FROM-less SELECT plan-level; six
+  HAVING / post-aggregate regression tests covering all common
+  patterns (HAVING <named-agg> {>,<,=} N, HAVING COUNT(*) > N,
+  HAVING <alias> > N, scalar-fn over aggregate, arithmetic between
+  aggregates, compound AND).
+
+The original temp commit also patched two other shapes that are not
+included here:
+
+(a) DatetimeUdtNormalizeRule: an Aggregate.<init> assertion when
+normalizing UDT types in aggregate inputs. That patch addressed only
+the direct assertion; a cascade gap remains for any Project/Filter
+above the re-typed Aggregate. Empirical verification of 24 canonical
+PPL dashboard queries (NFW, WAF, StatsCommandIT, docs) shows none
+trigger the bug, because they use span() over already-typed timestamp
+columns rather than UDT-producing UDFs inside aggregates. Shipping
+an incomplete fix would mask the underlying issue. A separate plan
+document (~/.kiro/plans/opensearch-sql/) captures the full
+investigation, the failing shapes, the designed cascade fix, and a
+recommended architectural follow-up (move datetime UDFs to standard
+return types so the rule becomes unnecessary).
+
+(b) AnalyticsExecutionEngine.buildSchema NUL stripping: defended
+against a NUL-byte alias encoding in CalciteRexNodeVisitor.visitAlias
+that was introduced in commit de26834e2 on 2026-05-18 11:45 and
+removed the same day before this strip was even authored. Empirical
+runs across :core, :api, :sql, :ppl, :legacy, :plugin (7,000+ tests)
+produced no NUL-bearing field names from any current code path. The
+strip was dead code; dropping it.
+
+All :api / :core / :sql unit tests pass on this branch.

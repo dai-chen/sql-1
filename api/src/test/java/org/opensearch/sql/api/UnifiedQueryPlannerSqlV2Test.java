@@ -220,14 +220,14 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
   }
 
   @Test
-  public void selectWithoutFrom_literal() {
+  public void selectLiteralWithoutFrom() {
     // Fix 3: FROM-less SELECT should produce a one-row result via LogicalValues.
     // The optimizer folds Project([1]) over Values([[0]]) into Values([[1]]).
     givenQuery("SELECT 1").assertPlanContains("LogicalValues(tuples=[[{ 1 }]])");
   }
 
   @Test
-  public void selectWithoutFrom_expression() {
+  public void selectExpressionWithoutFrom() {
     // Non-trivial expressions remain as Project over the one-row dual table.
     givenQuery("SELECT 1 + 1")
         .assertPlanContains("LogicalValues(tuples=[[{ 0 }]])")
@@ -238,7 +238,11 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
 
   @Test
   public void testHavingMaxCol() {
-    givenQuery("SELECT department FROM catalog.employees GROUP BY department HAVING MAX(age) > 30")
+    givenQuery(
+            """
+            SELECT department FROM catalog.employees
+              GROUP BY department HAVING MAX(age) > 30
+            """)
         .assertPlan(
             """
             LogicalProject(department=[$1])
@@ -276,7 +280,11 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
 
   @Test
   public void testHavingCountStar() {
-    givenQuery("SELECT department FROM catalog.employees GROUP BY department HAVING COUNT(*) > 5")
+    givenQuery(
+            """
+            SELECT department FROM catalog.employees
+              GROUP BY department HAVING COUNT(*) > 5
+            """)
         .assertPlan(
             """
             LogicalProject(department=[$1])
@@ -291,8 +299,10 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
   @Test
   public void testHavingWithAlias() {
     givenQuery(
-            "SELECT department, COUNT(*) AS cnt FROM catalog.employees GROUP BY department"
-                + " HAVING cnt > 1")
+            """
+            SELECT department, COUNT(*) AS cnt FROM catalog.employees
+              GROUP BY department HAVING cnt > 1
+            """)
         .assertPlan(
             """
             LogicalProject(department=[$1], cnt=[$0])
@@ -307,8 +317,10 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
   @Test
   public void testHavingCompoundAnd() {
     givenQuery(
-            "SELECT department FROM catalog.employees GROUP BY department"
-                + " HAVING MAX(age) > 30 AND MIN(age) < 50")
+            """
+            SELECT department FROM catalog.employees
+              GROUP BY department HAVING MAX(age) > 30 AND MIN(age) < 50
+            """)
         .assertPlan(
             """
             LogicalProject(department=[$2])
@@ -317,6 +329,21 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
                   LogicalAggregate(group=[{0}], MAX(age)=[MAX($1)], MIN(age)=[MIN($1)])
                     LogicalProject(department=[$3], age=[$2])
                       LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testWindowOrderByDefaultsNullsFirst() {
+    // Window function ORDER BY without explicit NULLS FIRST/LAST defaults to NULLS FIRST,
+    // matching top-level ORDER BY semantics. Previously NPE'd in translateOrderKeys.
+    givenQuery(
+            """
+            SELECT name, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM catalog.employees
+            """)
+        .assertPlan(
+            """
+            LogicalProject(name=[$1], rn=[ROW_NUMBER() OVER (ORDER BY $0 NULLS FIRST)])
+              LogicalTableScan(table=[[catalog, employees]])
             """);
   }
 }

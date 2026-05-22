@@ -1,0 +1,415 @@
+diff --git a/api/src/main/java/org/opensearch/sql/api/spec/datetime/DatetimeUdtNormalizeRule.java b/api/src/main/java/org/opensearch/sql/api/spec/datetime/DatetimeUdtNormalizeRule.java
+index b15d830d4..608bc3bc6 100644
+--- a/api/src/main/java/org/opensearch/sql/api/spec/datetime/DatetimeUdtNormalizeRule.java
++++ b/api/src/main/java/org/opensearch/sql/api/spec/datetime/DatetimeUdtNormalizeRule.java
+@@ -5,11 +5,14 @@
+ 
+ package org.opensearch.sql.api.spec.datetime;
+ 
++import java.util.List;
+ import java.util.Optional;
+ import lombok.AccessLevel;
+ import lombok.NoArgsConstructor;
+ import org.apache.calcite.rel.RelHomogeneousShuttle;
+ import org.apache.calcite.rel.RelNode;
++import org.apache.calcite.rel.core.Aggregate;
++import org.apache.calcite.rel.core.AggregateCall;
+ import org.apache.calcite.rel.type.RelDataType;
+ import org.apache.calcite.rel.type.RelDataTypeFactory;
+ import org.apache.calcite.rex.RexBuilder;
+@@ -30,6 +33,36 @@ class DatetimeUdtNormalizeRule extends RelHomogeneousShuttle {
+ 
+   @Override
+   public RelNode visit(RelNode other) {
++    // For Aggregate nodes, normalize children first, then rebuild AggregateCall entries
++    // with null type so Calcite re-infers from the updated input. This avoids the assertion
++    // in Aggregate.<init> that checks aggCall.type == inferredType after input type changes.
++    if (other instanceof Aggregate agg) {
++      RelNode newInput = agg.getInput().accept(this);
++      List<AggregateCall> newCalls =
++          agg.getAggCallList().stream()
++              .map(
++                  call ->
++                      // Use the deprecated overload that accepts groupCount + input + null type;
++                      // this is the only non-deprecated path in Calcite 1.41 that re-infers type.
++                      AggregateCall.create(
++                          call.getAggregation(),
++                          call.isDistinct(),
++                          call.isApproximate(),
++                          call.ignoreNulls(),
++                          call.rexList,
++                          call.getArgList(),
++                          call.filterArg,
++                          call.distinctKeys,
++                          call.collation,
++                          agg.getGroupCount(),
++                          newInput,
++                          null, // null → Calcite re-infers type from new input
++                          call.getName()))
++              .toList();
++      return agg.copy(
++          agg.getTraitSet(), newInput, agg.getGroupSet(), agg.getGroupSets(), newCalls);
++    }
++
+     RelNode visited = super.visit(other);
+     RexBuilder rexBuilder = visited.getCluster().getRexBuilder();
+     RelDataTypeFactory typeFactory = rexBuilder.getTypeFactory();
+@@ -44,17 +77,22 @@ class DatetimeUdtNormalizeRule extends RelHomogeneousShuttle {
+             }
+ 
+             // Normalize UDT return type to standard Calcite DATE/TIME/TIMESTAMP
+-            UdtMapping m = mapping.get();
+-            SqlTypeName stdTypeName = m.getStdType();
+-            RelDataType baseType =
+-                stdTypeName.allowsPrec()
+-                    ? typeFactory.createSqlType(
+-                        stdTypeName, typeFactory.getTypeSystem().getMaxPrecision(stdTypeName))
+-                    : typeFactory.createSqlType(stdTypeName);
+             RelDataType stdType =
+-                typeFactory.createTypeWithNullability(baseType, call.getType().isNullable());
++                toStdType(mapping.get(), typeFactory, call.getType().isNullable());
+             return call.clone(stdType, call.getOperands());
+           }
+         });
+   }
++
++  /** Convert a UDT mapping to the corresponding standard Calcite type. */
++  private static RelDataType toStdType(
++      UdtMapping mapping, RelDataTypeFactory typeFactory, boolean nullable) {
++    SqlTypeName stdTypeName = mapping.getStdType();
++    RelDataType baseType =
++        stdTypeName.allowsPrec()
++            ? typeFactory.createSqlType(
++                stdTypeName, typeFactory.getTypeSystem().getMaxPrecision(stdTypeName))
++            : typeFactory.createSqlType(stdTypeName);
++    return typeFactory.createTypeWithNullability(baseType, nullable);
++  }
+ }
+diff --git a/api/src/test/java/org/opensearch/sql/api/UnifiedQueryPlannerSqlV2Test.java b/api/src/test/java/org/opensearch/sql/api/UnifiedQueryPlannerSqlV2Test.java
+index 5d7135ec7..0fc8cf942 100644
+--- a/api/src/test/java/org/opensearch/sql/api/UnifiedQueryPlannerSqlV2Test.java
++++ b/api/src/test/java/org/opensearch/sql/api/UnifiedQueryPlannerSqlV2Test.java
+@@ -218,4 +218,19 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
+                 LogicalTableScan(table=[[catalog, employees]])
+             """);
+   }
++
++  @Test
++  public void selectWithoutFrom_literal() {
++    // Fix 3: FROM-less SELECT should produce a one-row result via LogicalValues.
++    // The optimizer folds Project([1]) over Values([[0]]) into Values([[1]]).
++    givenQuery("SELECT 1").assertPlanContains("LogicalValues(tuples=[[{ 1 }]])");
++  }
++
++  @Test
++  public void selectWithoutFrom_expression() {
++    // Non-trivial expressions remain as Project over the one-row dual table.
++    givenQuery("SELECT 1 + 1")
++        .assertPlanContains("LogicalValues(tuples=[[{ 0 }]])")
++        .assertPlanContains("LogicalProject");
++  }
+ }
+diff --git a/api/src/test/java/org/opensearch/sql/api/spec/datetime/DatetimeExtensionSqlTest.java b/api/src/test/java/org/opensearch/sql/api/spec/datetime/DatetimeExtensionSqlTest.java
+index 3cae8abd9..ff6fe9ba2 100644
+--- a/api/src/test/java/org/opensearch/sql/api/spec/datetime/DatetimeExtensionSqlTest.java
++++ b/api/src/test/java/org/opensearch/sql/api/spec/datetime/DatetimeExtensionSqlTest.java
+@@ -90,4 +90,19 @@ public class DatetimeExtensionSqlTest extends UnifiedQueryTestBase {
+         .assertReturnType("DATE", DATE)
+         .assertReturnType("TIMESTAMP", TIMESTAMP, 9);
+   }
++
++  @Test
++  public void testAggregateOverDatetimeColumn() {
++    // Verifies that DatetimeUdtNormalizeRule correctly re-infers AggregateCall types
++    // when the input Project's datetime columns are normalized from UDT to standard types.
++    // The plan should complete without assertion errors in Aggregate.<init>.
++    givenQuery("SELECT MAX(created_at) FROM catalog.events")
++        .assertPlanContains("LogicalAggregate");
++  }
++
++  @Test
++  public void testAggregateMinOverDateColumn() {
++    givenQuery("SELECT MIN(hire_date) FROM catalog.events")
++        .assertPlanContains("LogicalAggregate");
++  }
+ }
+diff --git a/core/src/main/java/org/opensearch/sql/calcite/CalcitePlanContext.java b/core/src/main/java/org/opensearch/sql/calcite/CalcitePlanContext.java
+index 5f58dea22..3cbb38c85 100644
+--- a/core/src/main/java/org/opensearch/sql/calcite/CalcitePlanContext.java
++++ b/core/src/main/java/org/opensearch/sql/calcite/CalcitePlanContext.java
+@@ -21,6 +21,7 @@ import org.apache.calcite.rex.RexCorrelVariable;
+ import org.apache.calcite.rex.RexLambdaRef;
+ import org.apache.calcite.rex.RexNode;
+ import org.apache.calcite.tools.FrameworkConfig;
++import org.opensearch.sql.ast.expression.AggregateFunction;
+ import org.opensearch.sql.ast.expression.UnresolvedExpression;
+ import org.opensearch.sql.ast.tree.HighlightConfig;
+ import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
+@@ -64,6 +65,14 @@ public class CalcitePlanContext {
+ 
+   @Getter public Map<String, RexLambdaRef> rexLambdaRefMap;
+ 
++  /**
++   * Maps each AggregateFunction AST node to its output field index in the post-aggregate row
++   * type. Populated by the relNode visitor during Aggregation construction; consumed by the
++   * rex visitor when resolving aggregate references in HAVING/SELECT (e.g., abs(MAX(age))).
++   */
++  @Getter
++  private final Map<AggregateFunction, Integer> aggregateOutputIndex = new HashMap<>();
++
+   /**
+    * List of captured variables from outer scope for lambda functions. When a lambda body references
+    * a field that is not a lambda parameter, it gets captured and stored here. The captured
+diff --git a/core/src/main/java/org/opensearch/sql/calcite/CalciteRelNodeVisitor.java b/core/src/main/java/org/opensearch/sql/calcite/CalciteRelNodeVisitor.java
+index 10c5d2aa8..394e5601b 100644
+--- a/core/src/main/java/org/opensearch/sql/calcite/CalciteRelNodeVisitor.java
++++ b/core/src/main/java/org/opensearch/sql/calcite/CalciteRelNodeVisitor.java
+@@ -1748,6 +1748,32 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
+       reordered.addAll(aggRexList);
+     }
+     context.relBuilder.project(reordered);
++
++    // Register aggregate output indices for resolution in HAVING / post-aggregate SELECT exprs.
++    context.getAggregateOutputIndex().clear();
++    List<String> finalFields = context.relBuilder.peek().getRowType().getFieldNames();
++    for (UnresolvedExpression aggExpr : aggExprList) {
++      AggregateFunction aggFunc = extractAggregateFunction(aggExpr);
++      if (aggFunc != null) {
++        String aggName = aggFunc.toString();
++        int idx = -1;
++        for (int i = 0; i < finalFields.size(); i++) {
++          if (finalFields.get(i).equalsIgnoreCase(aggName)) {
++            idx = i;
++            break;
++          }
++        }
++        if (idx >= 0) {
++          context.getAggregateOutputIndex().put(aggFunc, idx);
++        }
++      }
++    }
++  }
++
++  private static AggregateFunction extractAggregateFunction(UnresolvedExpression expr) {
++    if (expr instanceof AggregateFunction af) return af;
++    if (expr instanceof Alias alias) return extractAggregateFunction(alias.getDelegated());
++    return null;
+   }
+ 
+   private Optional<UnresolvedExpression> getTimeSpanField(UnresolvedExpression expr) {
+@@ -4184,7 +4210,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
+     // Accept SQL SELECT without FROM (dual table), encoded as Values([[]]) — one row, zero columns.
+     List<List<Literal>> rows = values.getValues();
+     if (rows == null || rows.isEmpty() || (rows.size() == 1 && rows.get(0).isEmpty())) {
+-      context.relBuilder.values(context.relBuilder.getTypeFactory().builder().build());
++      // Push Calcite's canonical one-row "dual table" so the downstream Project evaluates
++      // expressions over exactly one row. The dummy ZERO column is stripped by the Project.
++      context.relBuilder.push(LogicalValues.createOneRow(context.relBuilder.getCluster()));
+       return context.relBuilder.peek();
+     }
+     throw new CalciteUnsupportedException("Inline VALUES with literal rows is unsupported");
+diff --git a/core/src/main/java/org/opensearch/sql/calcite/CalciteRexNodeVisitor.java b/core/src/main/java/org/opensearch/sql/calcite/CalciteRexNodeVisitor.java
+index 01592cd30..be5015071 100644
+--- a/core/src/main/java/org/opensearch/sql/calcite/CalciteRexNodeVisitor.java
++++ b/core/src/main/java/org/opensearch/sql/calcite/CalciteRexNodeVisitor.java
+@@ -75,6 +75,7 @@ import org.opensearch.sql.ast.expression.subquery.ExistsSubquery;
+ import org.opensearch.sql.ast.expression.subquery.InSubquery;
+ import org.opensearch.sql.ast.expression.subquery.ScalarSubquery;
+ import org.opensearch.sql.ast.expression.subquery.SubqueryExpression;
++import org.opensearch.sql.ast.tree.Sort.NullOrder;
+ import org.opensearch.sql.ast.tree.Sort.SortOption;
+ import org.opensearch.sql.ast.tree.Sort.SortOrder;
+ import org.opensearch.sql.ast.tree.UnresolvedPlan;
+@@ -107,6 +108,30 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
+     return context.resolveJoinCondition(unresolved, this::analyze);
+   }
+ 
++  @Override
++  public RexNode visitAggregateFunction(AggregateFunction node, CalcitePlanContext context) {
++    // Resolve a post-aggregate AggregateFunction reference (HAVING or scalar wrapping in SELECT,
++    // e.g., abs(MAX(age))) to a field reference into the aggregate's output row type.
++    // Primary: structural lookup via the registry populated by visitAggregation.
++    Integer registered = context.getAggregateOutputIndex().get(node);
++    if (registered != null) {
++      return context.relBuilder.field(registered);
++    }
++    // Fallback: case-insensitive exact name match against current row type field names.
++    // Useful when the AST node was reconstructed (e.g., copy with different identity) but
++    // serializes to the same canonical form.
++    List<String> fieldNames = context.relBuilder.peek().getRowType().getFieldNames();
++    String canonical = node.toString();
++    for (int i = 0; i < fieldNames.size(); i++) {
++      if (fieldNames.get(i).equalsIgnoreCase(canonical)) {
++        return context.relBuilder.field(i);
++      }
++    }
++    throw new IllegalStateException(
++        "Cannot resolve aggregate function " + canonical
++            + " in post-aggregate context. Available fields: " + fieldNames);
++  }
++
+   @Override
+   public RexNode visitLiteral(Literal node, CalcitePlanContext context) {
+     RexBuilder rexBuilder = context.rexBuilder;
+@@ -651,10 +676,15 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
+               if (opt.getSortOrder() == SortOrder.DESC) {
+                 field = b.desc(field);
+               }
+-              return switch (opt.getNullOrder()) {
++              NullOrder no = opt.getNullOrder();
++              if (no == null) {
++                // Match top-level ORDER BY default: treat unspecified NULLS as NULLS FIRST.
++                // (See CalciteRelNodeVisitor visitSort: null nullOrder → nullsFirst.)
++                return b.nullsFirst(field);
++              }
++              return switch (no) {
+                 case NULL_LAST -> b.nullsLast(field);
+                 case NULL_FIRST -> b.nullsFirst(field);
+-                default -> field;
+               };
+             })
+         .toList();
+diff --git a/core/src/main/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngine.java b/core/src/main/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngine.java
+index ddfe5fd35..75f89aa96 100644
+--- a/core/src/main/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngine.java
++++ b/core/src/main/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngine.java
+@@ -136,7 +136,15 @@ public class AnalyticsExecutionEngine implements ExecutionEngine {
+     List<Schema.Column> columns = new ArrayList<>();
+     for (RelDataTypeField field : fields) {
+       ExprType exprType = convertType(field.getType());
+-      columns.add(new Schema.Column(field.getName(), null, exprType));
++      String name = field.getName();
++      // Strip Calcite's internal NUL separator (expression\0alias → alias).
++      // Calcite's planner may produce field names like 'ISNULL(lastname)\0name' when
++      // disambiguating projected fields; we want the user-facing alias only.
++      int nul = name.indexOf('\0');
++      if (nul >= 0) {
++        name = name.substring(nul + 1);
++      }
++      columns.add(new Schema.Column(name, null, exprType));
+     }
+     return new Schema(columns);
+   }
+diff --git a/core/src/test/java/org/opensearch/sql/calcite/CalciteRexNodeVisitorTest.java b/core/src/test/java/org/opensearch/sql/calcite/CalciteRexNodeVisitorTest.java
+index 9be542f20..efad8f209 100644
+--- a/core/src/test/java/org/opensearch/sql/calcite/CalciteRexNodeVisitorTest.java
++++ b/core/src/test/java/org/opensearch/sql/calcite/CalciteRexNodeVisitorTest.java
+@@ -7,12 +7,15 @@ package org.opensearch.sql.calcite;
+ 
+ import static org.junit.jupiter.api.Assertions.*;
+ import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.mock;
+ import static org.mockito.Mockito.when;
+ import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.TYPE_FACTORY;
+ 
+ import java.sql.Connection;
+ import java.util.List;
++import org.apache.calcite.rel.RelNode;
+ import org.apache.calcite.rel.type.RelDataType;
++import org.apache.calcite.rex.RexInputRef;
+ import org.apache.calcite.rex.RexNode;
+ import org.apache.calcite.sql.type.ArraySqlType;
+ import org.apache.calcite.sql.type.SqlTypeName;
+@@ -25,6 +28,7 @@ import org.mockito.Mock;
+ import org.mockito.MockedStatic;
+ import org.mockito.Mockito;
+ import org.mockito.junit.jupiter.MockitoExtension;
++import org.opensearch.sql.ast.expression.AggregateFunction;
+ import org.opensearch.sql.ast.expression.LambdaFunction;
+ import org.opensearch.sql.ast.expression.QualifiedName;
+ import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
+@@ -210,4 +214,53 @@ public class CalciteRexNodeVisitorTest {
+         lambdaContext.getRexLambdaRefMap().get("acc").getType().getSqlTypeName(),
+         SqlTypeName.FLOAT);
+   }
++
++  @Test
++  public void testVisitAggregateFunction_resolvesFromRegistry() {
++    // Setup: register an AggregateFunction in the context's aggregateOutputIndex
++    AggregateFunction aggFunc =
++        new AggregateFunction("MAX", new QualifiedName(List.of("age")));
++    context.getAggregateOutputIndex().put(aggFunc, 0);
++
++    RexInputRef expectedRef = new RexInputRef(0, TYPE_FACTORY.createSqlType(SqlTypeName.INTEGER));
++    when(relBuilder.field(0)).thenReturn(expectedRef);
++
++    RexNode result = visitor.visitAggregateFunction(aggFunc, context);
++    assertEquals(expectedRef, result);
++  }
++
++  @Test
++  public void testVisitAggregateFunction_fallsBackToNameMatch() {
++    // Setup: empty registry, but row type has matching field name
++    AggregateFunction aggFunc =
++        new AggregateFunction("MAX", new QualifiedName(List.of("age")));
++
++    RelDataType rowType =
++        TYPE_FACTORY.builder().add("MAX(age)", SqlTypeName.INTEGER).build();
++    RelNode mockRel = mock(RelNode.class);
++    when(mockRel.getRowType()).thenReturn(rowType);
++    when(relBuilder.peek()).thenReturn(mockRel);
++
++    RexInputRef expectedRef = new RexInputRef(0, TYPE_FACTORY.createSqlType(SqlTypeName.INTEGER));
++    when(relBuilder.field(0)).thenReturn(expectedRef);
++
++    RexNode result = visitor.visitAggregateFunction(aggFunc, context);
++    assertEquals(expectedRef, result);
++  }
++
++  @Test
++  public void testVisitAggregateFunction_throwsWhenUnresolvable() {
++    // Setup: empty registry, row type without matching field
++    AggregateFunction aggFunc =
++        new AggregateFunction("MAX", new QualifiedName(List.of("age")));
++
++    RelDataType rowType =
++        TYPE_FACTORY.builder().add("name", SqlTypeName.VARCHAR).build();
++    RelNode mockRel = mock(RelNode.class);
++    when(mockRel.getRowType()).thenReturn(rowType);
++    when(relBuilder.peek()).thenReturn(mockRel);
++
++    assertThrows(
++        IllegalStateException.class, () -> visitor.visitAggregateFunction(aggFunc, context));
++  }
+ }
+diff --git a/core/src/test/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngineTest.java b/core/src/test/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngineTest.java
+index 4de596fb3..7ad25db42 100644
+--- a/core/src/test/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngineTest.java
++++ b/core/src/test/java/org/opensearch/sql/executor/analytics/AnalyticsExecutionEngineTest.java
+@@ -276,6 +276,36 @@ class AnalyticsExecutionEngineTest {
+             + errorRef.get().getMessage());
+   }
+ 
++  @Test
++  void executeRelNode_nulSeparatorStrippedFromFieldNames() {
++    // Simulate Calcite's internal \0 separator in field names (expression\0alias → alias)
++    RelNode relNode =
++        mockRelNode(
++            "ISNULL(lastname)\0name", SqlTypeName.BOOLEAN,
++            "COUNT(*)\0cnt", SqlTypeName.BIGINT);
++    Iterable<Object[]> rows = Collections.singletonList(new Object[] {false, 42L});
++    stubExecutorWith(relNode, rows);
++
++    QueryResponse response = executeAndCapture(relNode);
++
++    // Field names should have \0 prefix stripped, keeping only the alias
++    assertEquals("name", response.getSchema().getColumns().get(0).getName());
++    assertEquals("cnt", response.getSchema().getColumns().get(1).getName());
++  }
++
++  @Test
++  void executeRelNode_cleanFieldNamesUnaffected() {
++    // Field names without \0 should pass through unchanged
++    RelNode relNode = mockRelNode("name", SqlTypeName.VARCHAR, "age", SqlTypeName.INTEGER);
++    Iterable<Object[]> rows = Collections.singletonList(new Object[] {"Alice", 30});
++    stubExecutorWith(relNode, rows);
++
++    QueryResponse response = executeAndCapture(relNode);
++
++    assertEquals("name", response.getSchema().getColumns().get(0).getName());
++    assertEquals("age", response.getSchema().getColumns().get(1).getName());
++  }
++
+   // --- helpers ---
+ 
+   private QueryResponse executeAndCapture(RelNode relNode) {

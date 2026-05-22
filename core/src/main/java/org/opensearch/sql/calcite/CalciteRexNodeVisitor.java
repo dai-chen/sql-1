@@ -110,16 +110,11 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitAggregateFunction(AggregateFunction node, CalcitePlanContext context) {
-    // Post-aggregate AggregateFunction reference (e.g., HAVING, abs(MAX(...))) resolves to a
-    // field of the Aggregate's output via the registry populated by visitAggregation.
+    // Resolve post-aggregate AggregateFunction via registry populated in visitAggregation.
     Integer index = context.getAggregateOutputIndex().get(node);
     if (index == null) {
       throw new IllegalStateException(
-          "Aggregate function "
-              + node
-              + " was not registered before reaching the rex visitor."
-              + " This indicates a planner bug: visitAggregation and visitAggregateFunction"
-              + " are out of sync.");
+          "Aggregate function " + node + " not registered (visitAggregation out of sync)");
     }
     return context.relBuilder.field(index);
   }

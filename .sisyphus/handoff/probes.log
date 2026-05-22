@@ -1,0 +1,39 @@
+=======================================
+OpenSearch Build Hamster says Hello!
+  Gradle Version        : 9.4.1
+  OS Info               : Mac OS X 26.4.1 (aarch64)
+  JDK Version           : 21 (Amazon Corretto JDK 21 (21.0.11+10-LTS))
+  JAVA_HOME             : /Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home
+  Random Testing Seed   : DC3DFD5222B69BF
+  Crypto Standard       : FIPS-140-3
+=======================================
+warning(184): OpenSearchSQLLexer.g4:112:0: One of the token MISSING values unreachable. MISSING is always overlapped by token MISSING_LITERAL
+warning(154): OpenSearchSQLParser.g4:184:0: rule windowFunction contains an optional block with at least one alternative that can match an empty string
+warning(154): OpenSearchPPLParser.g4:602:0: rule unionCommand contains an optional block with at least one alternative that can match an empty string
+Note: /Users/daichen/Temp/my-sql-repo-cc/common/src/main/java/org/opensearch/sql/common/grok/GrokCompiler.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+16 tests completed, 9 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':api:test'.
+> There were failing tests. See the report at: file:///Users/daichen/Temp/my-sql-repo-cc/api/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 24s

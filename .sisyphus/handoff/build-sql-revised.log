@@ -1,0 +1,1463 @@
+> Task :buildSrc:compileJava NO-SOURCE
+> Task :buildSrc:compileGroovy UP-TO-DATE
+> Task :buildSrc:processResources UP-TO-DATE
+> Task :buildSrc:classes UP-TO-DATE
+> Task :buildSrc:jar UP-TO-DATE
+
+> Configure project :
+Invalid Java installation found at '/Library/Java/JavaVirtualMachines/amazon-corretto-8.jdk/Contents/Home' (Java home). It will be re-checked in the next build. This might have performance impact if it keeps failing. Run the 'javaToolchains' task for more details.
+=======================================
+OpenSearch Build Hamster says Hello!
+  Gradle Version        : 9.4.1
+  OS Info               : Mac OS X 26.4.1 (aarch64)
+  JDK Version           : 21 (Amazon Corretto JDK 21 (21.0.11+10-LTS))
+  JAVA_HOME             : /Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home
+  Random Testing Seed   : 95BD51A231E9DE19
+  Crypto Standard       : FIPS-140-3
+=======================================
+
+> Task :sql:generateEffectiveLombokConfig UP-TO-DATE
+> Task :common:generateEffectiveLombokConfig UP-TO-DATE
+> Task :protocol:generateEffectiveLombokConfig UP-TO-DATE
+> Task :opensearch:generateEffectiveLombokConfig UP-TO-DATE
+> Task :core:generateEffectiveLombokConfig UP-TO-DATE
+> Task :protocol:processResources NO-SOURCE
+> Task :opensearch:processResources NO-SOURCE
+> Task :core:generateTestFixturesEffectiveLombokConfig UP-TO-DATE
+> Task :core:processResources NO-SOURCE
+> Task :core:processTestFixturesResources NO-SOURCE
+> Task :sql:generateGrammarSource UP-TO-DATE
+> Task :sql:processResources NO-SOURCE
+> Task :sql:generateTestEffectiveLombokConfig UP-TO-DATE
+> Task :sql:generateTestGrammarSource NO-SOURCE
+> Task :sql:processTestResources NO-SOURCE
+> Task :common:compileJava UP-TO-DATE
+> Task :common:processResources UP-TO-DATE
+> Task :common:classes UP-TO-DATE
+> Task :common:jar UP-TO-DATE
+
+> Task :core:compileJava
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :core:compileTestFixturesJava UP-TO-DATE
+> Task :core:classes
+> Task :opensearch:compileJava UP-TO-DATE
+> Task :opensearch:classes UP-TO-DATE
+> Task :opensearch:jar UP-TO-DATE
+> Task :protocol:compileJava UP-TO-DATE
+> Task :protocol:classes UP-TO-DATE
+> Task :protocol:jar UP-TO-DATE
+> Task :core:jar
+> Task :core:testFixturesClasses UP-TO-DATE
+> Task :core:testFixturesJar UP-TO-DATE
+> Task :sql:compileJava
+> Task :sql:classes
+> Task :sql:compileTestJava UP-TO-DATE
+> Task :sql:testClasses UP-TO-DATE
+
+> Task :sql:test
+
+AstQualifiedNameBuilderTest > canBuildDelimitedIdentifier() PASSED
+
+AstQualifiedNameBuilderTest > canBuildRegularIdentifierForOpenSearch() PASSED
+
+AstQualifiedNameBuilderTest > functionNameCanBeUsedAsIdentifier() PASSED
+
+AstQualifiedNameBuilderTest > commonKeywordCanBeUsedAsIdentifier() PASSED
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :sql:test
+
+AstQualifiedNameBuilderTest > canBuildQualifiedIdentifier() PASSED
+
+AstQualifiedNameBuilderTest > canBuildRegularIdentifierForSQLStandard() PASSED
+
+AstAggregationBuilderTest > can build group by clause without aggregators PASSED
+
+AstAggregationBuilderTest > should report error for non aggregated item in select if no group by PASSED
+
+AstAggregationBuilderTest > can build implicit group by for aggregator in having clause PASSED
+
+AstAggregationBuilderTest > should replace group by alias by expression in select clause PASSED
+
+AstAggregationBuilderTest > can build implicit group by clause PASSED
+
+AstAggregationBuilderTest > should report error for group by ordinal out of bound of select list PASSED
+
+AstAggregationBuilderTest > should report error for non integer ordinal in group by PASSED
+
+AstAggregationBuilderTest > can build distinct aggregator PASSED
+
+AstAggregationBuilderTest > can build group by clause with complicated aggregators PASSED
+
+AstAggregationBuilderTest > should build nothing if no group by and no aggregators in select PASSED
+
+AstAggregationBuilderTest > should report error for non aggregated item in select if only having PASSED
+
+AstAggregationBuilderTest > should report error for mismatch between select and group by items SKIPPED
+
+AstAggregationBuilderTest > can build group by clause PASSED
+
+AstAggregationBuilderTest > should replace group by ordinal by expression in select clause PASSED
+
+AstAggregationBuilderTest > can build group by clause with scalar expression PASSED
+
+QuerySpecificationTest > can collect select items in select clause PASSED
+
+QuerySpecificationTest > can collect alias in select clause PASSED
+
+QuerySpecificationTest > should deduplicate same aggregators PASSED
+
+QuerySpecificationTest > should skip sort items in window function PASSED
+
+QuerySpecificationTest > can collect filtered aggregation PASSED
+
+QuerySpecificationTest > can collect sort options in order by clause PASSED
+
+QuerySpecificationTest > can collect nested aggregators in select clause PASSED
+
+QuerySpecificationTest > can collect aggregators in select clause PASSED
+
+QuerySpecificationTest > can collect group by items in group by clause PASSED
+
+AnonymizerListenerTest > queriesWithHavingShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithNotEqualAlternateShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithFunctionsShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithOrderByShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesShouldAnonymousNumbers() PASSED
+
+AnonymizerListenerTest > queriesWithMatch_Bool_Prefix_ShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithLessOrEqualShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithAggregatesShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesShouldHaveAnonymousInputStrings() PASSED
+
+AnonymizerListenerTest > queriesWithNotEqualShouldAnonymizeSensitiveData() PASSED
+
+SQLSyntaxParserV2ExtensionTest > canParseLeftOuterJoin() PASSED
+
+SQLSyntaxParserV2ExtensionTest > canParseCrossJoin() PASSED
+
+SQLSyntaxParserV2ExtensionTest > canParseLeftJoin() PASSED
+
+SQLSyntaxParserV2ExtensionTest > canParseRightJoin() PASSED
+
+SQLSyntaxParserV2ExtensionTest > canParseInnerJoin() PASSED
+
+AstExpressionBuilderTest > canBuildCaseConditionStatement() PASSED
+
+AstExpressionBuilderTest > filteredAggregation() PASSED
+
+AstExpressionBuilderTest > relevanceMultiMatchAltSyntax() PASSED
+
+AstExpressionBuilderTest > canBuildExtractFunctionCall() PASSED
+
+AstExpressionBuilderTest > distinctCount() PASSED
+
+AstExpressionBuilderTest > filteredDistinctCount() PASSED
+
+AstExpressionBuilderTest > canBuildVarSamp() PASSED
+
+HighlightTest > multiple_highlights_test() PASSED
+
+HighlightTest > highlight_all_test() PASSED
+
+AstExpressionBuilderTest > canBuildCaseValueStatement() PASSED
+
+HighlightTest > no_parameters_failure_test() PASSED
+
+AstExpressionBuilderTest > relevanceWildcard_query() PASSED
+
+AstExpressionBuilderTest > canBuildIntervalLiteral() PASSED
+
+HighlightTest > wildcard_test() PASSED
+
+HighlightTest > multiple_parameters_failure_test() PASSED
+
+HighlightTest > single_field_test() PASSED
+
+AstExpressionBuilderTest > canBuildStringLiteralPositionFunction() PASSED
+
+AstExpressionBuilderTest > canBuildRegexpExpression() PASSED
+
+AstExpressionBuilderTest > canBuildTimeLiteral() PASSED
+
+AstExpressionBuilderTest > canBuildWindowFunction() PASSED
+
+AstExpressionBuilderTest > relevanceMulti_match() PASSED
+
+AstExpressionBuilderTest > canBuildNullTestExpressionWithNULLLiteral() PASSED
+
+AstExpressionBuilderTest > relevanceMultimatch_alternate_parameter_syntax() PASSED
+
+AstExpressionBuilderTest > canBuildTimestampAddFunctionCall() PASSED
+
+AstExpressionBuilderTest > canBuildWindowFunctionWithoutPartitionBy() PASSED
+
+AstExpressionBuilderTest > canBuildDateLiteral() PASSED
+
+AstExpressionBuilderTest > canBuildTimestampLiteral() PASSED
+
+AstExpressionBuilderTest > canBuildNullTestExpression() PASSED
+
+AstExpressionBuilderTest > canBuildNestedFunctionCall() PASSED
+
+AstExpressionBuilderTest > canBuildVarPop() PASSED
+
+AstExpressionBuilderTest > canBuildBooleanLiteral() PASSED
+
+AstExpressionBuilderTest > canCastValueAsString() PASSED
+
+AstExpressionBuilderTest > canBuildWindowFunctionWithoutOrderBy() PASSED
+
+MatchBoolPrefixParserTest > testDefaultArguments() PASSED
+
+AstExpressionBuilderTest > matchPhraseQueryAllParameters() PASSED
+
+AstExpressionBuilderTest > canBuildFunctionWithoutArguments() PASSED
+
+SQLSyntaxParserTest > can_parse_dayofyear_functions() PASSED
+
+AstExpressionBuilderTest > canBuildLogicalExpression() PASSED
+
+AstExpressionBuilderTest > relevanceMatchQueryAltSyntax() PASSED
+
+AstExpressionBuilderTest > canBuildExpressionWithParentheses() PASSED
+
+AstExpressionBuilderTest > canCastFieldAsString() PASSED
+
+AstExpressionBuilderTest > canBuildGetFormatFunctionCall() PASSED
+
+AstExpressionBuilderTest > canBuildVariance() PASSED
+
+AstExpressionBuilderTest > canBuildStringLiteralHighlightFunction() PASSED
+
+AstExpressionBuilderTest > canBuildIntegerLiteral() PASSED
+
+AstExpressionBuilderTest > canBuildBetweenExpression() PASSED
+
+AstExpressionBuilderTest > canBuildQualifiedNameHighlightFunction() PASSED
+
+AstExpressionBuilderTest > matchPhrasePrefixAllParameters() PASSED
+
+AstExpressionBuilderTest > canBuildFunctionCall() PASSED
+
+AstExpressionBuilderTest > relevanceScore_withBoost_query() PASSED
+
+AstExpressionBuilderTest > canBuildWindowFunctionWithNullOrderSpecified() PASSED
+
+AstExpressionBuilderTest > canBuildInClause() PASSED
+
+AstExpressionBuilderTest > relevanceScore_query() PASSED
+
+AstExpressionBuilderTest > canBuildAggregateWindowFunction() PASSED
+
+MatchBoolPrefixParserTest > testOneParameter() PASSED
+
+AstExpressionBuilderTest > canBuildPercentileWithCompression() PASSED
+
+AstExpressionBuilderTest > canBuildLongLiteral() PASSED
+
+AstExpressionBuilderTest > relevanceMatch_Query() PASSED
+
+AstExpressionBuilderTest > canBuildTimstampDiffFunctionCall() PASSED
+
+AstExpressionBuilderTest > relevanceMatch() PASSED
+
+AstExpressionBuilderTest > relevanceQuery() PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [1] curdate PASSED
+
+AstExpressionBuilderTest > relevanceMatchQuery() PASSED
+
+AstExpressionBuilderTest > canBuildNonMetaDataFieldAsQualifiedName() PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [2] current_date PASSED
+
+AstExpressionBuilderTest > canBuildKeywordsAsIdentifiers() PASSED
+
+AstExpressionBuilderTest > canBuildMetaDataFieldAsQualifiedName() PASSED
+
+AstExpressionBuilderTest > relevanceSimple_query_string() PASSED
+
+AstExpressionBuilderTest > relevanceMatchPhraseAltSyntax() PASSED
+
+AstExpressionBuilderTest > canBuildArithmeticExpressionPrecedence() PASSED
+
+AstExpressionBuilderTest > canBuildPercentile() PASSED
+
+AstExpressionBuilderTest > canBuildComparisonExpression() PASSED
+
+AstExpressionBuilderTest > canBuildLikeExpression() PASSED
+
+AstExpressionBuilderTest > relevanceQuery_string() PASSED
+
+AstExpressionBuilderTest > canBuildDateAndTimeFunctionCall() PASSED
+
+AstExpressionBuilderTest > canBuildArithmeticExpression() PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [3] current_time PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [4] current_timestamp PASSED
+
+AstExpressionBuilderTest > relevanceMultimatchquery_alternate_parameter_syntax() PASSED
+
+AstExpressionBuilderTest > canBuildStringLiteral() PASSED
+
+MatchBoolPrefixParserTest > testValidArguments(String) > [1] minimum_should_match=3 PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [5] curtime PASSED
+
+AstExpressionBuilderTest > canBuildKeywordsAsIdentInQualifiedName() PASSED
+
+AstExpressionBuilderTest > canBuildNotBetweenExpression() PASSED
+
+AstExpressionBuilderTest > canBuildNegativeRealLiteral() PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [6] localtimestamp PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [7] localtime PASSED
+
+SQLQueryRequestTest > should support query with query field only PASSED
+
+SQLQueryRequestTest > should support query PASSED
+
+SQLQueryRequestTest > should use JDBC format by default PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [8] now PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [9] sysdate PASSED
+
+BracketedTimestampTest > timestamp_test() PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [10] utc_date PASSED
+
+MatchBoolPrefixParserTest > testValidArguments(String) > [2] fuzziness=AUTO PASSED
+
+BracketedTimestampTest > time_shortened_test() PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [11] utc_time PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [1] SELECT * FROM t WHERE match_phrase(c, 3) PASSED
+
+BracketedTimestampTest > date_test() PASSED
+
+BracketedTimestampTest > time_test() PASSED
+
+BracketedTimestampTest > date_shortened_test() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [2] SELECT * FROM t WHERE match_phrase(c, 3, fuzziness=AUTO) PASSED
+
+BracketedTimestampTest > timestamp_shortened_test() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [3] SELECT * FROM t WHERE match_phrase(c, 3, zero_terms_query="all") PASSED
+
+AstNowLikeFunctionTest > filter_call(String) > [12] utc_timestamp PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [4] SELECT * FROM t WHERE match_phrase(c, 3, lenient=true) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [5] SELECT * FROM t WHERE match_phrase(c, 3, lenient='true') PASSED
+
+MatchBoolPrefixParserTest > testValidArguments(String) > [3] prefix_length=0 PASSED
+
+MatchBoolPrefixParserTest > testValidArguments(String) > [4] max_expansions=50 PASSED
+
+MatchBoolPrefixParserTest > testValidArguments(String) > [5] fuzzy_transpositions=true PASSED
+
+MatchBoolPrefixParserTest > testValidArguments(String) > [6] fuzzy_rewrite=constant_score PASSED
+
+MatchBoolPrefixParserTest > testValidArguments(String) > [7] boost=1 PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [6] SELECT * FROM t WHERE match_phrase(c, 3, operator=xor) PASSED
+
+AstNowLikeFunctionTest > fsp(String) > [1] sysdate PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [7] SELECT * FROM t WHERE match_phrase(c, 3, cutoff_frequency=0.04) PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [1] curdate PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [8] SELECT * FROM t WHERE match_phrase(c, 3, cutoff_frequency=0.04, analyzer = english, prefix_length=34, fuzziness='auto', minimum_should_match='2<-25% 9<-3') PASSED
+
+SQLQueryRequestTest > should not support request with cursor and something else PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [9] SELECT * FROM t WHERE match_phrase(c, 3, minimum_should_match='2<-25% 9<-3') PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [2] current_date PASSED
+
+SQLQueryRequestTest > should not support other format PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [10] SELECT * FROM t WHERE match_phrase(c, 3, operator='AUTO') PASSED
+
+SQLQueryRequestTest > should support CSV format and sanitize PASSED
+
+SQLQueryRequestTest > should not support request with unknown field PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [3] current_time PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [4] current_timestamp PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [5] curtime PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [6] localtimestamp PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [7] localtime PASSED
+
+SQLQueryRequestTest > should support query without parameters PASSED
+
+SQLQueryRequestTest > should support query with parameters and zero fetch size PASSED
+
+SQLQueryRequestTest > should support query with JDBC format PASSED
+
+SQLQueryRequestTest > should skip sanitize if set false PASSED
+
+SQLQueryRequestTest > should support raw format PASSED
+
+SQLQueryRequestTest > should support query with zero fetch size PASSED
+
+SQLQueryRequestTest > should support explain PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [11] SELECT * FROM test WHERE match(aUmIiNUZuw, xaMdBJuGPi,cutoff_frequency=42.0, LENIENT=true, OPERATOR="or") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [12] SELECT * FROM test WHERE match(oDIMqggSmR, QerRajYBux, analyzer='standard', operator = 'and', MAX_EXPANSIONS = 5,fuzziness = 'AUTO',lenient='false') PASSED
+
+SQLQueryRequestTest > should not support cursor request with unsupported parameters PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [13] SELECT * FROM test WHERE match(glDAAruVrL, IVMPxpyYtw, fuzziness="AUTO:1,5",CUTOFF_FREQUENCY=0.0, minimum_should_match='75%', BOOST = "1.0",ZERO_TERMS_QUERY = "none", fuzzy_transpositions='false') PASSED
+
+SQLQueryRequestTest > should support cursor close request PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [14] SELECT * FROM test WHERE match(rdhWAnIIYd, zJyKZyVEKp,PREFIX_LENGTH = 5,MINIMUM_SHOULD_MATCH="3<90%", MAX_EXPANSIONS = 5,zero_terms_query='all', LENIENT = false, cutoff_frequency="1.0"); PASSED
+
+SQLQueryRequestTest > should not support request with empty cursor PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [15] SELECT * FROM test WHERE match(qWLEMfrhbV, KsCwkNhbve,FUZZINESS = "AUTO", analyzer='standard',boost=0.5,OPERATOR = "and",zero_terms_query = 'none',PREFIX_LENGTH=2, CUTOFF_FREQUENCY=0.0, minimum_should_match = "3",LENIENT="false", MAX_EXPANSIONS=0); PASSED
+
+AstBuilderTest > join_iteration_in_from_clause_dispatches_to_visit_join_clause() PASSED
+
+SQLQueryRequestTest > should support query with parameters PASSED
+
+SQLQueryRequestTest > should not support explain with unsupported explain format PASSED
+
+SQLQueryRequestTest > should support cursor request with supported parameters PASSED
+
+SQLQueryRequestTest > should support cursor request PASSED
+
+SQLQueryRequestTest > should support explain format PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [16] SELECT * FROM test WHERE match(gvwMaRteqO, bpUTocnrXe, MAX_EXPANSIONS=0,fuzzy_transpositions=false,PREFIX_LENGTH="2",BOOST = 2.3,LENIENT = "false", ZERO_TERMS_QUERY="all"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [17] SELECT * FROM test WHERE match(nrTbyKtbQH, LnoZuXwIkh,fuzzy_transpositions = true,LENIENT=false,ZERO_TERMS_QUERY = 'all', CUTOFF_FREQUENCY = 0.0, prefix_length="0") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [18] SELECT * FROM test WHERE match(UPkNtjPJHB, WkhiXpiyGK, fuzzy_transpositions='false', operator='or') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [19] SELECT * FROM test WHERE match(cCEcOuBZqp, IzMMbSqnXV,cutoff_frequency = "0.0",ANALYZER='standard',FUZZY_TRANSPOSITIONS = true, OPERATOR = 'and', MAX_EXPANSIONS = 20); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [20] SELECT * FROM test WHERE match(hXFSdwQaQG, IbbKuWrQmG,ANALYZER = "stop",MINIMUM_SHOULD_MATCH='3<90%', CUTOFF_FREQUENCY = 42.0) PASSED
+
+AstBuilderTest > can_build_from_index_with_alias_quoted() PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [8] now PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [9] sysdate PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [10] utc_date PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [11] utc_time PASSED
+
+AstNowLikeFunctionTest > project_call(String) > [12] utc_timestamp PASSED
+
+AstBuilderTest > can_build_order_by_null_option() PASSED
+
+AstBuilderTest > can_build_from_index_with_alias() PASSED
+
+AstBuilderTest > can_build_group_by_ordinal() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [21] SELECT * FROM test WHERE match(ObMWUTaDgf, jduCYVdWAg,ZERO_TERMS_QUERY = "all", analyzer = "standard",BOOST="0.5",prefix_length = "2"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [22] SELECT * FROM test WHERE match(lBBLGlOEPE, ylVNMidjWj,ANALYZER = 'english',max_expansions = '20',PREFIX_LENGTH = 0) PASSED
+
+AstBuilderTest > can_build_select_fields_with_alias_quoted() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [23] SELECT * FROM test WHERE match(XvuwTrIJXA, KCslLIEQZp, LENIENT='true',ZERO_TERMS_QUERY="all", fuzzy_transpositions=false,FUZZINESS='AUTO:1,5') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [24] SELECT * FROM test WHERE match(OhilGkKVSB, AHZFiUTcdh, CUTOFF_FREQUENCY=0.001, analyzer = 'standard', BOOST='0.5',fuzziness="AUTO:1,5",operator = "and") PASSED
+
+AstBuilderTest > can_build_nested_select_all() PASSED
+
+AstBuilderTest > can_build_count_star() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [25] SELECT * FROM test WHERE match(nSVkZnGpse, gKsPNtufrR, BOOST=1.0,fuzzy_transpositions=true,lenient='false',prefix_length = 2) PASSED
+
+AstBuilderTest > can_build_show_selected_tables() PASSED
+
+AstBuilderTest > can_build_group_by_alias() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [26] SELECT * FROM test WHERE match(pxMroTsiPU, YYJriumewc,fuzziness="AUTO:1,5",LENIENT="true", FUZZY_TRANSPOSITIONS = false, boost=0.5,MAX_EXPANSIONS="0",ZERO_TERMS_QUERY = 'none', PREFIX_LENGTH=0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [27] SELECT * FROM test WHERE match(KavljJuRxo, QJoYVvnwbq, MAX_EXPANSIONS="0",boost="1.0", PREFIX_LENGTH = "5", CUTOFF_FREQUENCY = 0.001, ZERO_TERMS_QUERY="none", MINIMUM_SHOULD_MATCH = '3<90%', FUZZINESS="1",OPERATOR='and'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [28] SELECT * FROM test WHERE match(GAQFckAsaR, uEKBVpsRkW,boost='0.5', OPERATOR = "and",MINIMUM_SHOULD_MATCH = '-2',analyzer = "standard",fuzzy_transpositions="false"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [29] SELECT * FROM test WHERE match(odBdPvQeMV, YbRNNIGLcU, fuzzy_transpositions = "false",fuzziness = "AUTO",minimum_should_match = "-25%", zero_terms_query = 'all', ANALYZER = 'standard'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [30] SELECT * FROM test WHERE match(AQrLwirPux, mZIjlAGMfA,zero_terms_query='none',fuzzy_transpositions=false, MAX_EXPANSIONS = "20", prefix_length = 0, analyzer = "standard", BOOST = "0.5") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [31] SELECT * FROM test WHERE match(xSmEnrGaSg, YgYIoUVCYl,MINIMUM_SHOULD_MATCH = "75%", boost='1.0', ZERO_TERMS_QUERY='none', PREFIX_LENGTH = 5,MAX_EXPANSIONS="20", lenient="false") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [32] SELECT * FROM test WHERE match(tEwZPeTSHJ, VmtSbDMFYe,MAX_EXPANSIONS = '5', lenient = true, cutoff_frequency=1.0,prefix_length='5',MINIMUM_SHOULD_MATCH="3"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [33] SELECT * FROM test WHERE match(jcihQcuRuK, VYPGTeZeSo,MINIMUM_SHOULD_MATCH = '3',OPERATOR = 'or',BOOST=1.0, analyzer = "standard", CUTOFF_FREQUENCY=0.001,PREFIX_LENGTH = 2, FUZZINESS="1",LENIENT = 'true') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [34] SELECT * FROM test WHERE match(UmJEEFcOQj, qqpwlEIYrJ, OPERATOR='or', PREFIX_LENGTH = 0,ANALYZER = "english",minimum_should_match="2<-25% 9<-3",LENIENT = "true",CUTOFF_FREQUENCY=42.0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [35] SELECT * FROM test WHERE match(BySRUMxMGm, VkiVMgZZeq,minimum_should_match = '-2',BOOST = 2.3,fuzzy_transpositions = "false"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [36] SELECT * FROM test WHERE match(kdlDzhejsm, lXhjQBYFot, OPERATOR='or', BOOST = 1.0,fuzzy_transpositions='false',cutoff_frequency=0.001); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [37] SELECT * FROM test WHERE match(JjxLnGsdBq, OuWcgQZkiy,cutoff_frequency=0.001, fuzziness = "AUTO:1,5", operator = 'or',fuzzy_transpositions='true',lenient="true",minimum_should_match = "2<-25% 9<-3",boost=0.5) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [38] SELECT * FROM test WHERE match(GnPcvcgBty, NwDzItaPdN,fuzzy_transpositions = "true", lenient="true",max_expansions = 5, PREFIX_LENGTH='5', minimum_should_match='3<90%',OPERATOR="or",fuzziness="1"); PASSED
+
+AstBuilderTest > can_build_order_by_multiple_field_names() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [39] SELECT * FROM test WHERE match(npcXJySYiq, EjzNydMidl,lenient = true, ANALYZER="english", cutoff_frequency = 42.0, MINIMUM_SHOULD_MATCH='75%',max_expansions=20, OPERATOR='and') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [40] SELECT * FROM test WHERE match(eIgxQWMfBL, wgXcqWftvf, minimum_should_match = '-2',PREFIX_LENGTH = 0, operator = "or",zero_terms_query="all"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [41] SELECT * FROM test WHERE match(WEgdwdMfOs, EOSGBAWfXq,boost=2.3, MINIMUM_SHOULD_MATCH = "-25%",cutoff_frequency = 42.0,PREFIX_LENGTH = 5, operator = 'and',FUZZINESS='AUTO', analyzer = 'stop') PASSED
+
+AstBuilderTest > can_build_implicit_group_by_clause() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [42] SELECT * FROM test WHERE match(EIOcAiBLxU, VmdfVntIPW, max_expansions = 0, PREFIX_LENGTH = "5",FUZZY_TRANSPOSITIONS = "true", minimum_should_match = "-2", ANALYZER="standard",cutoff_frequency='42.0',zero_terms_query = "all"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [43] SELECT * FROM test WHERE match(ZtBzxviJiB, WaUwSYHFto,CUTOFF_FREQUENCY='0.0', analyzer='standard', PREFIX_LENGTH="0",FUZZINESS = '1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [44] SELECT * FROM test WHERE match(TOBGGcMvLV, SaiRJShxRv,ZERO_TERMS_QUERY="none",CUTOFF_FREQUENCY=0.001, FUZZY_TRANSPOSITIONS = false,boost='2.3', PREFIX_LENGTH="5"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [45] SELECT * FROM test WHERE match(OAdxaWXOPs, PMpXKyYyVs, cutoff_frequency=1.0, ANALYZER='english',fuzziness="AUTO", lenient=false,zero_terms_query="all"); PASSED
+
+AstBuilderTest > in_subquery_throws_syntax_check_exception() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [46] SELECT * FROM test WHERE match(ZreUZjfhJv, LbSyrUMLFZ,prefix_length = 2, fuzziness="1",minimum_should_match='3<90%', BOOST = 0.5,zero_terms_query = 'none',LENIENT=true); PASSED
+
+AstBuilderTest > can_build_describe_selected_tables() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [47] SELECT * FROM test WHERE match(DbbxMrDwyM, bkhboACXjJ,lenient = "false",ANALYZER='stop',CUTOFF_FREQUENCY = 42.0, MINIMUM_SHOULD_MATCH = "2<-25% 9<-3", fuzziness='AUTO:1,5', operator = "or") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [48] SELECT * FROM test WHERE match(mTYWvnKtzI, qAfTxsgOGI,minimum_should_match = "2<-25% 9<-3", operator = "or",ANALYZER = "standard",BOOST = "0.5", zero_terms_query = 'all',fuzziness='AUTO:1,5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [49] SELECT * FROM test WHERE match(NTFaSZGUQK, FvAgMbvPHO, max_expansions = 5, PREFIX_LENGTH="0", MINIMUM_SHOULD_MATCH = "2<-25% 9<-3", ZERO_TERMS_QUERY = "all", ANALYZER = "standard",operator = 'and'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [50] SELECT * FROM test WHERE match(xMbRHecKKC, dhPSUnbpke,fuzzy_transpositions = "false", prefix_length=5,ANALYZER = "standard",OPERATOR = 'or', CUTOFF_FREQUENCY=0.0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [51] SELECT * FROM test WHERE match(MnSBqBQYHd, gbQePSkZKS, operator='or',MAX_EXPANSIONS="20",zero_terms_query = "all", cutoff_frequency="0.001",FUZZY_TRANSPOSITIONS='true') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [52] SELECT * FROM test WHERE match(CACCgLRrsp, HcdpxMrJgN, operator = "or",CUTOFF_FREQUENCY="0.001",fuzziness='AUTO:1,5',max_expansions = 20,FUZZY_TRANSPOSITIONS=false,PREFIX_LENGTH = "5"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [53] SELECT * FROM test WHERE match(YKYxoTVvTv, AdpmwwvmGb, FUZZINESS='AUTO', LENIENT="true",boost="0.5",OPERATOR="and") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [54] SELECT * FROM test WHERE match(xlQYTWZboq, LuthWBKAgI, FUZZY_TRANSPOSITIONS = false,minimum_should_match = '3<90%',fuzziness='AUTO:1,5',CUTOFF_FREQUENCY = "42.0", zero_terms_query = "all", OPERATOR = "and"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [55] SELECT * FROM test WHERE match(jIbyxpjvVP, aXYohcLXWL,operator="and", fuzzy_transpositions="false",prefix_length = '5', CUTOFF_FREQUENCY="1.0", LENIENT = 'false', minimum_should_match = "3", zero_terms_query = "none", analyzer = 'english'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [56] SELECT * FROM test WHERE match(ruqTgNYKYy, NlkYokyVzZ, OPERATOR='or',LENIENT = "false", FUZZY_TRANSPOSITIONS = true,analyzer="english",prefix_length="0",boost = 0.5); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [57] SELECT * FROM test WHERE match(PjVDSznRFP, GFrkFoLOfG, fuzziness="AUTO",operator = 'or', minimum_should_match='2<-25% 9<-3',BOOST=1.0, ANALYZER="english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [58] SELECT * FROM test WHERE match(jpSEKrKgVl, FFWPlXElhA,ANALYZER='stop', prefix_length=0,zero_terms_query="all", cutoff_frequency = 42.0, MINIMUM_SHOULD_MATCH="-25%", FUZZY_TRANSPOSITIONS = 'false'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [59] SELECT * FROM test WHERE match(ZghVkqEomD, IAUqRrAeSl,prefix_length = "0", minimum_should_match='-2',FUZZY_TRANSPOSITIONS=false,FUZZINESS='AUTO:1,5', LENIENT = false); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [60] SELECT * FROM test WHERE match(ITKFdrxROt, uaWALBYoOs, lenient=true, ANALYZER="english",max_expansions = 0,operator="and",CUTOFF_FREQUENCY = 1.0, FUZZY_TRANSPOSITIONS="true"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [61] SELECT * FROM test WHERE match(DabpyMlcPh, asesqQnmrH,cutoff_frequency=0.0, ZERO_TERMS_QUERY="none",lenient = true, max_expansions = 20) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [62] SELECT * FROM test WHERE match(YmKOXyJnjP, MSzBMoONPC,operator="and", ANALYZER="standard",CUTOFF_FREQUENCY=0.001, zero_terms_query = 'none', boost = '2.3', max_expansions="0", LENIENT = true) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [63] SELECT * FROM test WHERE match(DDJQpDxglg, efmTbhEXTs,BOOST = 1.0,max_expansions='0',lenient = false) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [64] SELECT * FROM test WHERE match(SUyPiNBwEA, uguUIuyDOC,fuzziness = '1', boost="2.3",max_expansions='5',operator = 'or'); PASSED
+
+AstBuilderTest > table_function_relation_rejects_positional_argument() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [65] SELECT * FROM test WHERE match(oREghJMdvt, JHcHwHAzvc, BOOST='0.5', PREFIX_LENGTH = '5', ZERO_TERMS_QUERY = "all", fuzzy_transpositions=true, ANALYZER = "english") PASSED
+
+AstBuilderTest > can_build_where_clause() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [66] SELECT * FROM test WHERE match(mhPWHfGJXD, KqOtwmsISB,minimum_should_match = "-2", operator = 'or', cutoff_frequency = '0.001', fuzzy_transpositions="false",ZERO_TERMS_QUERY = 'none') PASSED
+
+AstBuilderTest > can_build_qualified_name_highlight() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [67] SELECT * FROM test WHERE match(rRaMwjMyHK, bQCisSreas, lenient=false,fuzzy_transpositions = "true", PREFIX_LENGTH=2, ANALYZER='standard',MAX_EXPANSIONS = "0",FUZZINESS = 'AUTO', operator="and"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [68] SELECT * FROM test WHERE match(KTUdZsqPKV, CxmsjyFAVf, lenient='true', FUZZINESS='1',MINIMUM_SHOULD_MATCH="3", boost=1.0, PREFIX_LENGTH = 2); PASSED
+
+AstBuilderTest > can_build_select_all_clause() PASSED
+
+AstBuilderTest > can_build_order_by_function() PASSED
+
+AstBuilderTest > can_build_order_by_field_name() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [69] SELECT * FROM test WHERE match(raAZYVcJtc, RhEHLoMPyt,cutoff_frequency = '0.0', max_expansions="5",ANALYZER='stop',FUZZY_TRANSPOSITIONS = 'true') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [70] SELECT * FROM test WHERE match(nAOhVrecQT, nbgJjLFzgn, max_expansions=20,CUTOFF_FREQUENCY='0.0',FUZZY_TRANSPOSITIONS=true,zero_terms_query='all',MINIMUM_SHOULD_MATCH="3<90%", fuzziness = "AUTO:1,5"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [71] SELECT * FROM test WHERE match(RvcldZVpXs, TxNvXJXuJD, operator="or", fuzziness = "AUTO:1,5",FUZZY_TRANSPOSITIONS=true,prefix_length = '5', MINIMUM_SHOULD_MATCH="75%", CUTOFF_FREQUENCY = "1.0") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [72] SELECT * FROM test WHERE match(IfagSzdCzr, bRDDtDCFkE, ZERO_TERMS_QUERY='none', OPERATOR = "or", boost = 0.5,minimum_should_match = '75%',prefix_length = "2", MAX_EXPANSIONS=5); PASSED
+
+AstBuilderTest > can_build_select_distinct_clause() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [73] SELECT * FROM test WHERE match(mNQZzutHya, gkfVhAUdgP,OPERATOR = 'or',prefix_length = '2', max_expansions = 0,BOOST = '1.0', fuzzy_transpositions=true,CUTOFF_FREQUENCY = '1.0') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [74] SELECT * FROM test WHERE match(ZgDYOrgpxI, uhvUuRLjmR,OPERATOR = "or",ANALYZER="stop", ZERO_TERMS_QUERY = "none", minimum_should_match='3', FUZZY_TRANSPOSITIONS='false', cutoff_frequency="42.0", prefix_length = 0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [75] SELECT * FROM test WHERE match(elHzJaHocF, SNTrladrzD,FUZZINESS='AUTO:1,5',ANALYZER="stop", lenient=true, MINIMUM_SHOULD_MATCH = "-2", prefix_length = 0,ZERO_TERMS_QUERY='all', MAX_EXPANSIONS="5", cutoff_frequency='1.0'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [76] SELECT * FROM test WHERE match(xdQsKnxMrX, VLZVAFeddf, fuzzy_transpositions=false,fuzziness = '1', prefix_length='2') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [77] SELECT * FROM test WHERE match(IubUkINQZv, bggHLhjFaN, cutoff_frequency = '0.001', operator='and') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [78] SELECT * FROM test WHERE match(QZuVEonPkH, xbfObLLUzM,PREFIX_LENGTH = 0,MAX_EXPANSIONS='0', zero_terms_query = "none", FUZZINESS = 'AUTO', BOOST = 2.3, operator = "and"); PASSED
+
+AstBuilderTest > can_build_from_table_function_with_where_order_limit() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [79] SELECT * FROM test WHERE match(GOvUaiehgU, tppTMoJsVI,lenient = "false",cutoff_frequency='1.0',operator="and",fuzzy_transpositions=true, BOOST='0.5',PREFIX_LENGTH = 0, max_expansions=20); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [80] SELECT * FROM test WHERE match(ZatTcEYOpq, uRmpNigjik,boost="2.3",CUTOFF_FREQUENCY = "1.0",minimum_should_match="3",FUZZINESS="1",lenient='false'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [81] SELECT * FROM test WHERE match(wWzexhriDQ, sGLTXGEufK,CUTOFF_FREQUENCY="1.0", FUZZINESS = "AUTO", MINIMUM_SHOULD_MATCH = '-25%', fuzzy_transpositions=true); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [82] SELECT * FROM test WHERE match(iBdQgzWFNi, VDWZhMzrZw, MINIMUM_SHOULD_MATCH="-2", lenient = false, zero_terms_query='none', OPERATOR = 'or',fuzzy_transpositions = 'true',CUTOFF_FREQUENCY='1.0',ANALYZER='standard', BOOST="2.3") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [83] SELECT * FROM test WHERE match(gNgaouwVfo, ipzDNcJpRr, MINIMUM_SHOULD_MATCH='2<-25% 9<-3', analyzer='stop',FUZZINESS="AUTO:1,5",cutoff_frequency = 0.001, ZERO_TERMS_QUERY = "none", BOOST = 0.5, FUZZY_TRANSPOSITIONS = false) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [84] SELECT * FROM test WHERE match(eMjVbBlpYU, SxxFdloGyq, LENIENT = false,FUZZY_TRANSPOSITIONS = true, CUTOFF_FREQUENCY="0.001",minimum_should_match = "2<-25% 9<-3"); PASSED
+
+AstBuilderTest > table_function_args_are_resolved_by_name_not_position() PASSED
+
+AstBuilderTest > can_build_select_all_and_fields_from_index() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [85] SELECT * FROM test WHERE match(xOTQKLugFe, STBQuabAOC,FUZZINESS = 'AUTO:1,5',BOOST = '2.3', MAX_EXPANSIONS = 20, fuzzy_transpositions=true,ANALYZER = "stop", zero_terms_query="none", OPERATOR="and",lenient="true") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [86] SELECT * FROM test WHERE match(uRYynPWksU, yXCjBMAEHI, operator='and',ANALYZER="english",lenient=true, MAX_EXPANSIONS = 5, PREFIX_LENGTH = '5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [87] SELECT * FROM test WHERE match(BByaEDmxYD, JtPenMrcmw,CUTOFF_FREQUENCY="0.0",analyzer = 'stop', MAX_EXPANSIONS = '0', FUZZINESS = 'AUTO:1,5', BOOST='1.0',operator='or'); PASSED
+
+AstBuilderTest > can_build_qualified_highlight_with_arguments() PASSED
+
+AstBuilderTest > join_throws_syntax_check_exception() PASSED
+
+AstBuilderTest > can_build_order_by_alias() PASSED
+
+AstBuilderTest > can_build_alias_by_keywords() PASSED
+
+AstBuilderTest > can_build_order_by_sort_order_keyword_insensitive() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [88] SELECT * FROM test WHERE match(EORNVHDhtJ, fmdsSoLwwy,minimum_should_match="75%",fuzziness = 'AUTO:1,5',max_expansions='20',PREFIX_LENGTH = 0,OPERATOR='and',fuzzy_transpositions='true',boost=0.5, lenient = true); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [89] SELECT * FROM test WHERE match(kbZEMxgeJa, waFSgawgjC,minimum_should_match = '-2', boost="2.3", fuzziness="AUTO", lenient=false,cutoff_frequency="1.0",OPERATOR="or"); PASSED
+
+AstBuilderTest > nested_in_having_clause_throws_exception() PASSED
+
+AstBuilderTest > can_build_order_by_ordinal() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [90] SELECT * FROM test WHERE match(akhGqVAWGR, csrPftoAkr,operator='and',FUZZY_TRANSPOSITIONS=true,prefix_length=2, zero_terms_query="none") PASSED
+
+AstBuilderTest > show_compatible_with_old_engine_syntax() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [91] SELECT * FROM test WHERE match(qamjxoqGUD, cBPIObewtz,PREFIX_LENGTH="5",lenient = "true",zero_terms_query = 'all', boost=1.0, fuzzy_transpositions=false,MINIMUM_SHOULD_MATCH='2<-25% 9<-3', max_expansions = '20',analyzer="english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [92] SELECT * FROM test WHERE match(pxpbMKunfx, ZcTvmZjMKg, fuzzy_transpositions=false,max_expansions = 5,cutoff_frequency = "0.001", FUZZINESS = "1",prefix_length='5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [93] SELECT * FROM test WHERE match(ZqaYvevakJ, byKniuMqke,ANALYZER = 'english',fuzzy_transpositions='false', CUTOFF_FREQUENCY = '42.0',zero_terms_query='none',max_expansions = '5', LENIENT = true) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [94] SELECT * FROM test WHERE match(KJsMBTcJhi, WORKhAqsWI,analyzer="english",prefix_length = 5,boost = '2.3',operator="and",fuzziness = "1") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [95] SELECT * FROM test WHERE match(FNvNAsgUPF, vPqiMctTWS,ZERO_TERMS_QUERY='none', FUZZY_TRANSPOSITIONS="true", PREFIX_LENGTH = 5, BOOST=2.3); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [96] SELECT * FROM test WHERE match(dFhjNxrLrD, LOpVnNYVve,ANALYZER="stop", MINIMUM_SHOULD_MATCH="3<90%", operator="and",prefix_length = "2", LENIENT = true, fuzzy_transpositions = "false",boost='0.5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [97] SELECT * FROM test WHERE match(suDAbsdhpI, MvPHncGFFD,operator='or',MINIMUM_SHOULD_MATCH='3', fuzzy_transpositions = "true") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [98] SELECT * FROM test WHERE match(VWhuVmaqBz, bsVHmsJRpC, FUZZY_TRANSPOSITIONS = "true", BOOST = "2.3",ANALYZER = "standard") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [99] SELECT * FROM test WHERE match(DcydxTLZfC, tNIGQeWrlJ,MINIMUM_SHOULD_MATCH="75%",FUZZY_TRANSPOSITIONS=true, ZERO_TERMS_QUERY="none",max_expansions = 5,boost = 1.0, ANALYZER="english"); PASSED
+
+AstBuilderTest > can_build_select_all_from_index() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [100] SELECT * FROM test WHERE match(UzoPdYGkXP, uZHJHNiPEy,BOOST = "1.0",max_expansions=0,operator = 'or', fuzziness = "AUTO", LENIENT = true); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [101] SELECT * FROM test WHERE match(fTpNqRjuVX, lRhBCDpWjX,BOOST=1.0,prefix_length="5", analyzer = "english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [102] SELECT * FROM test WHERE match(HCNezmfisy, DPUHfIVIem, PREFIX_LENGTH="0",LENIENT = 'true', boost = 1.0, MINIMUM_SHOULD_MATCH = '-2', zero_terms_query = 'all', operator = "and"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [103] SELECT * FROM test WHERE match(exoKUJOHbW, knchqKJenf, fuzzy_transpositions='false',boost=2.3,FUZZINESS="1",analyzer = "stop",ZERO_TERMS_QUERY = 'all', LENIENT=true, OPERATOR="or"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [104] SELECT * FROM test WHERE match(zWXLpvbkGW, RlwUJlNcfz,minimum_should_match="3<90%",FUZZY_TRANSPOSITIONS=false, operator = 'or',prefix_length=5,cutoff_frequency='1.0', max_expansions='0'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [105] SELECT * FROM test WHERE match(HZhrgzqUOh, aOnIdppEdW, ANALYZER = "standard",MAX_EXPANSIONS=20, fuzzy_transpositions=true, BOOST='2.3',LENIENT='true', prefix_length = '0',cutoff_frequency = "0.001") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [106] SELECT * FROM test WHERE match(netpEEjQtK, JOnOUPayLv,cutoff_frequency = "1.0",ZERO_TERMS_QUERY="all", MAX_EXPANSIONS="5", fuzziness = "AUTO",operator = "or",FUZZY_TRANSPOSITIONS = true, lenient='false',prefix_length="5", analyzer="stop") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [107] SELECT * FROM test WHERE match(hgNguWfhxW, rtYgRUgMwp, fuzziness="1",lenient='false',max_expansions = 20); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [108] SELECT * FROM test WHERE match(fbOpXiWIor, fMEAJTkqkR, fuzziness = "1", cutoff_frequency="0.001", MINIMUM_SHOULD_MATCH = "2<-25% 9<-3",prefix_length = "0", lenient=false, ZERO_TERMS_QUERY='all',ANALYZER = 'stop',OPERATOR = "or") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [109] SELECT * FROM test WHERE match(dXnNXslFhs, YNEYGezrGj,FUZZY_TRANSPOSITIONS = false,fuzziness='AUTO:1,5', analyzer='standard',MINIMUM_SHOULD_MATCH="3<90%", boost="2.3",lenient=false,ZERO_TERMS_QUERY='all') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [110] SELECT * FROM test WHERE match(STGxqMOfQB, opqpkincxR,zero_terms_query = "none",MAX_EXPANSIONS = 0, analyzer="standard", cutoff_frequency = 0.001, PREFIX_LENGTH = 2, FUZZY_TRANSPOSITIONS=true) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [111] SELECT * FROM test WHERE match_phrase(aUmIiNUZuw, xaMdBJuGPi,max_expansions=20); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [112] SELECT * FROM test WHERE match_phrase(qSeHQYXZqK, uaWAIDIxdX, MAX_EXPANSIONS = '20', slop='1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [113] SELECT * FROM test WHERE match_phrase(pebqWOGHjZ, RbzScDAPdt,analyzer = "english"); PASSED
+
+AstBuilderTest > table_function_relation_requires_alias() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [114] SELECT * FROM test WHERE match_phrase(RdknkcknNS, MFuQosusmp,ANALYZER = "standard", SLOP = "0") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [115] SELECT * FROM test WHERE match_phrase(guxhqbnbTG, WBhEwWedCQ,max_expansions = "0") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [116] SELECT * FROM test WHERE match_phrase(NtQtqFKZlZ, ULuIiaWBBF,max_expansions='5'); PASSED
+
+AstBuilderTest > table_function_allows_alias_without_as_keyword() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [117] SELECT * FROM test WHERE match_phrase(vUkJtJVSEI, LomNCFFoRy,max_expansions = 20,analyzer = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [118] SELECT * FROM test WHERE match_phrase(FdNWBnRMNz, hGGuOVdgmp,max_expansions='5') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [119] SELECT * FROM test WHERE match_phrase(kcpdfgMkDC, xSFflCVTOZ, SLOP=1, ANALYZER = "stop",max_expansions="0") PASSED
+
+AstBuilderTest > exists_subquery_throws_syntax_check_exception() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [120] SELECT * FROM test WHERE match_phrase(gMuDXnWFPB, QPitnTlBRW, slop='1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [121] SELECT * FROM test WHERE match_phrase(VPuqCoZmFk, DVfHzqhicF, max_expansions = 20, SLOP = 2,analyzer = 'stop') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [122] SELECT * FROM test WHERE match_phrase(vohibHuepQ, iujJeXXhNE,ANALYZER="stop") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [123] SELECT * FROM test WHERE match_phrase(ATVgbZuchd, TbZVXFwvNb, SLOP=1) PASSED
+
+AstBuilderTest > can_build_having_condition_using_alias() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [124] SELECT * FROM test WHERE match_phrase(ACFvfzFybo, hMhzbZoJsE, analyzer="stop",SLOP = "0"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [125] SELECT * FROM test WHERE match_phrase(jQVtEkylRF, nEXXgniDwL, slop='1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [126] SELECT * FROM test WHERE match_phrase(iHbcyVssXA, ruIePzhGbn,max_expansions="0"); PASSED
+
+AstBuilderTest > can_build_limit_clause_with_offset() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [127] SELECT * FROM test WHERE match_phrase(ZwDaDxuTjm, eJbFPkHWKS,slop = 2, MAX_EXPANSIONS = 5); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [128] SELECT * FROM test WHERE match_phrase(mYKIygmBpX, cXhsnhgoMr, slop='1',analyzer='standard') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [129] SELECT * FROM test WHERE match_phrase(eSUxAcKEIo, cxoypMrMbQ,slop = "0") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [130] SELECT * FROM test WHERE match_phrase(wiDXBpVnQA, HrZBIIeLDv) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [131] SELECT * FROM test WHERE match_phrase(VrkCiVNyhi, bcQZTloCZA,max_expansions = "0",slop = 2); PASSED
+
+AstBuilderTest > can_build_count_literal() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [132] SELECT * FROM test WHERE match_phrase(lWIFaBmklB, GqvaFrDXqT,max_expansions = '5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [133] SELECT * FROM test WHERE match_phrase(hyGKXuEGKX, ckqEgFlrBu, SLOP=2,ANALYZER='standard'); PASSED
+
+AstBuilderTest > can_build_group_by_field_name() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [134] SELECT * FROM test WHERE match_phrase(CraHrJXhsQ, oKXfCXEnol, max_expansions = 20,ANALYZER='english') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [135] SELECT * FROM test WHERE match_phrase(YoXAEizWIq, wTuWOoKtvi,MAX_EXPANSIONS = '20') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [136] SELECT * FROM test WHERE match_phrase(KfDoEBlzfC, fKreBUFFqQ,slop = 0,max_expansions = '20') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [137] SELECT * FROM test WHERE match_phrase(oOUpxKCqop, uMJgRoCQXa); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [138] SELECT * FROM test WHERE match_phrase(kPwAliDZOI, vPliRucfGj) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [139] SELECT * FROM test WHERE match_phrase(HbqGWMeRmr, ndgXELwxUK) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [140] SELECT * FROM test WHERE match_phrase(gQtFqDZVIY, uXlBdSidbc, slop = '1', MAX_EXPANSIONS=20); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [141] SELECT * FROM test WHERE match_phrase(lJzKbpVtPC, xzKqtiHNgq); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [142] SELECT * FROM test WHERE match_phrase(iyTTnLrEyJ, kZZLwltouv, analyzer="english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [143] SELECT * FROM test WHERE match_phrase(MEqETnTaEx, UsGoEySheM,analyzer="stop", max_expansions='20',SLOP=0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [144] SELECT * FROM test WHERE match_phrase(tURzGgghhG, wsWRvsfFnn,SLOP = "1",ANALYZER="standard"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [145] SELECT * FROM test WHERE match_phrase(fCdzQpRSuB, ULYWhChoFk, analyzer = 'stop',SLOP = '1') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [146] SELECT * FROM test WHERE match_phrase(wKbinvOSzt, yZXtoVtSmk,max_expansions=20); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [147] SELECT * FROM test WHERE match_phrase(ahZNhyfPDy, LzzdWsbZoA, MAX_EXPANSIONS = "20"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [148] SELECT * FROM test WHERE match_phrase(xGNygJIjJA, IqGiQhfvAf) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [149] SELECT * FROM test WHERE match_phrase(hRIEHNBNqj, ycXskOXOnB,ANALYZER = 'english', SLOP=0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [150] SELECT * FROM test WHERE match_phrase(kFYCUOqDbm, YzaWtQUHBU,ANALYZER = "stop",slop=2, MAX_EXPANSIONS="5") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [151] SELECT * FROM test WHERE match_phrase(dlmLQORiNu, LZnZsrQVYz) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [152] SELECT * FROM test WHERE match_phrase(jyVlrlUYWl, tnWBDqGlND,slop = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [153] SELECT * FROM test WHERE match_phrase(YsljUEeJie, daslcfpCyF, max_expansions = "0", analyzer = 'english'); PASSED
+
+AstBuilderTest > can_build_having_clause() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [154] SELECT * FROM test WHERE match_phrase(ThbCgPtuWB, FgTHAQqzsj, MAX_EXPANSIONS=5,ANALYZER = 'standard'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [155] SELECT * FROM test WHERE match_phrase(uCnmBIBKpK, ZgXGAyFXvU,ANALYZER = "standard") PASSED
+
+AstBuilderTest > can_build_select_fields_from_index() PASSED
+
+AstBuilderTest > can_build_select_fields_with_alias() PASSED
+
+AstBuilderTest > can_build_select_function_call_with_alias() PASSED
+
+AstBuilderTest > can_build_group_by_uppercase_function() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [156] SELECT * FROM test WHERE match_phrase(EvmYukNXYN, npBKmTLggb,max_expansions = "20", SLOP="0") PASSED
+
+AstBuilderTest > can_build_show_all_tables() PASSED
+
+AstBuilderTest > can_build_select_literals() PASSED
+
+AstBuilderTest > can_build_group_by_function() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [157] SELECT * FROM test WHERE match_phrase(iEeTzGvnIO, IYdwfzfqgP, ANALYZER='standard', slop='1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [158] SELECT * FROM test WHERE match_phrase(eXUDJMuIUg, RykIpOPzym,ANALYZER='english',max_expansions='0'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [159] SELECT * FROM test WHERE match_phrase(pBFpTGQeWo, mwcNMqoWnA, max_expansions = 20,ANALYZER="stop") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [160] SELECT * FROM test WHERE match_phrase(YftpMijsZi, koabqAqToy,SLOP = 0,MAX_EXPANSIONS = '5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [161] SELECT * FROM test WHERE match_phrase(bbqfPfHDtc, pqcFxNLZpa, MAX_EXPANSIONS=0, ANALYZER="english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [162] SELECT * FROM test WHERE match_phrase(FmYwhwfSJR, tBqWbQKqGw,SLOP = 1) PASSED
+
+AstBuilderTest > can_build_from_subquery() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [163] SELECT * FROM test WHERE match_phrase(PXuEgLxyOB, rnkoDKwsRY,MAX_EXPANSIONS="5", SLOP = "0"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [164] SELECT * FROM test WHERE match_phrase(EzcoBLSUXX, eDejpjapRa,max_expansions = 0, ANALYZER = "stop") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [165] SELECT * FROM test WHERE match_phrase(xSiLiwMiVm, BdrTgOvPTX, ANALYZER="standard"); PASSED
+
+AstBuilderTest > table_function_arg_names_are_canonicalized() PASSED
+
+AstBuilderTest > can_build_from_subquery_with_backquoted_alias() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [166] SELECT * FROM test WHERE match_phrase(yjbIeNomXN, sdoDJNZOHU,max_expansions = 0,slop = "0") PASSED
+
+AstBuilderTest > can_build_select_distinct_clause_with_function() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [167] SELECT * FROM test WHERE match_phrase(nSFcuuPYsL, BWzmjaPdHh); PASSED
+
+AstBuilderTest > can_build_string_literal_highlight() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [168] SELECT * FROM test WHERE match_phrase(FpoLkhnOkd, DQxFcATXhi, MAX_EXPANSIONS = 5,slop='0', ANALYZER='stop'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [169] SELECT * FROM test WHERE match_phrase(SszKILobMH, qjJfOxXlza, slop="2"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [170] SELECT * FROM test WHERE match_phrase(OuWcgQZkiy, nhHpFriVNG,slop = 2,analyzer="english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [171] SELECT * FROM test WHERE match_phrase(UhlYVmEjqf, DZfIlpdxRx,slop=0, max_expansions = '5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [172] SELECT * FROM test WHERE match_phrase(BYBhBKowaW, GnPcvcgBty,max_expansions=20, analyzer = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [173] SELECT * FROM test WHERE match_phrase(gAtlUAZemv, DHVtuRZSkD, SLOP='2') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [174] SELECT * FROM test WHERE match_phrase(lluBOpreBh, YdEnPjjUhn,analyzer = "stop", slop="2") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [175] SELECT * FROM test WHERE match_phrase(SnIXPSFhGb, cHmgSmOiPp, ANALYZER='standard', slop=0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [176] SELECT * FROM test WHERE match_phrase(rWxJSVlwBa, mfnVSHaRRJ,ANALYZER = "standard",max_expansions = 0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [177] SELECT * FROM test WHERE match_phrase(KvloShrxum, AxgJQguesn,ANALYZER = "english", slop = '2'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [178] SELECT * FROM test WHERE match_phrase(UPDAJHFLVi, RordEgNSrM, SLOP = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [179] SELECT * FROM test WHERE match_phrase(WEgdwdMfOs, EOSGBAWfXq, slop = '2',ANALYZER='standard',max_expansions = 20); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [180] SELECT * FROM test WHERE match_phrase(brcNSDJyJB, khoQFbKbsx); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [181] SELECT * FROM test WHERE match_phrase(qLvGlxIKIp, dMMPjBeXSp,SLOP = '1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [182] SELECT * FROM test WHERE match_phrase(WffNtLTGcB, CrepTavwxy,ANALYZER = 'stop',MAX_EXPANSIONS=0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [183] SELECT * FROM test WHERE match_phrase(oxvnxzDULS, ILxtHgXbKR, MAX_EXPANSIONS=5, ANALYZER = 'stop'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [184] SELECT * FROM test WHERE match_phrase(hbCgZGfwTK, jgmHZXsHOw,slop='1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [185] SELECT * FROM test WHERE match_phrase(oAyIQBYppy, RhonztjkdB,analyzer="english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [186] SELECT * FROM test WHERE match_phrase(LpIeXBPzOR, buVxzEgAHV,SLOP=0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [187] SELECT * FROM test WHERE match_phrase(rYppgDjfwQ, AopQxlseIV,MAX_EXPANSIONS=0, SLOP = 2) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [188] SELECT * FROM test WHERE match_phrase(FRyZaYuzEB, lqwNzCqNMI) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [189] SELECT * FROM test WHERE match_phrase(jiQZvSQITU, DtCBRPFKFm,ANALYZER = 'standard',MAX_EXPANSIONS="5", slop=2) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [190] SELECT * FROM test WHERE match_phrase(pnoprOvpdi, TwbMzmPpkC,MAX_EXPANSIONS=20, SLOP = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [191] SELECT * FROM test WHERE match_phrase(VuMBjLtOtw, sSQrIhvQfl,slop="1", MAX_EXPANSIONS='20'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [192] SELECT * FROM test WHERE match_phrase(uEsqOADARH, HqgDXljZtQ,MAX_EXPANSIONS=5); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [193] SELECT * FROM test WHERE match_phrase(HcjzcaUKBx, BLuOmSqHWq,slop='0',ANALYZER='stop'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [194] SELECT * FROM test WHERE match_phrase(aDdaEzoSKU, xHWRANyjqy, SLOP='2', ANALYZER = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [195] SELECT * FROM test WHERE match_phrase(ESkLFStcdb, UGofXkyoBt, analyzer="stop"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [196] SELECT * FROM test WHERE match_phrase(EJTymGEEmi, vkpHDDPGXs, slop=0,analyzer="standard",MAX_EXPANSIONS=5); PASSED
+
+AstBuilderTest > can_build_from_table_function() PASSED
+
+AstBuilderTest > can_build_describe_selected_tables_field_filter() PASSED
+
+AstBuilderTest > can_build_limit_clause() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [197] SELECT * FROM test WHERE match_phrase(CgJeaLYfKc, XIiDezpWUW, ANALYZER = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [198] SELECT * FROM test WHERE match_phrase(FvAgMbvPHO, BtXLMqcHZa, SLOP = 2) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [199] SELECT * FROM test WHERE match_phrase(nxlkAoOMtS, xuKElUGlqz,slop = "2") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [200] SELECT * FROM test WHERE match_phrase(YtBNGPpzla, mrqUhxuFMm,max_expansions='5',slop = "0"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [201] SELECT * FROM test WHERE match_phrase(EJjpzHtEod, JQtgWPodrp, max_expansions = "0", slop="1") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [202] SELECT * FROM test WHERE match_phrase(JFeetHCQgi, slxjMbSxCr) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [203] SELECT * FROM test WHERE match_phrase(doUPNvMAAI, JuqJcEiCSl,SLOP='0',max_expansions = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [204] SELECT * FROM test WHERE match_phrase(JSZELvSPJO, JyyWGukvHx,MAX_EXPANSIONS='20',SLOP = '2'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [205] SELECT * FROM test WHERE match_phrase(MrwZagbGdZ, jBJBYhttRN, ANALYZER = "stop",MAX_EXPANSIONS=0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [206] SELECT * FROM test WHERE match_phrase(BWKDHZQyJl, OsWoXEqrLg,slop=2,analyzer = "english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [207] SELECT * FROM test WHERE match_phrase(wwtUJvUpiu, obuoKRcgsF,analyzer = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [208] SELECT * FROM test WHERE match_phrase(JyUleniVNe, pjGpfjLkqE, MAX_EXPANSIONS="20") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [209] SELECT * FROM test WHERE match_phrase(vjHknWfoav, LOFAoeHlSO, slop = '2',max_expansions="0", analyzer='stop') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [210] SELECT * FROM test WHERE match_phrase(ZtJADoEcLg, viigkxzinb, SLOP = 2); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [211] SELECT * FROM t WHERE matchphrasequery(c, 3) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [212] SELECT * FROM t WHERE matchphrasequery(c, 3, fuzziness=AUTO) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [213] SELECT * FROM t WHERE matchphrasequery(c, 3, zero_terms_query="all") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [214] SELECT * FROM t WHERE matchphrasequery(c, 3, lenient=true) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [215] SELECT * FROM t WHERE matchphrasequery(c, 3, lenient='true') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [216] SELECT * FROM t WHERE matchphrasequery(c, 3, operator=xor) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [217] SELECT * FROM t WHERE matchphrasequery(c, 3, cutoff_frequency=0.04) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [218] SELECT * FROM t WHERE matchphrasequery(c, 3, cutoff_frequency=0.04, analyzer = english, prefix_length=34, fuzziness='auto', minimum_should_match='2<-25% 9<-3') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [219] SELECT * FROM t WHERE matchphrasequery(c, 3, minimum_should_match='2<-25% 9<-3') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhraseArgsTest(String) > [220] SELECT * FROM t WHERE matchphrasequery(c, 3, operator='AUTO') PASSED
+
+SQLSyntaxParserTest > canParseCaseStatement() PASSED
+
+SQLSyntaxParserTest > canParseMatchPhraseAlternateSyntax() PASSED
+
+SQLSyntaxParserTest > can_parse_day_of_week_functions() PASSED
+
+SQLSyntaxParserTest > can_parse_match_phrase_relevance_function() PASSED
+
+SQLSyntaxParserTest > can_parse_query_string_relevance_function() PASSED
+
+SQLSyntaxParserTest > can_parse_weekday_function() PASSED
+
+SQLSyntaxParserTest > canParseQueryEndWithSemiColon() PASSED
+
+SQLSyntaxParserTest > canParseSelectFields() PASSED
+
+SQLSyntaxParserTest > canParseIfFunction() PASSED
+
+SQLSyntaxParserTest > canParseWhereClauseWithLogicalOperator() PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > now PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > current_timestamp PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > localtimestamp PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > localtime PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > sysdate PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > curtime PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > current_time PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > curdate PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > current_date PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > utc_date PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > utc_time PASSED
+
+SQLSyntaxParserTest > can_parse_now_like_functions(String, Boolean, Boolean) > utc_timestamp PASSED
+
+SQLSyntaxParserTest > can_parse_to_seconds_function() PASSED
+
+SQLSyntaxParserTest > cannot_parse_get_format_function_with_bad_arg() PASSED
+
+SQLSyntaxParserTest > can_parse_minute_of_day_function() PASSED
+
+SQLSyntaxParserTest > can_parse_match_query_relevance_function() PASSED
+
+SQLSyntaxParserTest > canParseOrderByClause() PASSED
+
+SQLSyntaxParserTest > describe_request_accepts_only_quoted_string_literals() PASSED
+
+SQLSyntaxParserTest > canParseGroupByClause() PASSED
+
+SQLSyntaxParserTest > canNotParseIndexNameStartingWithNumber() PASSED
+
+SQLSyntaxParserTest > canParseMultiMatchAlternateSyntax() PASSED
+
+SQLSyntaxParserTest > canParseSelectClauseWithLogicalOperator() PASSED
+
+SQLSyntaxParserTest > canParseIndexNameWithSpecialCharQuoted() PASSED
+
+SQLSyntaxParserTest > can_parse_second_functions() PASSED
+
+SQLSyntaxParserTest > canParseWhereClause() PASSED
+
+SQLSyntaxParserTest > can_parse_wildcard_query_relevance_function() PASSED
+
+SQLSyntaxParserTest > show_request_accepts_only_quoted_string_literals() PASSED
+
+AstSortBuilderTest > can build sort node PASSED
+
+SQLSyntaxParserTest > can_parse_nested_function() PASSED
+
+SQLSyntaxParserTest > can_parse_matchquery_relevance_function() PASSED
+
+SQLSyntaxParserTest > can_parse_query_relevance_function() PASSED
+
+SQLSyntaxParserTest > can_parse_str_to_date() PASSED
+
+SQLSyntaxParserTest > can_parse_hour_functions() PASSED
+
+SQLSyntaxParserTest > can_parse_match_relevance_function() PASSED
+
+SQLSyntaxParserTest > canParseDistinctClause() PASSED
+
+SQLSyntaxParserTest > can_parse_timestampdiff_function() PASSED
+
+SQLSyntaxParserTest > can_parse_minute_functions() PASSED
+
+SQLSyntaxParserTest > canParseSelectLiterals() PASSED
+
+SQLSyntaxParserTest > cannot_parse_extract_function_invalid_part(String) > INVALID PASSED
+
+SQLSyntaxParserTest > cannot_parse_extract_function_invalid_part(String) > "SECOND" PASSED
+
+SQLSyntaxParserTest > cannot_parse_extract_function_invalid_part(String) > 123 PASSED
+
+SQLSyntaxParserTest > can_parse_week_of_year_functions() PASSED
+
+SQLSyntaxParserTest > can_parse_timestampadd_function() PASSED
+
+SQLSyntaxParserTest > canParseSelectLiteralWithAlias() PASSED
+
+SQLSyntaxParserTest > can_parse_yearweek_function() PASSED
+
+SQLSyntaxParserTest > canParseHiddenIndexName() PASSED
+
+SQLSyntaxParserTest > can_parse_dayofmonth_functions() PASSED
+
+SQLSyntaxParserTest > can_parse_multi_match_relevance_function() PASSED
+
+SQLSyntaxParserTest > can_parse_last_day_function() PASSED
+
+SQLSyntaxParserTest > canParseSelectFieldWithQuotedAlias() PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [1] SELECT * FROM test WHERE match_phrase_prefix(aUmIiNUZuw, xaMdBJuGPi,slop=2); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [2] SELECT * FROM test WHERE match_phrase_prefix(wylMYhlHfI, aXCDQhiwyE,boost="1.0",zero_terms_query="NULL") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [3] SELECT * FROM test WHERE match_phrase_prefix(bYtzobuGyq, geBhpHBwDk); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [4] SELECT * FROM test WHERE match_phrase_prefix(RdknkcknNS, MFuQosusmp,zero_terms_query = "NULL", MAX_EXPANSIONS = "0",ANALYZER = "standard"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [5] SELECT * FROM test WHERE match_phrase_prefix(CWcVaObkuf, keeEonLUcy, MAX_EXPANSIONS = 0, slop="1",boost='1.0') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [6] SELECT * FROM test WHERE match_phrase_prefix(dNzVSESNqA, VJnuysoIIw,ANALYZER = "standard", zero_terms_query='ALL', boost=1.2,SLOP = 1) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [7] SELECT * FROM test WHERE match_phrase_prefix(wDGLFMbMeA, hCNkmPfkNi,zero_terms_query='NULL', SLOP = 2, MAX_EXPANSIONS = 3); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [8] SELECT * FROM test WHERE match_phrase_prefix(CnVjzqORvW, gMuDXnWFPB, MAX_EXPANSIONS=0, zero_terms_query='NONE', boost = -0.5) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [9] SELECT * FROM test WHERE match_phrase_prefix(QdkIFBoWXN, JZGTniiRlk, SLOP="1",BOOST="1.0"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [10] SELECT * FROM test WHERE match_phrase_prefix(gpunIxejaV, UhcFbQXYDb, ZERO_TERMS_QUERY = "ALL", ANALYZER="english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [11] SELECT * FROM test WHERE match_phrase_prefix(aLnTKzJlCs, KuWRwjriUy, BOOST=1.0,slop = '0',analyzer = "standard", zero_terms_query="ALL", max_expansions=0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [12] SELECT * FROM test WHERE match_phrase_prefix(hNnjUMUmzN, lTUOnfClNo); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [13] SELECT * FROM test WHERE match_phrase_prefix(GnIDKAfhlv, cVmqBeVcwv,BOOST=-0.5, max_expansions="0"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [14] SELECT * FROM test WHERE match_phrase_prefix(vwtGwvrNCM, kRTigOInnu, boost='-0.5',slop = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [15] SELECT * FROM test WHERE match_phrase_prefix(sRmskNblQA, KmzgOAJbEz,MAX_EXPANSIONS=0,ZERO_TERMS_QUERY='NONE',analyzer='english', slop = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [16] SELECT * FROM test WHERE match_phrase_prefix(lanTIIrPom, VrkCiVNyhi,zero_terms_query = "NULL", boost = "1.0", ANALYZER = "english",max_expansions = "0") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [17] SELECT * FROM test WHERE match_phrase_prefix(SGMbdjCHBC, GOdvvOuVRu); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [18] SELECT * FROM test WHERE match_phrase_prefix(kifygsksQG, JmWysdvIug, MAX_EXPANSIONS=10) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [19] SELECT * FROM test WHERE match_phrase_prefix(bNXzCUIsIj, STGpoWmdPi, boost='1.2', MAX_EXPANSIONS = 0, ZERO_TERMS_QUERY = 'NONE', analyzer='english'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [20] SELECT * FROM test WHERE match_phrase_prefix(EpLGiSylFh, KfDoEBlzfC,max_expansions = '10',zero_terms_query = "NONE", ANALYZER = "english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [21] SELECT * FROM test WHERE match_phrase_prefix(lARaRUrZhn, LeCaktkFcb, zero_terms_query="ALL",MAX_EXPANSIONS=0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [22] SELECT * FROM test WHERE match_phrase_prefix(PdqxbquGVs, kMeVleUDwu,BOOST = '-0.5'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [23] SELECT * FROM test WHERE match_phrase_prefix(cmbicpUBBi, AegOAiuBxr, BOOST='-0.5', analyzer = 'standard') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [24] SELECT * FROM test WHERE match_phrase_prefix(ZwzBedwWfz, hpIySPLsjU, max_expansions=10,analyzer="standard"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [25] SELECT * FROM test WHERE match_phrase_prefix(dwpeqsHNsX, eyTjuvTKKV, BOOST="1.0",analyzer = "stop",max_expansions='3'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [26] SELECT * FROM test WHERE match_phrase_prefix(YYJriumewc, AvYemoldMs,ZERO_TERMS_QUERY = 'NONE', BOOST = 1.0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [27] SELECT * FROM test WHERE match_phrase_prefix(aXvxvuHcWh, BNDrXMGsTx,SLOP="0", analyzer="standard",BOOST='1.2') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [28] SELECT * FROM test WHERE match_phrase_prefix(jFdcwaFocV, QJIEGMmehd, BOOST=1.2, ZERO_TERMS_QUERY = 'ALL', SLOP = 0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [29] SELECT * FROM test WHERE match_phrase_prefix(IqGiQhfvAf, oPCTYvaQmr,ANALYZER='stop', BOOST=1.2, MAX_EXPANSIONS="0", ZERO_TERMS_QUERY="NULL"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [30] SELECT * FROM test WHERE match_phrase_prefix(jgHLVivcYT, nbShWhKkEt,zero_terms_query='ALL',max_expansions="10",ANALYZER = 'stop'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [31] SELECT * FROM test WHERE match_phrase_prefix(JQRZvAuSqt, iYwBJXNQDE, ANALYZER='stop'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [32] SELECT * FROM test WHERE match_phrase_prefix(ghRYxJbhpI, vIIFYwyojz, BOOST = 1.0,analyzer="standard",SLOP=2,MAX_EXPANSIONS=3); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [33] SELECT * FROM test WHERE match_phrase_prefix(FgTHAQqzsj, kibZKuZlCN, ANALYZER="stop") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [34] SELECT * FROM test WHERE match_phrase_prefix(lAHZhglvij, RXzSPLHwPZ, ZERO_TERMS_QUERY="NONE"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [35] SELECT * FROM test WHERE match_phrase_prefix(bYoUFAmrWF, cWlsSmZbbd, ZERO_TERMS_QUERY = "ALL", BOOST = 1.2, slop=1,MAX_EXPANSIONS = '10') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [36] SELECT * FROM test WHERE match_phrase_prefix(raBhFmWUwh, uwSHqUDbEf, boost="1.0") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [37] SELECT * FROM test WHERE match_phrase_prefix(OatYgHMjyK, uhggbzZHan, SLOP = 2, zero_terms_query="ALL", MAX_EXPANSIONS=3); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [38] SELECT * FROM test WHERE match_phrase_prefix(kuVhOQQTfD, nmVNZifrma, max_expansions = 0,ZERO_TERMS_QUERY = 'NULL') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [39] SELECT * FROM test WHERE match_phrase_prefix(WEAWNSlhVF, bbqfPfHDtc, MAX_EXPANSIONS=0, SLOP=2, analyzer="standard") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [40] SELECT * FROM test WHERE match_phrase_prefix(JZREMHfkwZ, iqEddvXxoR,SLOP = '2',ANALYZER = "stop",ZERO_TERMS_QUERY='ALL', MAX_EXPANSIONS="10"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [41] SELECT * FROM test WHERE match_phrase_prefix(uZIzYypxIR, lKUuXxHDEe,boost=1.2, slop="0"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [42] SELECT * FROM test WHERE match_phrase_prefix(CyoNQMMnZp, sAyzAGucgr,analyzer = "stop"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [43] SELECT * FROM test WHERE match_phrase_prefix(yjbIeNomXN, sdoDJNZOHU,zero_terms_query = 'NONE',slop = 0,max_expansions = "0",boost = -0.5); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [44] SELECT * FROM test WHERE match_phrase_prefix(VzeoBVWMjS, UToVxoNXms,slop = 2,boost='-0.5', analyzer = "stop"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [45] SELECT * FROM test WHERE match_phrase_prefix(SszKILobMH, qjJfOxXlza, max_expansions="10",boost=-0.5); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [46] SELECT * FROM test WHERE match_phrase_prefix(OWslAEabex, ABvwqzedcC,ANALYZER = "standard",slop='0',max_expansions=0, boost = '1.0') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [47] SELECT * FROM test WHERE match_phrase_prefix(jmrhUCxrCq, YYNtOwJMLI, SLOP='0',ANALYZER='standard',boost = 1.2, MAX_EXPANSIONS = 3) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [48] SELECT * FROM test WHERE match_phrase_prefix(CvjLyNaHYd, yQoeiqsbfl,MAX_EXPANSIONS = '0', slop=1); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [49] SELECT * FROM test WHERE match_phrase_prefix(mgxvLlAkat, npcXJySYiq, max_expansions = 3, BOOST="1.0", ZERO_TERMS_QUERY="NULL",analyzer = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [50] SELECT * FROM test WHERE match_phrase_prefix(mfnVSHaRRJ, pHAIHxnMTz, boost='-0.5',max_expansions=10,analyzer = "standard"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [51] SELECT * FROM test WHERE match_phrase_prefix(FPWxQoQIIN, VWqOHhantD,ZERO_TERMS_QUERY="NULL", SLOP="2", BOOST = -0.5); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [52] SELECT * FROM test WHERE match_phrase_prefix(KzyXQygJbG, pqmmlElkGD,ZERO_TERMS_QUERY="NULL",BOOST = 1.0,slop='1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [53] SELECT * FROM test WHERE match_phrase_prefix(KRKdJadkzT, ZxTtqixjBx, analyzer = 'stop') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [54] SELECT * FROM test WHERE match_phrase_prefix(spsgLXVIGu, pkrBIlvRrj, zero_terms_query='NONE',boost=1.2); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [55] SELECT * FROM test WHERE match_phrase_prefix(iaKuHUnFUj, cKWvJavBtz, BOOST = "1.2",analyzer = "english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [56] SELECT * FROM test WHERE match_phrase_prefix(BDttqAWEhg, hbCgZGfwTK, SLOP = "1",max_expansions='3') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [57] SELECT * FROM test WHERE match_phrase_prefix(vNuxWalntH, LQzuQGyVtD,ZERO_TERMS_QUERY = "NONE", ANALYZER = "english"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [58] SELECT * FROM test WHERE match_phrase_prefix(ysMEmMEOJE, nGzgebJNSe, max_expansions = 10, ANALYZER='stop', SLOP = 1) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [59] SELECT * FROM test WHERE match_phrase_prefix(bKXwwVspvr, mLzZwcKpHA, BOOST = 1.2, SLOP = '2'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [60] SELECT * FROM test WHERE match_phrase_prefix(zsMMnajQGh, OHTyEbETTd,max_expansions = '0',ANALYZER='stop', zero_terms_query = "NONE") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [61] SELECT * FROM test WHERE match_phrase_prefix(dDnPGWUUFM, zkbZaJqAzI, boost=1.2, ZERO_TERMS_QUERY = "NULL"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [62] SELECT * FROM test WHERE match_phrase_prefix(AxtkDHwpaE, EsMxXoadIw,max_expansions = 3,BOOST=1.0, SLOP = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [63] SELECT * FROM test WHERE match_phrase_prefix(McaFvDnzdJ, iQMXSrTJKQ,boost = '1.0', analyzer='standard',slop='0'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [64] SELECT * FROM test WHERE match_phrase_prefix(iDcoTkDCXy, KBQRnWLrBD, zero_terms_query='NULL', max_expansions = "0",BOOST=1.2,analyzer="stop") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [65] SELECT * FROM test WHERE match_phrase_prefix(HsWqMJpzRL, ToTiUNvHLf, MAX_EXPANSIONS=0, ANALYZER='english', boost = 1.2, slop=1) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [66] SELECT * FROM test WHERE match_phrase_prefix(owvTPQxqqR, ArxURQoNAs, SLOP = 1); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [67] SELECT * FROM test WHERE match_phrase_prefix(YlbMGyzfkg, hpRkFAyCrh,SLOP = '2', ZERO_TERMS_QUERY="NULL", ANALYZER="stop") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [68] SELECT * FROM test WHERE match_phrase_prefix(mrqUhxuFMm, EkCKGmxouD,analyzer='english',MAX_EXPANSIONS = 0, SLOP=1) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [69] SELECT * FROM test WHERE match_phrase_prefix(pZutgWZMFM, hcVHLVWFGJ, BOOST="-0.5", ANALYZER='english'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [70] SELECT * FROM test WHERE match_phrase_prefix(gbQePSkZKS, SVeTHOtQgK,boost = -0.5) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [71] SELECT * FROM test WHERE match_phrase_prefix(HzMKefofPZ, NatPSYODeF,boost='1.0',zero_terms_query="ALL",SLOP="1",max_expansions="3",ANALYZER='english') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [72] SELECT * FROM test WHERE match_phrase_prefix(nRDVqIFQRo, AAnIWynFbV,boost = 1.2, max_expansions = 3,ANALYZER = 'stop') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [73] SELECT * FROM test WHERE match_phrase_prefix(iVwQZuFNyt, wwtUJvUpiu,analyzer="english",slop = 2,boost="-0.5") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [74] SELECT * FROM test WHERE match_phrase_prefix(dDOuSGpEZj, IrhGuYWrCp, analyzer='stop', zero_terms_query='ALL',MAX_EXPANSIONS=10,boost="-0.5"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [75] SELECT * FROM test WHERE match_phrase_prefix(cBBTcCxfzn, ZtJADoEcLg, ZERO_TERMS_QUERY = "NULL", ANALYZER = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [76] SELECT * FROM test WHERE match_phrase_prefix(LfeFyAwIiP, PbnUjWXTLn,BOOST="-0.5",SLOP=0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [77] SELECT * FROM test WHERE match_phrase_prefix(FjPxqeXPVe, JrkfOCebcC,zero_terms_query = 'NONE',boost="-0.5", slop="2"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [78] SELECT * FROM test WHERE match_phrase_prefix(ngOSWzjIpn, oOShgQvMUf, slop = "2") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [79] SELECT * FROM test WHERE match_phrase_prefix(FwwGCFIfIZ, ROVqOAQiKP) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [80] SELECT * FROM test WHERE match_phrase_prefix(LoeQHoesuq, gpGhLfyfbR, ANALYZER='english',SLOP = "1", boost=1.0) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [81] SELECT * FROM test WHERE match_phrase_prefix(kjNqzIYuSG, QiMlAOXMDo,ZERO_TERMS_QUERY='NONE', slop = 2); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [82] SELECT * FROM test WHERE match_phrase_prefix(IriyipMvKH, BgCMSFSoNO, ANALYZER='english',ZERO_TERMS_QUERY = 'NULL',slop = 1); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [83] SELECT * FROM test WHERE match_phrase_prefix(FITXaoPnkJ, SPuVXKuiKw,ZERO_TERMS_QUERY = "ALL", slop='1',BOOST=-0.5); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [84] SELECT * FROM test WHERE match_phrase_prefix(AOAVUmVXHA, HfIlJsZEZr,ZERO_TERMS_QUERY = 'NULL', SLOP="2", ANALYZER = 'english', MAX_EXPANSIONS = "3"); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [85] SELECT * FROM test WHERE match_phrase_prefix(aCpSmtPAsR, GFPDhoLWPx,MAX_EXPANSIONS=3, SLOP = '1'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [86] SELECT * FROM test WHERE match_phrase_prefix(ARcefOdYtw, naYheTCsgO,ZERO_TERMS_QUERY = "NULL",boost=1.0, analyzer = "english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [87] SELECT * FROM test WHERE match_phrase_prefix(EIxBUviUKj, NIlUScEYqJ, MAX_EXPANSIONS='3',ANALYZER = 'english', SLOP='2') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [88] SELECT * FROM test WHERE match_phrase_prefix(GQhCHnwjLK, xTEPPStdLE, zero_terms_query = "NULL",boost=1.2); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [89] SELECT * FROM test WHERE match_phrase_prefix(VGSjXMlJpe, MksAabvYOV, ANALYZER="english", ZERO_TERMS_QUERY="NONE", SLOP = "1") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [90] SELECT * FROM test WHERE match_phrase_prefix(qodjwEojBr, vUPVyNOoxc, slop="0",boost = "-0.5", zero_terms_query='NULL') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [91] SELECT * FROM test WHERE match_phrase_prefix(jJWUalUYwK, zWkOPQzDPr,boost = -0.5) PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [92] SELECT * FROM test WHERE match_phrase_prefix(vMhjMxGtoY, whXzAufxXw,boost = '-0.5',slop = 1); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [93] SELECT * FROM test WHERE match_phrase_prefix(EiURSaNzMr, WcFKtAVHMa,slop="2", ZERO_TERMS_QUERY = "ALL", analyzer="english") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [94] SELECT * FROM test WHERE match_phrase_prefix(kkPZsLhlZP, JLCrHrVXPY, max_expansions=3, SLOP = 2,BOOST = 1.2, ZERO_TERMS_QUERY='NONE'); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [95] SELECT * FROM test WHERE match_phrase_prefix(FtzMRPcNSF, mhPWHfGJXD, BOOST=1.0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [96] SELECT * FROM test WHERE match_phrase_prefix(HAQarinsNe, XtlaWzDOLN, BOOST=1.0, max_expansions = '10') PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [97] SELECT * FROM test WHERE match_phrase_prefix(bWVCcGflKq, TWJARKSzBa, slop=2,max_expansions = 0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [98] SELECT * FROM test WHERE match_phrase_prefix(AJDDUlOvzy, JNSniixXxm, MAX_EXPANSIONS=3, zero_terms_query="ALL", boost=1.0); PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [99] SELECT * FROM test WHERE match_phrase_prefix(HwgHdJxkod, UVKUbvMBAZ, SLOP="2") PASSED
+
+SQLSyntaxParserTest > canParseComplexMatchPhrasePrefixQueries(String) > [100] SELECT * FROM test WHERE match_phrase_prefix(kXDVJKMVZR, ymeZUKsSpb, BOOST = 1.0, zero_terms_query="ALL") PASSED
+
+SQLSyntaxParserTest > can_parse_sec_to_time_function() PASSED
+
+SQLSyntaxParserTest > canParseSelectFieldWithAlias() PASSED
+
+SQLSyntaxParserTest > can_parse_simple_query_string_relevance_function() PASSED
+
+SQLSyntaxParserTest > canParseIndexNameWithDate() PASSED
+
+SQLSyntaxParserTest > canParseMatchQueryAlternateSyntax() PASSED
+
+SQLSyntaxParserTest > canNotParseIndexNameWithSpecialChar() PASSED
+
+SQLSyntaxParserTest > canNotParseShowStatementWithoutFilterClause() PASSED
+
+SQLSyntaxParserTest > can_parse_month_of_year_function() PASSED
+
+SQLSyntaxParserTest > canNotParseIndexNameSingleQuoted() PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > MICROSECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > SECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > MINUTE PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > HOUR PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > DAY PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > WEEK PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > MONTH PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > QUARTER PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > YEAR PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > SECOND_MICROSECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > MINUTE_MICROSECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > MINUTE_SECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > HOUR_MICROSECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > HOUR_SECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > HOUR_MINUTE PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > DAY_MICROSECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > DAY_SECOND PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > DAY_MINUTE PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > DAY_HOUR PASSED
+
+SQLSyntaxParserTest > can_parse_extract_function(String) > YEAR_MONTH PASSED
+
+SQLSyntaxParserTest > canNotParseAggregateFunctionWithWrongArgument() PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATE PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATE PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATE PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATE PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATE PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATETIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATETIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATETIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATETIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > DATETIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIME PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIMESTAMP PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIMESTAMP PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIMESTAMP PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIMESTAMP PASSED
+
+SQLSyntaxParserTest > can_parse_get_format_function(String, String) > TIMESTAMP PASSED
+
+AnonymizerListenerTest > enterErrorNote() PASSED
+
+AnonymizerListenerTest > queriesShouldHaveAnonymousFieldAndIndex() PASSED
+
+AnonymizerListenerTest > queriesShouldHaveAnonymousBooleanLiterals() PASSED
+
+AnonymizerListenerTest > queriesWithSubqueriesShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithHighlightShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithAliasesShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithMatchShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithGreaterOrEqualShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithPositionShouldAnonymizeSensitiveData() PASSED
+
+AnonymizerListenerTest > queriesWithLimitShouldAnonymizeSensitiveData() PASSED
+
+SQLServiceTest > can capture error during explain PASSED
+
+AstHavingFilterBuilderTest > should replace alias with select expression PASSED
+
+SQLServiceTest > can execute sql query PASSED
+
+SQLServiceTest > can execute cursor query PASSED
+
+SQLServiceTest > can execute pretty raw format request PASSED
+
+SQLServiceTest > can explain sql query PASSED
+
+SQLServiceTest > can execute csv format request PASSED
+
+SQLServiceTest > can execute close cursor query PASSED
+
+SQLServiceTest > cannot explain cursor query PASSED
+
+SQLServiceTest > can capture error during execution PASSED
+
+SQLServiceTest > can execute raw format request PASSED
+
+> Task :sql:jacocoTestReport
+
+[Incubating] Problems report is available at: file:///Users/daichen/Temp/my-sql-repo-cc/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 12s
+26 actionable tasks: 5 executed, 21 up-to-date

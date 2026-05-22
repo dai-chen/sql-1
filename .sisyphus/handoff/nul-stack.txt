@@ -1,0 +1,19 @@
+NUL_PROBE Stack Trace (from synthetic test only)
+=================================================
+
+Test: AnalyticsExecutionEngineTest.executeRelNode_nulSeparatorStrippedFromFieldNames
+Module: :core
+
+Stack trace:
+  at org.opensearch.sql.executor.analytics.AnalyticsExecutionEngine.buildSchema(AnalyticsExecutionEngine.java:143)
+  at org.opensearch.sql.executor.analytics.AnalyticsExecutionEngine$1.onResponse(AnalyticsExecutionEngine.java:90)
+  at org.opensearch.sql.executor.analytics.AnalyticsExecutionEngine.execute(AnalyticsExecutionEngine.java:81)
+  at org.opensearch.sql.executor.analytics.AnalyticsExecutionEngineTest.executeAndCapture(AnalyticsExecutionEngineTest.java:313)
+  at org.opensearch.sql.executor.analytics.AnalyticsExecutionEngineTest.executeRelNode_nulSeparatorStrippedFromFieldNames(AnalyticsExecutionEngineTest.java:289)
+  ... (mockito/reflection frames)
+
+Field name: "ISNULL(lastname)\0name" (length=21)
+
+NOTE: This is a SYNTHETIC test that manually constructs a mock RelNode with \0 in field names.
+No real production code path was found to produce \0 in unit tests.
+The real \0 only manifests in integration tests requiring a running OpenSearch cluster.

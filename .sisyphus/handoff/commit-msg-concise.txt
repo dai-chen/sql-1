@@ -1,0 +1,22 @@
+fix(calcite): support HAVING / post-aggregate refs, FROM-less SELECT, window NULL order
+
+1. CalciteRelNodeVisitor.visitValues
+   FROM-less SELECT (e.g. `SELECT 1`) returned 0 rows because the empty
+   Values builder produced a zero-row relation. Use
+   LogicalValues.createOneRow so the downstream Project evaluates over a
+   single row.
+
+2. CalciteRexNodeVisitor.visitAggregateFunction
+   Post-aggregate AggregateFunction references (HAVING, abs(MAX(...)),
+   MAX+MIN) NPE'd: the default visitor returned null. Resolve via a
+   Map<AggregateFunction, Integer> on CalcitePlanContext populated by
+   visitAggregation using the schema-reorder's position arithmetic.
+   Lookup is structural (@EqualsAndHashCode), so COUNT(*) and HAVING
+   alias references resolve without any toString/name matching.
+
+3. CalciteRexNodeVisitor (window functions)
+   `... OVER(ORDER BY x)` (no NULLS FIRST/LAST) NPE'd because nullOrder
+   was null. Default to nullsFirst, matching top-level ORDER BY semantics.
+
+Tests: FROM-less SELECT, registry hit/miss, six HAVING/post-aggregate
+shapes (named agg, COUNT(*), alias, scalar-wrap, arithmetic, compound AND).

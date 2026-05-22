@@ -66,9 +66,8 @@ public class CalcitePlanContext {
   @Getter public Map<String, RexLambdaRef> rexLambdaRefMap;
 
   /**
-   * Maps each AggregateFunction AST node to its output field index in the post-aggregate row type.
-   * Populated by the relNode visitor during Aggregation construction; consumed by the rex visitor
-   * when resolving aggregate references in HAVING/SELECT (e.g., abs(MAX(age))).
+   * Maps AggregateFunction AST nodes to their output field index for HAVING/post-aggregate
+   * resolution.
    */
   @Getter private final Map<AggregateFunction, Integer> aggregateOutputIndex = new HashMap<>();
 

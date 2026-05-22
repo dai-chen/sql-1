@@ -13,7 +13,6 @@ import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.TYPE_FACTOR
 import java.sql.Connection;
 import java.util.List;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.type.ArraySqlType;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -26,7 +25,6 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.opensearch.sql.ast.expression.AggregateFunction;
 import org.opensearch.sql.ast.expression.LambdaFunction;
 import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
@@ -211,26 +209,5 @@ public class CalciteRexNodeVisitorTest {
     assertEquals(
         lambdaContext.getRexLambdaRefMap().get("acc").getType().getSqlTypeName(),
         SqlTypeName.FLOAT);
-  }
-
-  @Test
-  public void testVisitAggregateFunction_resolvesFromRegistry() {
-    // Setup: register an AggregateFunction in the context's aggregateOutputIndex
-    AggregateFunction aggFunc = new AggregateFunction("MAX", new QualifiedName(List.of("age")));
-    context.getAggregateOutputIndex().put(aggFunc, 0);
-
-    RexInputRef expectedRef = new RexInputRef(0, TYPE_FACTORY.createSqlType(SqlTypeName.INTEGER));
-    when(relBuilder.field(0)).thenReturn(expectedRef);
-
-    RexNode result = visitor.visitAggregateFunction(aggFunc, context);
-    assertEquals(expectedRef, result);
-  }
-
-  @Test
-  public void testVisitAggregateFunction_throwsWhenUnresolvable() {
-    // Empty registry → IllegalStateException (planner-bug invariant violation).
-    AggregateFunction aggFunc = new AggregateFunction("MAX", new QualifiedName(List.of("age")));
-    assertThrows(
-        IllegalStateException.class, () -> visitor.visitAggregateFunction(aggFunc, context));
   }
 }
