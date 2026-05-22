@@ -114,7 +114,7 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
     Integer index = context.getAggregateOutputIndex().get(node);
     if (index == null) {
       throw new IllegalStateException(
-          "Aggregate function " + node + " not registered (visitAggregation out of sync)");
+          "Aggregate function " + node + " not registered (planner bug)");
     }
     return context.relBuilder.field(index);
   }
@@ -664,14 +664,11 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
                 field = b.desc(field);
               }
               NullOrder no = opt.getNullOrder();
-              if (no == null) {
-                // Match top-level ORDER BY default: treat unspecified NULLS as NULLS FIRST.
-                // (See CalciteRelNodeVisitor visitSort: null nullOrder → nullsFirst.)
-                return b.nullsFirst(field);
-              }
               return switch (no) {
-                case NULL_LAST -> b.nullsLast(field);
+                // Unspecified NULLS defaults to NULLS FIRST, matching top-level ORDER BY.
+                case null -> b.nullsFirst(field);
                 case NULL_FIRST -> b.nullsFirst(field);
+                case NULL_LAST -> b.nullsLast(field);
               };
             })
         .toList();

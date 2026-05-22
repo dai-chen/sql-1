@@ -221,20 +221,25 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
 
   @Test
   public void selectLiteralWithoutFrom() {
-    // Fix 3: FROM-less SELECT should produce a one-row result via LogicalValues.
-    // The optimizer folds Project([1]) over Values([[0]]) into Values([[1]]).
-    givenQuery("SELECT 1").assertPlanContains("LogicalValues(tuples=[[{ 1 }]])");
+    // FROM-less SELECT produces a one-row result via LogicalValues so the downstream
+    // Project evaluates over a single row.
+    givenQuery("SELECT 1")
+        .assertPlan(
+            """
+            LogicalSort(sort0=[$0], dir0=[ASC])
+              LogicalValues(tuples=[[{ 1 }]])
+            """);
   }
 
   @Test
   public void selectExpressionWithoutFrom() {
-    // Non-trivial expressions remain as Project over the one-row dual table.
     givenQuery("SELECT 1 + 1")
-        .assertPlanContains("LogicalValues(tuples=[[{ 0 }]])")
-        .assertPlanContains("LogicalProject");
+        .assertPlan(
+            """
+            LogicalProject(1 + 1=[+(1, 1)])
+              LogicalValues(tuples=[[{ 0 }]])
+            """);
   }
-
-  // HAVING and post-aggregate resolution tests
 
   @Test
   public void testHavingMaxCol() {
@@ -335,7 +340,7 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
   @Test
   public void testWindowOrderByDefaultsNullsFirst() {
     // Window function ORDER BY without explicit NULLS FIRST/LAST defaults to NULLS FIRST,
-    // matching top-level ORDER BY semantics. Previously NPE'd in translateOrderKeys.
+    // matching top-level ORDER BY semantics.
     givenQuery(
             """
             SELECT name, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM catalog.employees

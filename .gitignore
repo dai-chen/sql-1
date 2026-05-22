@@ -59,4 +59,4 @@ http-client.env.json
 !.claude/harness/
 .claude/settings.local.json
 .clinerules
-memory-bank.sisyphus/
+memory-bank
