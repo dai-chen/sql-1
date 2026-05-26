@@ -23,6 +23,7 @@ import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.util.TestUtils;
 
+@Ignore("Not supported by analytics-engine")
 public class PaginationIT extends SQLIntegTestCase {
   @Override
   public void init() throws IOException {

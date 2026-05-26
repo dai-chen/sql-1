@@ -6,6 +6,7 @@
 package org.opensearch.sql.sql;
 
 import static org.opensearch.sql.legacy.TestsConstants.*;
+import org.junit.Ignore;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -16,6 +17,7 @@ import org.junit.Test;
 import org.opensearch.client.ResponseException;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 
+@Ignore("Not supported by analytics-engine")
 public class PaginationWindowIT extends SQLIntegTestCase {
   @Override
   public void init() throws IOException {

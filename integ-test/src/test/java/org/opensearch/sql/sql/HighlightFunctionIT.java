@@ -9,6 +9,7 @@ import static org.opensearch.sql.util.MatcherUtils.rows;
 import static org.opensearch.sql.util.MatcherUtils.schema;
 import static org.opensearch.sql.util.MatcherUtils.verifyDataRows;
 import static org.opensearch.sql.util.MatcherUtils.verifySchema;
+import org.junit.Ignore;
 
 import com.google.common.collect.ImmutableMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import org.junit.Test;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.legacy.TestsConstants;
 
+@Ignore("Not supported by analytics-engine")
 public class HighlightFunctionIT extends SQLIntegTestCase {
 
   @Override

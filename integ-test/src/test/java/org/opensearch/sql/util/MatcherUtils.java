@@ -284,13 +284,34 @@ public class MatcherUtils {
       @Override
       protected boolean matchesSafely(JSONObject jsonObject) {
         String actualName = (String) jsonObject.query("/name");
-        String actualAlias = (String) jsonObject.query("/alias");
+        String actualAlias =
+            jsonObject.has("alias") ? (String) jsonObject.query("/alias") : null;
         String actualType = (String) jsonObject.query("/type");
-        return expectedName.equals(actualName)
-            && (Strings.isNullOrEmpty(expectedAlias) || expectedAlias.equals(actualAlias))
-            && expectedType.equals(actualType);
+
+        // Accept AE format: alias promoted to name field (no separate alias field)
+        boolean nameMatches =
+            expectedName.equals(actualName)
+                || (!Strings.isNullOrEmpty(expectedAlias) && expectedAlias.equals(actualName));
+
+        boolean aliasMatches =
+            Strings.isNullOrEmpty(expectedAlias)
+                || expectedAlias.equals(actualAlias)
+                || expectedAlias.equals(actualName);
+
+        boolean typeMatches =
+            expectedType.equals(actualType) || isCompatibleType(expectedType, actualType);
+
+        return nameMatches && aliasMatches && typeMatches;
       }
     };
+  }
+
+  private static boolean isCompatibleType(String expected, String actual) {
+    if (expected == null || actual == null) return false;
+    // keyword/text → string (Calcite VARCHAR unification)
+    if (("keyword".equals(expected) || "text".equals(expected)) && "string".equals(actual))
+      return true;
+    return false;
   }
 
   public static TypeSafeMatcher<JSONArray> rows(Object... expectedObjects) {

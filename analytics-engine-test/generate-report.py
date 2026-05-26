@@ -86,8 +86,8 @@ def main():
     w = lines.append
 
     w("# SQL V2 + Legacy IT — Analytics Engine Compatibility Report\n")
-    w(f"**Total Tests:** {total} | ✅ Passed: {total_p} ({total_p/total*100:.1f}%) | "
-      f"❌ Failed: {total_f} ({total_f/total*100:.1f}%) | ⏭️ Skipped: {total_s} ({total_s/total*100:.1f}%)\n")
+    w(f"**Total Tests:** {total} | Passed: {total_p} ({total_p/total*100:.1f}%) | "
+      f"Failed: {total_f} ({total_f/total*100:.1f}%) | Skipped: {total_s} ({total_s/total*100:.1f}%)\n")
     w("")
     w("| Area | Passed | Failed | Skipped | Pass Rate |")
     w("|------|-------:|-------:|--------:|----------:|")
@@ -104,14 +104,14 @@ def main():
         w(f"| {cat} | {cnt} | {cnt/total_f*100:.1f}% |")
     w("")
 
-    w("## ✅ Fully Passing Test Classes\n")
+    w("## Fully Passing Test Classes\n")
     fully_passing = sorted([(k, v) for k, v in classes.items() if v["failed"] == 0 and v["passed"] > 0],
                            key=lambda x: -x[1]["passed"])
     for name, v in fully_passing:
         w(f"- **{name}** ({v['passed']} tests)")
     w("")
 
-    w("## 🟡 Partially Passing (>50%)\n")
+    w("## Partially Passing (>50%)\n")
     w("| Class | Passed | Failed | Rate |")
     w("|-------|-------:|-------:|-----:|")
     partial = sorted([(k, v) for k, v in classes.items()
@@ -122,7 +122,7 @@ def main():
         w(f"| {name} | {v['passed']} | {v['failed']} | {rate:.0f}% |")
     w("")
 
-    w("## ❌ Failing Test Classes\n")
+    w("## Failing Test Classes\n")
     w("| Class | Passed | Failed | Skipped | Top Failure |")
     w("|-------|-------:|-------:|--------:|-------------|")
     failing = sorted([(k, v) for k, v in classes.items()

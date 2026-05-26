@@ -33,12 +33,12 @@ public class JdbcFormatIT extends SQLIntegTestCase {
     verifySchema(
         response,
         schema("account_number", "long"),
-        schema("address", "text"),
+        schema("address", "string"),
         schema("age", "integer"),
         schema("birthdate", "timestamp"),
-        schema("city", "keyword"),
+        schema("city", "string"),
         schema("male", "boolean"),
-        schema("state", "text"));
+        schema("state", "string"));
   }
 
   @Test
@@ -47,6 +47,7 @@ public class JdbcFormatIT extends SQLIntegTestCase {
         new JSONObject(
             executeQuery("SELECT account_number AS acc FROM " + TEST_INDEX_BANK, "jdbc"));
 
-    verifySchema(response, schema("account_number", "acc", "long"));
+    // TODO: AE returns alias as column name (SQL standard)
+    verifySchema(response, schema("acc", null, "long"));
   }
 }

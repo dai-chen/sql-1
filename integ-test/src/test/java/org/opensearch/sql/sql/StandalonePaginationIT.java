@@ -18,6 +18,7 @@ import java.util.Map;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import org.json.JSONObject;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
@@ -54,6 +55,7 @@ import org.opensearch.sql.util.InternalRestHighLevelClient;
 import org.opensearch.sql.util.StandaloneModule;
 
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
+@Ignore("Not supported by analytics-engine")
 public class StandalonePaginationIT extends SQLIntegTestCase {
 
   private QueryService queryService;

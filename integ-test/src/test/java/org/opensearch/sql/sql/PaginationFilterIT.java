@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.legacy.TestsConstants;
+import org.junit.Ignore;
 
 /**
  * Test pagination with `WHERE` clause using a parametrized test. See constructor {@link
@@ -26,6 +27,7 @@ import org.opensearch.sql.legacy.TestsConstants;
  * #STATEMENT_TO_NUM_OF_PAGES} to see how these parameters are generated.
  */
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
+@Ignore("Not supported by analytics-engine")
 public class PaginationFilterIT extends SQLIntegTestCase {
 
   /**

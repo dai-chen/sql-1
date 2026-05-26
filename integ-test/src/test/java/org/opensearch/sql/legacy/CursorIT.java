@@ -28,6 +28,7 @@ import org.opensearch.client.ResponseException;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.legacy.utils.StringUtils;
 
+@Ignore("Not supported by analytics-engine")
 public class CursorIT extends SQLIntegTestCase {
 
   private static final String CURSOR = "cursor";

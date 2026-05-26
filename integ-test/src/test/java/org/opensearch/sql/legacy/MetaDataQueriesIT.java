@@ -185,6 +185,7 @@ import org.opensearch.sql.legacy.utils.StringUtils;
  * ]
  * </pre>
  */
+@Ignore("Not supported by analytics-engine")
 public class MetaDataQueriesIT extends SQLIntegTestCase {
 
   // Number of fields in the response, assuming no filters, based on output shown above

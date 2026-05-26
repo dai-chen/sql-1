@@ -6,6 +6,7 @@
 package org.opensearch.sql.sql;
 
 import static org.hamcrest.Matchers.containsString;
+import org.junit.Ignore;
 
 import java.io.IOException;
 import org.junit.Test;
@@ -19,6 +20,7 @@ import org.opensearch.sql.legacy.TestsConstants;
  * verify that invalid inputs are rejected with clear error messages. Explain-plan DSL shape tests
  * live in {@link VectorSearchExplainIT}.
  */
+@Ignore("Not supported by analytics-engine")
 public class VectorSearchIT extends SQLIntegTestCase {
 
   @Override

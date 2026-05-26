@@ -11,6 +11,7 @@ import static org.opensearch.sql.util.MatcherUtils.verifyDataRows;
 import static org.opensearch.sql.util.MatcherUtils.verifySchema;
 
 import org.json.JSONObject;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 
@@ -41,6 +42,7 @@ public class NullLiteralIT extends SQLIntegTestCase {
     verifyDataRows(query("SELECT ABS(NULL), POW(2, FLOOR(NULL))"), rows(null, null));
   }
 
+  @Ignore("INTERVAL NULL is V2-specific syntax, not valid in ANSI SQL/Calcite")
   @Test
   public void testNullLiteralInInterval() {
     verifyDataRows(

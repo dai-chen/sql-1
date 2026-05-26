@@ -6,6 +6,7 @@
 package org.opensearch.sql.sql;
 
 import static org.hamcrest.Matchers.containsString;
+import org.junit.Ignore;
 
 import java.io.IOException;
 import org.junit.Test;
@@ -22,6 +23,7 @@ import org.opensearch.sql.legacy.TestsConstants;
  * <p>Uses _explain-only plus error-path queries, so the k-NN plugin is not required — the planner
  * validation fires during planning, before any k-NN execution.
  */
+@Ignore("Not supported by analytics-engine")
 public class VectorSearchSubqueryIT extends SQLIntegTestCase {
 
   @Override

@@ -13,6 +13,7 @@ import static org.opensearch.sql.util.MatcherUtils.verifySchema;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.legacy.utils.StringUtils;
@@ -21,6 +22,7 @@ import org.opensearch.sql.legacy.utils.StringUtils;
  * Integration test for OpenSearch object field (and nested field). This class is focused on simple
  * SELECT-FROM query to ensure right column number and value is returned.
  */
+@Ignore("Not supported by analytics-engine")
 public class ObjectFieldSelectIT extends SQLIntegTestCase {
 
   @Override

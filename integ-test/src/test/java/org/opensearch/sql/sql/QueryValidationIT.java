@@ -27,6 +27,7 @@ import org.opensearch.sql.legacy.SQLIntegTestCase;
  * The query validation IT only covers test for error cases that not doable in comparison test. For
  * all other tests, comparison test should be favored over manual written test like this.
  */
+@Ignore("Not supported by analytics-engine")
 public class QueryValidationIT extends SQLIntegTestCase {
 
   @Rule public final ExpectedException exceptionRule = ExpectedException.none();

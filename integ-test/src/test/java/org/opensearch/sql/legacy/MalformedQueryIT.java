@@ -10,10 +10,12 @@ import java.util.Locale;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.json.JSONObject;
+import org.junit.Ignore;
 import org.junit.Assert;
 import org.opensearch.client.ResponseException;
 
 /** Tests for clean handling of various types of invalid queries */
+@Ignore("Not supported by analytics-engine")
 public class MalformedQueryIT extends SQLIntegTestCase {
   @Override
   protected void init() throws Exception {

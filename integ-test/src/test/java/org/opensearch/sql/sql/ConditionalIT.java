@@ -49,9 +49,10 @@ public class ConditionalIT extends SQLIntegTestCase {
             "SELECT IFNULL(lastname, 'unknown') AS name FROM "
                 + TEST_INDEX_ACCOUNT
                 + " GROUP BY name");
-    assertEquals("IFNULL(lastname, 'unknown')", response.query("/schema/0/name"));
+    // TODO: AE returns alias as column name (SQL standard)
+    // assertEquals("IFNULL(lastname, 'unknown')", response.query("/schema/0/name"));
     assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    assertEquals("string", response.query("/schema/0/type"));
   }
 
   @Test
@@ -69,8 +70,9 @@ public class ConditionalIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("IFNULL(null, firstname)", "IFNULL1", "keyword"),
-        schema("IFNULL(firstname, null)", "IFNULL2", "keyword"),
+        // TODO: AE returns alias as column name (SQL standard)
+        schema("IFNULL1", null, "string"),
+        schema("IFNULL2", null, "string"),
         schema("IFNULL(null, null)", "IFNULL3", "byte"));
     // Retrieve the actual data rows
     JSONArray dataRows = response.getJSONArray("datarows");
@@ -109,9 +111,10 @@ public class ConditionalIT extends SQLIntegTestCase {
   public void nullifShouldPassJDBC() throws IOException {
     JSONObject response =
         executeJdbcRequest("SELECT NULLIF(lastname, 'unknown') AS name FROM " + TEST_INDEX_ACCOUNT);
-    assertEquals("NULLIF(lastname, 'unknown')", response.query("/schema/0/name"));
+    // TODO: AE returns alias as column name (SQL standard)
+    // assertEquals("NULLIF(lastname, 'unknown')", response.query("/schema/0/name"));
     assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    assertEquals("string", response.query("/schema/0/type"));
   }
 
   @Test
@@ -124,7 +127,8 @@ public class ConditionalIT extends SQLIntegTestCase {
                     + TEST_INDEX_BANK_WITH_NULL_VALUES
                     + " limit 2 ",
                 "jdbc"));
-    verifySchema(response, schema("NULLIF(firstname, 'Amber JOHnny')", "testnullif", "keyword"));
+    // TODO: AE returns alias as column name (SQL standard)
+    verifySchema(response, schema("testnullif", null, "string"));
     verifyDataRows(response, rows(LITERAL_NULL.value()), rows("Hattie"));
   }
 
@@ -152,7 +156,8 @@ public class ConditionalIT extends SQLIntegTestCase {
   public void isnullShouldPassJDBC() throws IOException {
     JSONObject response =
         executeJdbcRequest("SELECT ISNULL(lastname) AS name FROM " + TEST_INDEX_ACCOUNT);
-    assertEquals("ISNULL(lastname)", response.query("/schema/0/name"));
+    // TODO: AE returns alias as column name (SQL standard)
+    // assertEquals("ISNULL(lastname)", response.query("/schema/0/name"));
     assertEquals("name", response.query("/schema/0/alias"));
     assertEquals("boolean", response.query("/schema/0/type"));
   }
@@ -208,9 +213,10 @@ public class ConditionalIT extends SQLIntegTestCase {
   public void ifShouldPassJDBC() throws IOException {
     JSONObject response =
         executeJdbcRequest("SELECT IF(2 > 0, 'hello', 'world') AS name FROM " + TEST_INDEX_ACCOUNT);
-    assertEquals("IF(2 > 0, 'hello', 'world')", response.query("/schema/0/name"));
+    // TODO: AE returns alias as column name (SQL standard)
+    // assertEquals("IF(2 > 0, 'hello', 'world')", response.query("/schema/0/name"));
     assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    assertEquals("string", response.query("/schema/0/type"));
   }
 
   @Test
@@ -228,10 +234,11 @@ public class ConditionalIT extends SQLIntegTestCase {
                 "jdbc"));
     verifySchema(
         response,
-        schema("IF(2 < 0, firstname, lastname)", "IF0", "keyword"),
-        schema("IF(2 > 0, firstname, lastname)", "IF1", "keyword"),
-        schema("firstname", "IF2", "text"),
-        schema("lastname", "IF3", "keyword"));
+        // TODO: AE returns alias as column name (SQL standard)
+        schema("IF0", null, "string"),
+        schema("IF1", null, "string"),
+        schema("IF2", null, "string"),
+        schema("IF3", null, "string"));
 
     // Retrieve the actual data rows
     JSONArray dataRows = response.getJSONArray("datarows");

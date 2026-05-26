@@ -70,7 +70,7 @@ public class AggregationExpressionIT extends SQLIntegTestCase {
                 "SELECT gender, AVG(age) as `avg` " + "FROM %s " + "GROUP BY gender",
                 Index.BANK.getName()));
 
-    verifySchema(response, schema("gender", null, "text"), schema("AVG(age)", "avg", "double"));
+    verifySchema(response, schema("gender", null, "string"), schema("AVG(age)", "avg", "double"));
     verifyDataRows(response, rows("M", 34.25), rows("F", 33.666666666666664d));
   }
 
@@ -84,7 +84,7 @@ public class AggregationExpressionIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("gender", null, "text"),
+        schema("gender", null, "string"),
         schema("MAX(age) + MIN(age)", "addValue", "long"));
     verifyDataRows(response, rows("M", 60), rows("F", 60));
   }
@@ -97,7 +97,7 @@ public class AggregationExpressionIT extends SQLIntegTestCase {
                 "SELECT gender, MAX(age) + 1 as `add` " + "FROM %s " + "GROUP BY gender",
                 Index.ACCOUNT.getName()));
 
-    verifySchema(response, schema("gender", null, "text"), schema("MAX(age) + 1", "add", "long"));
+    verifySchema(response, schema("gender", null, "string"), schema("MAX(age) + 1", "add", "long"));
     verifyDataRows(response, rows("M", 41), rows("F", 41));
   }
 
@@ -124,7 +124,7 @@ public class AggregationExpressionIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("gender", null, "text"),
+        schema("gender", null, "string"),
         schema("Log(MAX(age) + MIN(age))", "logValue", "double"));
     verifyDataRows(response, rows("M", 4.0943445622221d), rows("F", 4.0943445622221d));
   }
@@ -143,7 +143,7 @@ public class AggregationExpressionIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("gender", null, "text"),
+        schema("gender", null, "string"),
         schema("age+10", null, "long"),
         schema("max(balance)", "max", "long"));
     verifyDataRows(response, rows("M", 30, 49568), rows("M", 31, 49433));
@@ -163,7 +163,7 @@ public class AggregationExpressionIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("gender", null, "text"),
+        schema("gender", null, "string"),
         schema("Log(age+10)", "logAge", "double"),
         schema("max(balance)", "max", "long"));
     verifyDataRows(
@@ -184,7 +184,7 @@ public class AggregationExpressionIT extends SQLIntegTestCase {
 
     verifySchema(
         response,
-        schema("gender", null, "text"),
+        schema("gender", null, "string"),
         schema("Log(age+10)", "logAge", "double"),
         schema("max(balance) - 100", "max", "long"));
     verifyDataRows(

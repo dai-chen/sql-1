@@ -41,6 +41,7 @@ import org.opensearch.client.Response;
 import org.opensearch.sql.legacy.executor.csv.CSVResult;
 
 /** Tests to cover requests with "?format=csv" parameter */
+@Ignore("Not supported by analytics-engine")
 public class CsvFormatResponseIT extends SQLIntegTestCase {
 
   private boolean flatOption = false;

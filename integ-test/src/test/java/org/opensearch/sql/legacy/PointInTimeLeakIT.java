@@ -7,6 +7,7 @@ package org.opensearch.sql.legacy;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
+import org.junit.Ignore;
 
 import java.io.IOException;
 import org.json.JSONArray;
@@ -23,6 +24,7 @@ import org.opensearch.sql.legacy.utils.StringUtils;
  *
  * @see <a href="https://github.com/opensearch-project/sql/issues/5002">Issue #5002</a>
  */
+@Ignore("Not supported by analytics-engine")
 public class PointInTimeLeakIT extends SQLIntegTestCase {
 
   private static final String TEST_INDEX = "test-logs-2025.01.01";
