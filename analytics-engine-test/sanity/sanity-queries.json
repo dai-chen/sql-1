@@ -1,0 +1,2336 @@
+[
+  {
+    "category": "SELECT",
+    "name": "select_where",
+    "query": "SELECT * FROM sanity_test WHERE age > 30",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          32,
+          "Seattle",
+          1,
+          "Alice"
+        ],
+        [
+          35,
+          "Portland",
+          2,
+          "Dave"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_star",
+    "query": "SELECT * FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          32,
+          "Seattle",
+          1,
+          "Alice"
+        ],
+        [
+          25,
+          "Portland",
+          2,
+          "Bob"
+        ],
+        [
+          28,
+          "Seattle",
+          1,
+          "Carol"
+        ],
+        [
+          35,
+          "Portland",
+          2,
+          "Dave"
+        ],
+        [
+          22,
+          "Denver",
+          1,
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_expression",
+    "query": "SELECT name, age * 2 AS double_age, age + 10 AS age_plus FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          64,
+          42
+        ],
+        [
+          "Bob",
+          50,
+          35
+        ],
+        [
+          "Carol",
+          56,
+          38
+        ],
+        [
+          "Dave",
+          70,
+          45
+        ],
+        [
+          "Eve",
+          44,
+          32
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_distinct",
+    "query": "SELECT DISTINCT city FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle"
+        ],
+        [
+          "Portland"
+        ],
+        [
+          "Denver"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_alias",
+    "query": "SELECT name AS employee_name, city AS location FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Seattle"
+        ],
+        [
+          "Bob",
+          "Portland"
+        ],
+        [
+          "Carol",
+          "Seattle"
+        ],
+        [
+          "Dave",
+          "Portland"
+        ],
+        [
+          "Eve",
+          "Denver"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "SELECT",
+    "name": "select_literal",
+    "query": "SELECT 1 + 1 AS two, 'hello' AS greeting",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          2,
+          "hello"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_in",
+    "query": "SELECT name, city FROM sanity_test WHERE city IN ('Seattle', 'Denver')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Seattle"
+        ],
+        [
+          "Carol",
+          "Seattle"
+        ],
+        [
+          "Eve",
+          "Denver"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_between",
+    "query": "SELECT name, age FROM sanity_test WHERE age BETWEEN 25 AND 32",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          32
+        ],
+        [
+          "Bob",
+          25
+        ],
+        [
+          "Carol",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_and_or",
+    "query": "SELECT name FROM sanity_test WHERE (city = 'Seattle' OR city = 'Denver') AND age > 25",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_not",
+    "query": "SELECT name FROM sanity_test WHERE NOT city = 'Portland'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "WHERE",
+    "name": "where_is_null",
+    "query": "SELECT name FROM sanity_test WHERE city IS NOT NULL",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Bob"
+        ],
+        [
+          "Carol"
+        ],
+        [
+          "Dave"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "ORDER BY",
+    "name": "order_by_limit",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age DESC LIMIT 3",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Dave",
+          35
+        ],
+        [
+          "Alice",
+          32
+        ],
+        [
+          "Carol",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "ORDER BY",
+    "name": "order_by_multi",
+    "query": "SELECT name, city, age FROM sanity_test ORDER BY city ASC, age DESC",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Eve",
+          "Denver",
+          22
+        ],
+        [
+          "Dave",
+          "Portland",
+          35
+        ],
+        [
+          "Bob",
+          "Portland",
+          25
+        ],
+        [
+          "Alice",
+          "Seattle",
+          32
+        ],
+        [
+          "Carol",
+          "Seattle",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "ORDER BY",
+    "name": "order_by_asc",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age ASC LIMIT 3",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Eve",
+          22
+        ],
+        [
+          "Bob",
+          25
+        ],
+        [
+          "Carol",
+          28
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIMIT / OFFSET",
+    "name": "limit_only",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age LIMIT 2",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Eve",
+          22
+        ],
+        [
+          "Bob",
+          25
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIMIT / OFFSET",
+    "name": "offset_skip",
+    "query": "SELECT name, age FROM sanity_test ORDER BY age LIMIT 2 OFFSET 2",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Carol",
+          28
+        ],
+        [
+          "Alice",
+          32
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIMIT / OFFSET",
+    "name": "offset_zero",
+    "query": "SELECT name FROM sanity_test ORDER BY name LIMIT 3 OFFSET 0",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Bob"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "GROUP BY",
+    "name": "group_by_sum_count",
+    "query": "SELECT city, SUM(age), COUNT(*) FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          60,
+          2
+        ],
+        [
+          "Portland",
+          60,
+          2
+        ],
+        [
+          "Denver",
+          22,
+          1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "GROUP BY",
+    "name": "group_by_max",
+    "query": "SELECT city, MAX(age) FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          32
+        ],
+        [
+          "Portland",
+          35
+        ],
+        [
+          "Denver",
+          22
+        ]
+      ]
+    }
+  },
+  {
+    "category": "GROUP BY",
+    "name": "filtered_agg",
+    "query": "SELECT city, SUM(age) FILTER(WHERE age > 25) FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          60
+        ],
+        [
+          "Portland",
+          35
+        ],
+        [
+          "Denver",
+          null
+        ]
+      ]
+    }
+  },
+  {
+    "category": "HAVING",
+    "name": "group_by_having",
+    "query": "SELECT city FROM sanity_test GROUP BY city HAVING COUNT(*) > 1",
+    "expected": {
+      "rows": [
+        [
+          "Seattle"
+        ],
+        [
+          "Portland"
+        ]
+      ],
+      "ordered": false
+    }
+  },
+  {
+    "category": "CASE",
+    "name": "case_simple",
+    "query": "SELECT name, CASE WHEN age > 30 THEN 'senior' ELSE 'junior' END AS level FROM sanity_test",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "senior"
+        ],
+        [
+          "Bob",
+          "junior"
+        ],
+        [
+          "Carol",
+          "junior"
+        ],
+        [
+          "Dave",
+          "senior"
+        ],
+        [
+          "Eve",
+          "junior"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "CASE",
+    "name": "case_in_agg",
+    "query": "SELECT city, SUM(CASE WHEN age > 30 THEN 1 ELSE 0 END) AS senior_count FROM sanity_test GROUP BY city",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          1
+        ],
+        [
+          "Portland",
+          1
+        ],
+        [
+          "Denver",
+          0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIKE / REGEXP",
+    "name": "like_prefix",
+    "query": "SELECT name FROM sanity_test WHERE city LIKE 'Sea%'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIKE / REGEXP",
+    "name": "like_contains",
+    "query": "SELECT name FROM sanity_test WHERE city LIKE '%ort%'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Bob"
+        ],
+        [
+          "Dave"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "LIKE / REGEXP",
+    "name": "like_negated",
+    "query": "SELECT name FROM sanity_test WHERE NOT city LIKE 'Sea%'",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Bob"
+        ],
+        [
+          "Dave"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Set Operations",
+    "name": "union_basic",
+    "query": "SELECT name, age FROM sanity_test WHERE city = 'Seattle' UNION SELECT name, age FROM sanity_test WHERE age > 30",
+    "expected": null
+  },
+  {
+    "category": "Set Operations",
+    "name": "union_all_basic",
+    "query": "SELECT name, age FROM sanity_test WHERE city = 'Seattle' UNION ALL SELECT name, age FROM sanity_test WHERE city = 'Portland'",
+    "expected": null
+  },
+  {
+    "category": "Set Operations",
+    "name": "minus_basic",
+    "query": "SELECT name FROM sanity_test WHERE city = 'Seattle' MINUS SELECT name FROM sanity_test WHERE age < 30",
+    "expected": null
+  },
+  {
+    "category": "JOIN",
+    "name": "inner_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Engineering"
+        ],
+        [
+          "Bob",
+          "Marketing"
+        ],
+        [
+          "Carol",
+          "Engineering"
+        ],
+        [
+          "Dave",
+          "Marketing"
+        ],
+        [
+          "Eve",
+          "Engineering"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "JOIN",
+    "name": "left_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a LEFT JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Engineering"
+        ],
+        [
+          "Bob",
+          "Marketing"
+        ],
+        [
+          "Carol",
+          "Engineering"
+        ],
+        [
+          "Dave",
+          "Marketing"
+        ],
+        [
+          "Eve",
+          "Engineering"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "JOIN",
+    "name": "right_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a RIGHT JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice",
+          "Engineering"
+        ],
+        [
+          "Bob",
+          "Marketing"
+        ],
+        [
+          "Carol",
+          "Engineering"
+        ],
+        [
+          "Dave",
+          "Marketing"
+        ],
+        [
+          "Eve",
+          "Engineering"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "JOIN",
+    "name": "cross_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a CROSS JOIN sanity_dept b LIMIT 3",
+    "expected": null
+  },
+  {
+    "category": "Subqueries",
+    "name": "subquery_where",
+    "query": "SELECT name FROM sanity_test WHERE dept_id IN (SELECT id FROM sanity_dept WHERE dept = 'Engineering')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ],
+        [
+          "Eve"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Subqueries",
+    "name": "subquery_from",
+    "query": "SELECT t.city, t.total FROM (SELECT city, COUNT(*) AS total FROM sanity_test GROUP BY city) t",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Seattle",
+          2
+        ],
+        [
+          "Portland",
+          2
+        ],
+        [
+          "Denver",
+          1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Subqueries",
+    "name": "exists_subquery",
+    "query": "SELECT name FROM sanity_test a WHERE EXISTS (SELECT 1 FROM sanity_dept b WHERE b.id = a.dept_id AND b.dept = 'Engineering')",
+    "expected": null
+  },
+  {
+    "category": "EXPLAIN",
+    "name": "explain_select",
+    "query": "SELECT name, age FROM sanity_test WHERE age > 25",
+    "expected": null
+  },
+  {
+    "category": "EXPLAIN",
+    "name": "explain_join",
+    "query": "SELECT a.name, b.dept FROM sanity_test a JOIN sanity_dept b ON a.dept_id = b.id",
+    "expected": null
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_upper",
+    "query": "SELECT UPPER('hello')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "HELLO"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_lower",
+    "query": "SELECT LOWER('WORLD')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "world"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_length",
+    "query": "SELECT LENGTH('test')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          4
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_concat",
+    "query": "SELECT CONCAT('hello', ' ', 'world')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hello world"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_substring",
+    "query": "SELECT SUBSTRING('hello', 2, 3)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "ell"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_trim",
+    "query": "SELECT TRIM('  hello  ')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hello"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_replace",
+    "query": "SELECT REPLACE('hello world', 'world', 'there')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hello there"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_left",
+    "query": "SELECT LEFT('hello', 3)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hel"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_right",
+    "query": "SELECT RIGHT('hello', 3)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "llo"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_locate",
+    "query": "SELECT LOCATE('l', 'hello')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_reverse",
+    "query": "SELECT REVERSE('hello')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "olleh"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_ltrim",
+    "query": "SELECT LTRIM('  hello')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hello"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_rtrim",
+    "query": "SELECT RTRIM('hello  ')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "hello"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_abs",
+    "query": "SELECT ABS(-5)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          5
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_ceil",
+    "query": "SELECT CEIL(3.2)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          4
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_floor",
+    "query": "SELECT FLOOR(3.8)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_round",
+    "query": "SELECT ROUND(3.56, 1)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3.6
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_mod",
+    "query": "SELECT MOD(10, 3)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_sqrt",
+    "query": "SELECT SQRT(16)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          4.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_pow",
+    "query": "SELECT POW(2, 3)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          8.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_log",
+    "query": "SELECT LOG(E())",
+    "expected": null
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_log2",
+    "query": "SELECT LOG2(8)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_log10",
+    "query": "SELECT LOG10(100)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          2.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_exp",
+    "query": "SELECT EXP(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_sign",
+    "query": "SELECT SIGN(-5)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          -1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_truncate",
+    "query": "SELECT TRUNCATE(3.789, 2)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3.78
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_rand",
+    "query": "SELECT RAND() IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_pi",
+    "query": "SELECT PI() > 3.14 AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_degrees",
+    "query": "SELECT DEGREES(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_radians",
+    "query": "SELECT RADIANS(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_now",
+    "query": "SELECT NOW() IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_curdate",
+    "query": "SELECT CURDATE() IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_curtime",
+    "query": "SELECT CURTIME() IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_date",
+    "query": "SELECT DATE('2024-03-15 10:30:00')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "2024-03-15"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_time",
+    "query": "SELECT TIME('2024-03-15 10:30:00')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "10:30:00"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_year",
+    "query": "SELECT YEAR(DATE('2024-03-15'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          2024
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_month",
+    "query": "SELECT MONTH(DATE('2024-03-15'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_day",
+    "query": "SELECT DAY(DATE('2024-03-15'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          15
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_hour",
+    "query": "SELECT HOUR(TIME('10:30:00'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          10
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_minute",
+    "query": "SELECT MINUTE(TIME('10:30:00'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          30
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_second",
+    "query": "SELECT SECOND(TIME('10:30:45'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          45
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_dayofweek",
+    "query": "SELECT DAYOFWEEK(DATE('2024-03-15'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          6
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_dayofyear",
+    "query": "SELECT DAYOFYEAR(DATE('2024-03-15'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          75
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_week",
+    "query": "SELECT WEEK(DATE('2024-03-15'))",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_quarter",
+    "query": "SELECT QUARTER(DATE('2024-03-15'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_date_format",
+    "query": "SELECT DATE_FORMAT('2024-01-15', '%Y-%m')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "2024-01"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_date_add",
+    "query": "SELECT DATE_ADD(DATE('2024-03-15'), INTERVAL 1 DAY)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_date_sub",
+    "query": "SELECT DATE_SUB(DATE('2024-03-15'), INTERVAL 1 DAY)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_datediff",
+    "query": "SELECT DATEDIFF(DATE('2024-03-15'), DATE('2024-03-10'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          5
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_timestampdiff",
+    "query": "SELECT TIMESTAMPDIFF(DAY, '2024-03-10', '2024-03-15')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          5
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_timestampadd",
+    "query": "SELECT TIMESTAMPADD(DAY, 1, '2024-03-15')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_unix_timestamp",
+    "query": "SELECT UNIX_TIMESTAMP('2024-01-01 00:00:00') > 0 AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_from_unixtime",
+    "query": "SELECT FROM_UNIXTIME(0)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_str_to_date",
+    "query": "SELECT STR_TO_DATE('2024-03-15', '%Y-%m-%d')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_adddate",
+    "query": "SELECT ADDDATE(DATE('2024-03-15'), INTERVAL 1 DAY)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_subdate",
+    "query": "SELECT SUBDATE(DATE('2024-03-15'), INTERVAL 1 DAY)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_addtime",
+    "query": "SELECT ADDTIME('2024-01-01 10:00:00', '2024-01-01 01:30:00')",
+    "expected": {
+      "rows": [
+        [
+          "2024-01-01 11:30:00"
+        ]
+      ],
+      "ordered": true
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_subtime",
+    "query": "SELECT SUBTIME('2024-01-01 10:00:00', '2024-01-01 01:30:00')",
+    "expected": {
+      "rows": [
+        [
+          "2024-01-01 08:30:00"
+        ]
+      ],
+      "ordered": true
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_period_add",
+    "query": "SELECT PERIOD_ADD(202403, 2)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_period_diff",
+    "query": "SELECT PERIOD_DIFF(202403, 202401)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_sec_to_time",
+    "query": "SELECT SEC_TO_TIME(3661)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_time_to_sec",
+    "query": "SELECT TIME_TO_SEC('01:01:01')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_to_days",
+    "query": "SELECT TO_DAYS('2024-03-15')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_from_days",
+    "query": "SELECT FROM_DAYS(739000)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_last_day",
+    "query": "SELECT LAST_DAY('2024-02-15')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_dayname",
+    "query": "SELECT DAYNAME(DATE('2024-03-15'))",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_monthname",
+    "query": "SELECT MONTHNAME(DATE('2024-03-15'))",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_yearweek",
+    "query": "SELECT YEARWEEK('2024-03-15')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_weekday",
+    "query": "SELECT WEEKDAY(DATE('2024-03-15'))",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_get_format",
+    "query": "SELECT GET_FORMAT(DATE, 'USA')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_convert_tz",
+    "query": "SELECT CONVERT_TZ('2024-03-15 10:00:00', '+00:00', '+05:30')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_utc_timestamp",
+    "query": "SELECT UTC_TIMESTAMP() IS NOT NULL AS ok",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_utc_date",
+    "query": "SELECT UTC_DATE() IS NOT NULL AS ok",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_utc_time",
+    "query": "SELECT UTC_TIME() IS NOT NULL AS ok",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_makedate",
+    "query": "SELECT MAKEDATE(2024, 75)",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "v2_maketime",
+    "query": "SELECT MAKETIME(10, 30, 0)",
+    "expected": null
+  },
+  {
+    "category": "Functions: Conditional",
+    "name": "cond_if",
+    "query": "SELECT IF(1 > 0, 'yes', 'no')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "yes"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Conditional",
+    "name": "cond_ifnull",
+    "query": "SELECT IFNULL(CAST(NULL AS STRING), 'default')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "default"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Conditional",
+    "name": "cond_nullif",
+    "query": "SELECT NULLIF(1, 1)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Conditional",
+    "name": "cond_isnull",
+    "query": "SELECT ISNULL(NULL)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Type Conversion",
+    "name": "type_cast_int",
+    "query": "SELECT CAST('123' AS INT)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          123
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Type Conversion",
+    "name": "type_cast_double",
+    "query": "SELECT CAST('3.14' AS DOUBLE)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3.14
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Type Conversion",
+    "name": "type_cast_string",
+    "query": "SELECT CAST(123 AS STRING)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "123"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Type Conversion",
+    "name": "type_cast_date",
+    "query": "SELECT CAST('2024-03-15' AS DATE)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "2024-03-15"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Type Conversion",
+    "name": "type_typeof",
+    "query": "SELECT TYPEOF(123)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "INT"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_count",
+    "query": "SELECT COUNT(*) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          5
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_sum",
+    "query": "SELECT SUM(age) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          142
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_avg",
+    "query": "SELECT AVG(age) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          28.4
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_min",
+    "query": "SELECT MIN(age) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          22
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_max",
+    "query": "SELECT MAX(age) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          35
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_count_distinct",
+    "query": "SELECT COUNT(DISTINCT city) FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_stddev_pop",
+    "query": "SELECT STDDEV_POP(age) IS NOT NULL AS ok FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_stddev_samp",
+    "query": "SELECT STDDEV_SAMP(age) IS NOT NULL AS ok FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_var_pop",
+    "query": "SELECT VAR_POP(age) IS NOT NULL AS ok FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_var_samp",
+    "query": "SELECT VAR_SAMP(age) IS NOT NULL AS ok FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_percentile_approx",
+    "query": "SELECT PERCENTILE_APPROX(age, 50) FROM sanity_test",
+    "expected": null
+  },
+  {
+    "category": "Functions: Window",
+    "name": "window_row_number",
+    "query": "SELECT name, ROW_NUMBER() OVER(ORDER BY age) AS rn FROM sanity_test ORDER BY age LIMIT 2",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "Eve",
+          1
+        ],
+        [
+          "Bob",
+          2
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Window",
+    "name": "window_rank",
+    "query": "SELECT name, RANK() OVER(ORDER BY age DESC) AS rnk FROM sanity_test LIMIT 1",
+    "expected": null
+  },
+  {
+    "category": "Functions: Window",
+    "name": "window_dense_rank",
+    "query": "SELECT name, DENSE_RANK() OVER(ORDER BY age DESC) AS dr FROM sanity_test LIMIT 1",
+    "expected": null
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_match",
+    "query": "SELECT name FROM sanity_test WHERE match(name, 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_match_phrase",
+    "query": "SELECT name FROM sanity_test WHERE match_phrase(name, 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_multi_match",
+    "query": "SELECT name FROM sanity_test WHERE multi_match(['name', 'city'], 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_query_string",
+    "query": "SELECT name FROM sanity_test WHERE query_string(['name'], 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_simple_query_string",
+    "query": "SELECT name FROM sanity_test WHERE simple_query_string(['name'], 'Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_match_bool_prefix",
+    "query": "SELECT name FROM sanity_test WHERE match_bool_prefix(name, 'Ali')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_match_phrase_prefix",
+    "query": "SELECT name FROM sanity_test WHERE match_phrase_prefix(name, 'Ali')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_wildcard_query",
+    "query": "SELECT name FROM sanity_test WHERE wildcard_query(city, 'Sea*')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ],
+        [
+          "Carol"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Relevance",
+    "name": "relevance_query",
+    "query": "SELECT name FROM sanity_test WHERE query('name:Alice')",
+    "expected": {
+      "ordered": false,
+      "rows": [
+        [
+          "Alice"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_ascii",
+    "query": "SELECT ASCII('A')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          65
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_concat_ws",
+    "query": "SELECT CONCAT_WS(',', 'a', 'b', 'c')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "a,b,c"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_strcmp",
+    "query": "SELECT STRCMP('a', 'b')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          -1
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_position",
+    "query": "SELECT POSITION('l' IN 'hello')",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: String",
+    "name": "string_substr",
+    "query": "SELECT SUBSTR('hello', 2, 3)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          "ell"
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_ln",
+    "query": "SELECT LN(1)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_cbrt",
+    "query": "SELECT CBRT(27)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          3.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_rint",
+    "query": "SELECT RINT(3.5)",
+    "expected": null
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_atan",
+    "query": "SELECT ATAN(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_atan2",
+    "query": "SELECT ATAN2(0, 1)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_cos",
+    "query": "SELECT COS(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_sin",
+    "query": "SELECT SIN(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_tan",
+    "query": "SELECT TAN(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_cot",
+    "query": "SELECT COT(1) IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_cosh",
+    "query": "SELECT COSH(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_sinh",
+    "query": "SELECT SINH(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_conv",
+    "query": "SELECT CONV(10, 10, 2)",
+    "expected": null
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_crc32",
+    "query": "SELECT CRC32('hello') IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_e",
+    "query": "SELECT E() > 2.71 AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Math",
+    "name": "math_expm1",
+    "query": "SELECT EXPM1(0)",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_microsecond",
+    "query": "SELECT MICROSECOND(TIME('10:30:00.123456'))",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_sysdate",
+    "query": "SELECT SYSDATE() IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_extract",
+    "query": "SELECT EXTRACT(YEAR FROM DATE('2024-03-15'))",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          2024
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_timediff",
+    "query": "SELECT TIMEDIFF('10:00:00', '08:30:00')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_to_seconds",
+    "query": "SELECT TO_SECONDS('2024-03-15')",
+    "expected": null
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_timestamp",
+    "query": "SELECT TIMESTAMP('2024-03-15 10:30:00') IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_time_format",
+    "query": "SELECT TIME_FORMAT('2024-01-01 10:30:00', '%H:%i')",
+    "expected": {
+      "rows": [
+        [
+          "10:30"
+        ]
+      ],
+      "ordered": true
+    }
+  },
+  {
+    "category": "Functions: DateTime",
+    "name": "datetime_datetime",
+    "query": "SELECT DATETIME('2024-03-15 10:30:00') IS NOT NULL AS ok",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_variance",
+    "query": "SELECT VARIANCE(age) IS NOT NULL AS ok FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_stddev",
+    "query": "SELECT STDDEV(age) IS NOT NULL AS ok FROM sanity_test",
+    "expected": {
+      "ordered": true,
+      "rows": [
+        [
+          true
+        ]
+      ]
+    }
+  },
+  {
+    "category": "Functions: Aggregate",
+    "name": "agg_percentile",
+    "query": "SELECT PERCENTILE(age, 50) FROM sanity_test",
+    "expected": null
+  },
+  {
+    "category": "SHOW / DESCRIBE",
+    "name": "show_tables",
+    "query": "SHOW TABLES LIKE 'sanity%'",
+    "expected": null
+  },
+  {
+    "category": "SHOW / DESCRIBE",
+    "name": "describe_table",
+    "query": "DESCRIBE TABLES LIKE 'sanity_test' COLUMNS LIKE '%'",
+    "expected": null
+  }
+]
