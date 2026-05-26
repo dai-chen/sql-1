@@ -9,9 +9,15 @@ import static org.opensearch.sql.ast.dsl.AstDSL.existsSubquery;
 import static org.opensearch.sql.ast.dsl.AstDSL.inSubquery;
 import static org.opensearch.sql.ast.dsl.AstDSL.join;
 
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.opensearch.sql.ast.expression.DataType;
+import org.opensearch.sql.ast.expression.Function;
+import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.Not;
+import org.opensearch.sql.ast.expression.UnresolvedArgument;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
@@ -22,6 +28,7 @@ import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.ExistsSubqueryExpressionAtomContext;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.InSubqueryPredicateContext;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.JoinClauseContext;
+import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser.SingleFieldRelevanceFunctionContext;
 import org.opensearch.sql.sql.parser.AstBuilder;
 import org.opensearch.sql.sql.parser.AstExpressionBuilder;
 import org.opensearch.sql.sql.parser.AstStatementBuilder;
@@ -87,6 +94,62 @@ public class SqlV2QueryParser implements UnifiedQueryParser<UnresolvedPlan> {
      * enclosing {@code this} reference is not available during {@code super()} construction.
      */
     private class ExtendedAstExpressionBuilder extends AstExpressionBuilder {
+
+      @Override
+      public UnresolvedExpression visitSingleFieldRelevanceFunction(
+          SingleFieldRelevanceFunctionContext ctx) {
+        UnresolvedExpression result = super.visitSingleFieldRelevanceFunction(ctx);
+        String funcName =
+            ctx.singleFieldRelevanceFunctionName().getText().toLowerCase(Locale.ROOT);
+        if ("wildcard_query".equals(funcName) || "wildcardquery".equals(funcName)) {
+          return convertWildcardPattern((Function) result);
+        }
+        return result;
+      }
+
+      /** Convert SQL wildcards (%/_) to OpenSearch wildcards ( * /?) in wildcard_query pattern. */
+      private Function convertWildcardPattern(Function func) {
+        List<UnresolvedExpression> args = func.getFuncArgs();
+        for (int i = 0; i < args.size(); i++) {
+          if (args.get(i) instanceof UnresolvedArgument arg && "query".equals(arg.getArgName())) {
+            if (arg.getValue() instanceof Literal lit && lit.getValue() instanceof String query) {
+              String converted = sqlWildcardToLucene(query);
+              if (!converted.equals(query)) {
+                List<UnresolvedExpression> newArgs = new java.util.ArrayList<>(args);
+                newArgs.set(
+                    i,
+                    new UnresolvedArgument(
+                        "query", new Literal(converted, DataType.STRING)));
+                return new Function(func.getFuncName(), newArgs);
+              }
+            }
+          }
+        }
+        return func;
+      }
+
+      /** Converts SQL wildcards (% → *, _ → ?) respecting backslash escaping. */
+      private String sqlWildcardToLucene(String text) {
+        StringBuilder sb = new StringBuilder(text.length());
+        boolean escaped = false;
+        for (char c : text.toCharArray()) {
+          if (c == '\\') {
+            escaped = true;
+            sb.append(c);
+          } else if (c == '%' && !escaped) {
+            sb.append('*');
+          } else if (c == '_' && !escaped) {
+            sb.append('?');
+          } else {
+            if (escaped && (c == '%' || c == '_')) {
+              sb.deleteCharAt(sb.length() - 1); // remove escape char
+            }
+            sb.append(c);
+            escaped = false;
+          }
+        }
+        return sb.toString();
+      }
 
       @Override
       public UnresolvedExpression visitInSubqueryPredicate(InSubqueryPredicateContext ctx) {

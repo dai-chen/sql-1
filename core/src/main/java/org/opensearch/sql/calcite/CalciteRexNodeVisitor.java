@@ -662,6 +662,9 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
               if (opt.getSortOrder() == SortOrder.DESC) {
                 field = b.desc(field);
               }
+              if (opt.getNullOrder() == null) {
+                return field;
+              }
               return switch (opt.getNullOrder()) {
                 // Unspecified NULLS defaults to NULLS FIRST, matching top-level ORDER BY.
                 case null -> b.nullsFirst(field);
