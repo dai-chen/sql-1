@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.function.Function;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -285,13 +286,37 @@ public class MatcherUtils {
       @Override
       protected boolean matchesSafely(JSONObject jsonObject) {
         String actualName = (String) jsonObject.query("/name");
-        String actualAlias = (String) jsonObject.query("/alias");
         String actualType = (String) jsonObject.query("/type");
-        return expectedName.equals(actualName)
-            && (Strings.isNullOrEmpty(expectedAlias) || expectedAlias.equals(actualAlias))
-            && expectedType.equals(actualType);
+
+        // AE promotes alias to name (SQL-standard). Accept if actual name matches
+        // either the expected name or expected alias.
+        boolean nameMatches =
+            expectedName.equals(actualName)
+                || (!Strings.isNullOrEmpty(expectedAlias) && expectedAlias.equals(actualName));
+
+        boolean typeMatches =
+            expectedType.equals(actualType) || isCompatibleType(expectedType, actualType);
+
+        return nameMatches && typeMatches;
       }
     };
+  }
+
+  /**
+   * Checks if two type names are compatible across V2 and AE engines. AE unifies keyword/text to
+   * string (Calcite VARCHAR).
+   */
+  private static final Set<String> NUMERIC_TYPES =
+      Set.of("integer", "long", "float", "double");
+
+  private static final Set<String> STRING_TYPES = Set.of("keyword", "text", "string");
+
+  private static boolean isCompatibleType(String expected, String actual) {
+    if (expected == null || actual == null) return false;
+    String e = expected.toLowerCase();
+    String a = actual.toLowerCase();
+    return (NUMERIC_TYPES.contains(e) && NUMERIC_TYPES.contains(a))
+        || (STRING_TYPES.contains(e) && STRING_TYPES.contains(a));
   }
 
   public static TypeSafeMatcher<JSONArray> rows(Object... expectedObjects) {

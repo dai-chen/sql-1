@@ -46,12 +46,10 @@ public class ConditionalIT extends SQLIntegTestCase {
   public void ifnullShouldPassJDBC() throws IOException {
     JSONObject response =
         executeJdbcRequest(
-            "SELECT IFNULL(lastname, 'unknown') AS name FROM "
+            "SELECT IFNULL(lastname, 'unknown') FROM "
                 + TEST_INDEX_ACCOUNT
-                + " GROUP BY name");
-    assertEquals("IFNULL(lastname, 'unknown')", response.query("/schema/0/name"));
-    assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+                + " GROUP BY 1");
+    verifySchema(response, schema("IFNULL(lastname, 'unknown')", null, "keyword"));
   }
 
   @Test
@@ -109,9 +107,7 @@ public class ConditionalIT extends SQLIntegTestCase {
   public void nullifShouldPassJDBC() throws IOException {
     JSONObject response =
         executeJdbcRequest("SELECT NULLIF(lastname, 'unknown') AS name FROM " + TEST_INDEX_ACCOUNT);
-    assertEquals("NULLIF(lastname, 'unknown')", response.query("/schema/0/name"));
-    assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    verifySchema(response, schema("NULLIF(lastname, 'unknown')", "name", "keyword"));
   }
 
   @Test
@@ -152,9 +148,7 @@ public class ConditionalIT extends SQLIntegTestCase {
   public void isnullShouldPassJDBC() throws IOException {
     JSONObject response =
         executeJdbcRequest("SELECT ISNULL(lastname) AS name FROM " + TEST_INDEX_ACCOUNT);
-    assertEquals("ISNULL(lastname)", response.query("/schema/0/name"));
-    assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("boolean", response.query("/schema/0/type"));
+    verifySchema(response, schema("ISNULL(lastname)", "name", "boolean"));
   }
 
   @Ignore(
@@ -208,9 +202,7 @@ public class ConditionalIT extends SQLIntegTestCase {
   public void ifShouldPassJDBC() throws IOException {
     JSONObject response =
         executeJdbcRequest("SELECT IF(2 > 0, 'hello', 'world') AS name FROM " + TEST_INDEX_ACCOUNT);
-    assertEquals("IF(2 > 0, 'hello', 'world')", response.query("/schema/0/name"));
-    assertEquals("name", response.query("/schema/0/alias"));
-    assertEquals("keyword", response.query("/schema/0/type"));
+    verifySchema(response, schema("IF(2 > 0, 'hello', 'world')", "name", "keyword"));
   }
 
   @Test

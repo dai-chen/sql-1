@@ -37,6 +37,14 @@ if ! grep -q "transport.stream.enabled" "$RUN_GRADLE"; then
   echo "[patch] Done. Revert later with: git checkout gradle/run.gradle"
 fi
 
+# Patch run.gradle to set cluster-level pluggable dataformat routing
+# This makes isAnalyticsIndex() return true for ALL indices without needing per-index settings
+if ! grep -q "cluster.pluggable.dataformat" "$RUN_GRADLE"; then
+  echo "[patch] Adding cluster.pluggable.dataformat=composite to run.gradle..."
+  sed -i "/setting 'indices.queries.cache.size', '0%'/a\\          setting 'cluster.pluggable.dataformat', 'composite'" "$RUN_GRADLE"
+  echo "[patch] Done."
+fi
+
 exec env JAVA_HOME="$JAVA25" ./gradlew run \
   -Dtests.jvm.argline="-da -dsa" \
   -Dsandbox.enabled=true \
