@@ -563,6 +563,12 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitFunction(Function node, CalcitePlanContext context) {
+    // Post-aggregate, a GROUP BY function expression is a materialized output column; reference it
+    // instead of recomputing from base fields the aggregation removed.
+    Integer groupKeyIndex = context.getGroupKeyOutputIndex().get(node);
+    if (groupKeyIndex != null) {
+      return context.relBuilder.field(groupKeyIndex);
+    }
     List<UnresolvedExpression> args = node.getFuncArgs();
     List<RexNode> arguments = new ArrayList<>();
 
