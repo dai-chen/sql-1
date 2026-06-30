@@ -69,6 +69,45 @@ import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.exception.SemanticCheckException;
 
 public class AstExpressionBuilderTest extends AstBuilderTest {
+
+  @Test
+  public void deeplyNestedOrChainIsRejectedInsteadOfCrashing() {
+    assertThrows(SyntaxCheckException.class, () -> plan("source=t | where " + chain(" or ", 1024)));
+  }
+
+  @Test
+  public void deeplyNestedAndChainIsRejectedInsteadOfCrashing() {
+    assertThrows(
+        SyntaxCheckException.class, () -> plan("source=t | where " + chain(" and ", 1024)));
+  }
+
+  @Test
+  public void deeplyNestedMixedAndOrChainIsRejectedInsteadOfCrashing() {
+    assertThrows(SyntaxCheckException.class, () -> plan("source=t | where " + mixedChain(1024)));
+  }
+
+  @Test
+  public void shallowChainIsAccepted() {
+    plan("source=t | where " + chain(" or ", 50));
+  }
+
+  private String chain(String op, int terms) {
+    StringBuilder sb = new StringBuilder("a = 1");
+    for (int i = 2; i <= terms; i++) {
+      sb.append(op).append("a = ").append(i);
+    }
+    return sb.toString();
+  }
+
+  private String mixedChain(int terms) {
+    StringBuilder sb = new StringBuilder("a = 1");
+    for (int i = 2; i <= terms; i++) {
+      String op = (i % 2 == 0) ? " and " : " or ";
+      sb.insert(0, "(").append(op).append("a = ").append(i).append(")");
+    }
+    return sb.toString();
+  }
+
   @Test
   public void testLogicalNotExpr() {
     assertEqual(

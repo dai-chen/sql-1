@@ -36,6 +36,18 @@ public class QueryValidationIT extends SQLIntegTestCase {
     loadIndex(Index.ACCOUNT);
   }
 
+  @Test
+  public void testDeeplyNestedPredicateIsRejectedInsteadOfCrashingNode() throws IOException {
+    StringBuilder predicate = new StringBuilder("age = 1");
+    for (int i = 2; i <= 2000; i++) {
+      predicate.append(" OR age = ").append(i);
+    }
+    expectResponseException()
+        .hasStatusCode(BAD_REQUEST)
+        .containsMessage("Expression nesting depth exceeds the maximum allowed")
+        .whenExecute("SELECT * FROM opensearch-sql_test_index_account WHERE " + predicate);
+  }
+
   @Ignore(
       "Will add this validation in analyzer later. This test should be enabled once "
           + "https://github.com/opensearch-project/sql/issues/910 has been resolved")

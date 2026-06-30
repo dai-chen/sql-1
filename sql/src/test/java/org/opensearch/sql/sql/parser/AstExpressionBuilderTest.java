@@ -6,6 +6,7 @@
 package org.opensearch.sql.sql.parser;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.opensearch.sql.ast.dsl.AstDSL.aggregate;
 import static org.opensearch.sql.ast.dsl.AstDSL.and;
 import static org.opensearch.sql.ast.dsl.AstDSL.between;
@@ -49,6 +50,7 @@ import org.opensearch.sql.ast.expression.WindowFunction;
 import org.opensearch.sql.ast.tree.Sort.SortOption;
 import org.opensearch.sql.common.antlr.CaseInsensitiveCharStream;
 import org.opensearch.sql.common.antlr.SyntaxAnalysisErrorListener;
+import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLLexer;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser;
 
@@ -825,6 +827,43 @@ class AstExpressionBuilderTest {
             AstDSL.function("abs", AstDSL.intLiteral(20)),
             AstDSL.function("abs", AstDSL.intLiteral(30))),
         buildExprAst("age in (abs(20), abs(30))"));
+  }
+
+  @Test
+  public void deeplyNestedOrChainIsRejectedInsteadOfCrashing() {
+    assertThrows(SyntaxCheckException.class, () -> buildExprAst(chain(" or ", 1024)));
+  }
+
+  @Test
+  public void deeplyNestedAndChainIsRejectedInsteadOfCrashing() {
+    assertThrows(SyntaxCheckException.class, () -> buildExprAst(chain(" and ", 1024)));
+  }
+
+  @Test
+  public void deeplyNestedMixedAndOrChainIsRejectedInsteadOfCrashing() {
+    assertThrows(SyntaxCheckException.class, () -> buildExprAst(mixedChain(1024)));
+  }
+
+  @Test
+  public void shallowChainIsAccepted() {
+    assertEquals(buildExprAst(chain(" or ", 50)), buildExprAst(chain(" or ", 50)));
+  }
+
+  private String chain(String op, int terms) {
+    StringBuilder sb = new StringBuilder("a = 1");
+    for (int i = 2; i <= terms; i++) {
+      sb.append(op).append("a = ").append(i);
+    }
+    return sb.toString();
+  }
+
+  private String mixedChain(int terms) {
+    StringBuilder sb = new StringBuilder("a = 1");
+    for (int i = 2; i <= terms; i++) {
+      String op = (i % 2 == 0) ? " and " : " or ";
+      sb.insert(0, "(").append(op).append("a = ").append(i).append(")");
+    }
+    return sb.toString();
   }
 
   private Node buildExprAst(String expr) {
