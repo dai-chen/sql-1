@@ -21,6 +21,7 @@ import org.opensearch.client.Request;
 import org.opensearch.client.RequestOptions;
 import org.opensearch.client.ResponseException;
 import org.opensearch.core.rest.RestStatus;
+import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 
 /**
@@ -38,14 +39,24 @@ public class QueryValidationIT extends SQLIntegTestCase {
 
   @Test
   public void testDeeplyNestedPredicateIsRejectedInsteadOfCrashingNode() throws IOException {
-    StringBuilder predicate = new StringBuilder("age = 1");
-    for (int i = 2; i <= 2000; i++) {
-      predicate.append(" OR age = ").append(i);
+    // Lower the limit so a small, safe-to-parse query triggers the guard (a query large enough
+    // to exhaust the default limit could overflow the ANTLR parser itself before the guard runs).
+    updateClusterSettings(
+        new ClusterSetting(TRANSIENT, Settings.Key.QUERY_MAX_EXPRESSION_DEPTH.getKeyValue(), "20"));
+    try {
+      StringBuilder predicate = new StringBuilder("age = 1");
+      for (int i = 2; i <= 30; i++) {
+        predicate.append(" OR age = ").append(i);
+      }
+      expectResponseException()
+          .hasStatusCode(BAD_REQUEST)
+          .containsMessage("Expression nesting depth exceeds the maximum allowed")
+          .whenExecute("SELECT * FROM opensearch-sql_test_index_account WHERE " + predicate);
+    } finally {
+      updateClusterSettings(
+          new ClusterSetting(
+              TRANSIENT, Settings.Key.QUERY_MAX_EXPRESSION_DEPTH.getKeyValue(), null));
     }
-    expectResponseException()
-        .hasStatusCode(BAD_REQUEST)
-        .containsMessage("Expression nesting depth exceeds the maximum allowed")
-        .whenExecute("SELECT * FROM opensearch-sql_test_index_account WHERE " + predicate);
   }
 
   @Ignore(

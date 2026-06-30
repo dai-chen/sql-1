@@ -104,7 +104,15 @@ import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParserBaseVisitor;
 /** Expression builder to parse text to expression in AST. */
 public class AstExpressionBuilder extends OpenSearchSQLParserBaseVisitor<UnresolvedExpression> {
 
-  private final AstBuildGuard guard = new AstBuildGuard();
+  private final AstBuildGuard guard;
+
+  public AstExpressionBuilder() {
+    this(new AstBuildGuard());
+  }
+
+  public AstExpressionBuilder(AstBuildGuard guard) {
+    this.guard = guard;
+  }
 
   @Override
   public UnresolvedExpression visit(ParseTree tree) {

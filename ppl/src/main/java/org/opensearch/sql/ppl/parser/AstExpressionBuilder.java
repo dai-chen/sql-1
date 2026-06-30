@@ -97,10 +97,15 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
 
   private final AstBuilder astBuilder;
 
-  private final AstBuildGuard guard = new AstBuildGuard();
+  private final AstBuildGuard guard;
 
   public AstExpressionBuilder(AstBuilder astBuilder) {
+    this(astBuilder, new AstBuildGuard());
+  }
+
+  public AstExpressionBuilder(AstBuilder astBuilder, AstBuildGuard guard) {
     this.astBuilder = astBuilder;
+    this.guard = guard;
   }
 
   @Override

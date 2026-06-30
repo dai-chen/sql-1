@@ -56,6 +56,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
+import org.antlr.v4.runtime.CommonTokenStream;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.opensearch.sql.ast.Node;
@@ -65,30 +66,36 @@ import org.opensearch.sql.ast.expression.RelevanceFieldList;
 import org.opensearch.sql.ast.expression.SpanUnit;
 import org.opensearch.sql.ast.tree.Chart;
 import org.opensearch.sql.calcite.plan.OpenSearchConstants;
+import org.opensearch.sql.common.antlr.AstBuildGuard;
+import org.opensearch.sql.common.antlr.CaseInsensitiveCharStream;
+import org.opensearch.sql.common.antlr.SyntaxAnalysisErrorListener;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.exception.SemanticCheckException;
+import org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLLexer;
+import org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser;
 
 public class AstExpressionBuilderTest extends AstBuilderTest {
 
   @Test
-  public void deeplyNestedOrChainIsRejectedInsteadOfCrashing() {
-    assertThrows(SyntaxCheckException.class, () -> plan("source=t | where " + chain(" or ", 1024)));
+  public void deeplyNestedExpressionShouldBeRejected() {
+    assertThrows(IllegalArgumentException.class, () -> parseWithGuard(chain(" or ", 30), 20));
+    assertThrows(IllegalArgumentException.class, () -> parseWithGuard(chain(" and ", 30), 20));
+    assertThrows(IllegalArgumentException.class, () -> parseWithGuard(mixedChain(30), 20));
   }
 
   @Test
-  public void deeplyNestedAndChainIsRejectedInsteadOfCrashing() {
-    assertThrows(
-        SyntaxCheckException.class, () -> plan("source=t | where " + chain(" and ", 1024)));
+  public void shallowChainWithinLimitIsAccepted() {
+    parseWithGuard(chain(" or ", 5), 20);
   }
 
-  @Test
-  public void deeplyNestedMixedAndOrChainIsRejectedInsteadOfCrashing() {
-    assertThrows(SyntaxCheckException.class, () -> plan("source=t | where " + mixedChain(1024)));
-  }
-
-  @Test
-  public void shallowChainIsAccepted() {
-    plan("source=t | where " + chain(" or ", 50));
+  private void parseWithGuard(String expr, int maxDepth) {
+    OpenSearchPPLParser parser =
+        new OpenSearchPPLParser(
+            new CommonTokenStream(new OpenSearchPPLLexer(new CaseInsensitiveCharStream(expr))));
+    parser.addErrorListener(new SyntaxAnalysisErrorListener());
+    parser
+        .logicalExpression()
+        .accept(new AstExpressionBuilder(new AstBuilder(expr), new AstBuildGuard(maxDepth)));
   }
 
   private String chain(String op, int terms) {

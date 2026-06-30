@@ -7,23 +7,22 @@ package org.opensearch.sql.common.antlr;
 
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
+import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.common.utils.StringUtils;
 
 /**
- * Guardrails applied while building the AST from the parse tree, protecting the node from
- * pathological queries. Currently enforces a maximum nesting depth so a deeply nested expression
- * (e.g. thousands of chained OR/AND terms) is rejected with a {@link SyntaxCheckException} instead
- * of crashing the node with a StackOverflowError during AST construction. More guardrails can be
- * added here in future.
+ * Guards AST construction against pathological queries by bounding the depth of parse-tree visitor
+ * recursion, rejecting over-nested expressions with an {@link IllegalArgumentException} instead of
+ * letting a StackOverflowError crash the node.
  *
- * <p>Holds per-traversal state, so an instance must not be shared across threads; the AST builders
- * that use it are created per parse.
+ * <p>Holds per-traversal state, so an instance must not be shared across threads.
  */
 @RequiredArgsConstructor
 public final class AstBuildGuard {
 
   public static final int DEFAULT_MAX_DEPTH = 1000;
 
+  /** Maximum nesting depth allowed; {@code 0} or less means unlimited. */
   private final int maxDepth;
 
   /** Live nesting depth of the in-progress traversal; resets to 0 between top-level visits. */
@@ -33,16 +32,24 @@ public final class AstBuildGuard {
     this(DEFAULT_MAX_DEPTH);
   }
 
+  /** Builds a guard from the configured {@code plugins.query.expression_max_depth} setting. */
+  public static AstBuildGuard fromSettings(Settings settings) {
+    Integer configured =
+        settings == null ? null : settings.getSettingValue(Settings.Key.QUERY_MAX_EXPRESSION_DEPTH);
+    return new AstBuildGuard(configured == null ? DEFAULT_MAX_DEPTH : configured);
+  }
+
   /**
    * Runs a single AST-build descent under the configured guardrails.
    *
    * @param visit the visitor descent to execute
    * @return the result of {@code visit}
-   * @throws SyntaxCheckException if the nesting depth would exceed the configured maximum
+   * @throws IllegalArgumentException if a positive maximum depth is configured and would be
+   *     exceeded
    */
   public <T> T enforce(Supplier<T> visit) {
-    if (depth >= maxDepth) {
-      throw new SyntaxCheckException(
+    if (maxDepth > 0 && depth >= maxDepth) {
+      throw new IllegalArgumentException(
           StringUtils.format(
               "Expression nesting depth exceeds the maximum allowed [%d]; simplify the query or"
                   + " reduce the number of chained conditions.",

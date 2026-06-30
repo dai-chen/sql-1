@@ -316,6 +316,8 @@ public class RestUnifiedQueryAction {
         builder, org.opensearch.sql.common.setting.Settings.Key.PPL_REX_MAX_MATCH_LIMIT);
     forwardClusterSetting(
         builder, org.opensearch.sql.common.setting.Settings.Key.PPL_SYNTAX_LEGACY_PREFERRED);
+    forwardClusterSetting(
+        builder, org.opensearch.sql.common.setting.Settings.Key.QUERY_MAX_EXPRESSION_DEPTH);
     return builder;
   }
 

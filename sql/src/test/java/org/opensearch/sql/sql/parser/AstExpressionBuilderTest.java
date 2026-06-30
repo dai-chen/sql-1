@@ -48,9 +48,9 @@ import org.opensearch.sql.ast.expression.RelevanceFieldList;
 import org.opensearch.sql.ast.expression.WindowFrame;
 import org.opensearch.sql.ast.expression.WindowFunction;
 import org.opensearch.sql.ast.tree.Sort.SortOption;
+import org.opensearch.sql.common.antlr.AstBuildGuard;
 import org.opensearch.sql.common.antlr.CaseInsensitiveCharStream;
 import org.opensearch.sql.common.antlr.SyntaxAnalysisErrorListener;
-import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLLexer;
 import org.opensearch.sql.sql.antlr.parser.OpenSearchSQLParser;
 
@@ -830,23 +830,17 @@ class AstExpressionBuilderTest {
   }
 
   @Test
-  public void deeplyNestedOrChainIsRejectedInsteadOfCrashing() {
-    assertThrows(SyntaxCheckException.class, () -> buildExprAst(chain(" or ", 1024)));
+  public void deeplyNestedExpressionShouldBeRejected() {
+    AstExpressionBuilder guarded = new AstExpressionBuilder(new AstBuildGuard(20));
+    assertThrows(IllegalArgumentException.class, () -> buildExprAst(chain(" or ", 30), guarded));
+    assertThrows(IllegalArgumentException.class, () -> buildExprAst(chain(" and ", 30), guarded));
+    assertThrows(IllegalArgumentException.class, () -> buildExprAst(mixedChain(30), guarded));
   }
 
   @Test
-  public void deeplyNestedAndChainIsRejectedInsteadOfCrashing() {
-    assertThrows(SyntaxCheckException.class, () -> buildExprAst(chain(" and ", 1024)));
-  }
-
-  @Test
-  public void deeplyNestedMixedAndOrChainIsRejectedInsteadOfCrashing() {
-    assertThrows(SyntaxCheckException.class, () -> buildExprAst(mixedChain(1024)));
-  }
-
-  @Test
-  public void shallowChainIsAccepted() {
-    assertEquals(buildExprAst(chain(" or ", 50)), buildExprAst(chain(" or ", 50)));
+  public void shallowChainWithinLimitIsAccepted() {
+    AstExpressionBuilder guarded = new AstExpressionBuilder(new AstBuildGuard(20));
+    assertEquals(buildExprAst(chain(" or ", 5), guarded), buildExprAst(chain(" or ", 5), guarded));
   }
 
   private String chain(String op, int terms) {
@@ -867,9 +861,13 @@ class AstExpressionBuilderTest {
   }
 
   private Node buildExprAst(String expr) {
+    return buildExprAst(expr, astExprBuilder);
+  }
+
+  private Node buildExprAst(String expr, AstExpressionBuilder builder) {
     OpenSearchSQLLexer lexer = new OpenSearchSQLLexer(new CaseInsensitiveCharStream(expr));
     OpenSearchSQLParser parser = new OpenSearchSQLParser(new CommonTokenStream(lexer));
     parser.addErrorListener(new SyntaxAnalysisErrorListener());
-    return parser.expression().accept(astExprBuilder);
+    return parser.expression().accept(builder);
   }
 }
