@@ -27,6 +27,8 @@ OpenSearch SQL enables you to extract insights out of OpenSearch using the famil
 
   - `Comments <general/comments.rst>`_
 
+  - `SQL Compatibility <general/sql-compatibility.rst>`_
+
 * **Data Query Language**
 
   - `Expressions <dql/expressions.rst>`_
