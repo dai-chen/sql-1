@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.plugin.config;
 
+import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.opensearch.common.inject.AbstractModule;
@@ -25,6 +26,7 @@ import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
 import org.opensearch.sql.monitor.ResourceMonitor;
 import org.opensearch.sql.opensearch.client.OpenSearchClient;
 import org.opensearch.sql.opensearch.client.OpenSearchNodeClient;
+import org.opensearch.sql.opensearch.calciteexec.CalciteExecEngine;
 import org.opensearch.sql.opensearch.executor.OpenSearchExecutionEngine;
 import org.opensearch.sql.opensearch.executor.OpenSearchQueryManager;
 import org.opensearch.sql.opensearch.executor.ThreadPoolExecutionDispatcher;
@@ -74,10 +76,12 @@ public class OpenSearchPluginModule extends AbstractModule {
       OpenSearchClient client, ExecutionProtector protector, PlanSerializer planSerializer) {
     ExecutionEngine defaultEngine =
         new OpenSearchExecutionEngine(client, protector, planSerializer);
-    if (executionEngineExtensions.isEmpty()) {
-      return defaultEngine;
-    }
-    return new DelegatingExecutionEngine(defaultEngine, executionEngineExtensions);
+    // Register CalciteExecEngine for distributed execution of window-family PPL operators
+    CalciteExecEngine calciteExecEngine = new CalciteExecEngine(client);
+    List<ExecutionEngine> allExtensions = new ArrayList<>();
+    allExtensions.add(calciteExecEngine);
+    allExtensions.addAll(executionEngineExtensions);
+    return new DelegatingExecutionEngine(defaultEngine, allExtensions);
   }
 
   @Provides

@@ -20,11 +20,15 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
 
   private final List<String> fields;
   private final boolean probe;
+  private final String plan;
+  private final List<String> schema;
 
   CalciteExecAggregatorFactory(
       String name,
       List<String> fields,
       boolean probe,
+      String plan,
+      List<String> schema,
       QueryShardContext queryShardContext,
       AggregatorFactory parent,
       AggregatorFactories.Builder subFactories,
@@ -33,6 +37,8 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
     super(name, queryShardContext, parent, subFactories, metadata);
     this.fields = fields;
     this.probe = probe;
+    this.plan = plan;
+    this.schema = schema;
   }
 
   @Override
@@ -42,6 +48,6 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
       CardinalityUpperBound cardinality,
       Map<String, Object> metadata
   ) throws IOException {
-    return new CalciteExecAggregator(name, fields, probe, searchContext, parent, metadata);
+    return new CalciteExecAggregator(name, fields, probe, plan, schema, searchContext, parent, metadata);
   }
 }

@@ -30,6 +30,8 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
 
   private List<String> fields;
   private boolean probe;
+  private String plan;
+  private List<String> schema;
 
   private static final ObjectParser<CalciteExecAggregationBuilder, Void> INTERNAL_PARSER =
       new ObjectParser<>(NAME);
@@ -37,6 +39,8 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
   static {
     INTERNAL_PARSER.declareStringArray(CalciteExecAggregationBuilder::setFields, new ParseField("fields"));
     INTERNAL_PARSER.declareBoolean(CalciteExecAggregationBuilder::setProbe, new ParseField("probe"));
+    INTERNAL_PARSER.declareString(CalciteExecAggregationBuilder::setPlan, new ParseField("plan"));
+    INTERNAL_PARSER.declareStringArray(CalciteExecAggregationBuilder::setSchema, new ParseField("schema"));
   }
 
   public static final ContextParser<String, CalciteExecAggregationBuilder> PARSER = (parser, aggName) -> {
@@ -49,12 +53,16 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
     super(name);
     this.fields = List.of();
     this.probe = true;
+    this.plan = null;
+    this.schema = List.of();
   }
 
   public CalciteExecAggregationBuilder(StreamInput in) throws IOException {
     super(in);
     this.fields = in.readStringList();
     this.probe = in.readBoolean();
+    this.plan = in.readOptionalString();
+    this.schema = in.readStringList();
   }
 
   protected CalciteExecAggregationBuilder(
@@ -65,6 +73,8 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
     super(clone, factoriesBuilder, metadata);
     this.fields = clone.fields;
     this.probe = clone.probe;
+    this.plan = clone.plan;
+    this.schema = clone.schema;
   }
 
   @Override
@@ -76,6 +86,8 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
   protected void doWriteTo(StreamOutput out) throws IOException {
     out.writeStringCollection(fields);
     out.writeBoolean(probe);
+    out.writeOptionalString(plan);
+    out.writeStringCollection(schema);
   }
 
   @Override
@@ -84,7 +96,7 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
       AggregatorFactory parent,
       AggregatorFactories.Builder subfactoriesBuilder
   ) throws IOException {
-    return new CalciteExecAggregatorFactory(name, fields, probe, queryShardContext, parent, subfactoriesBuilder, metadata);
+    return new CalciteExecAggregatorFactory(name, fields, probe, plan, schema, queryShardContext, parent, subfactoriesBuilder, metadata);
   }
 
   @Override
@@ -92,6 +104,12 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
     builder.startObject();
     builder.field("fields", fields);
     builder.field("probe", probe);
+    if (plan != null) {
+      builder.field("plan", plan);
+    }
+    if (!schema.isEmpty()) {
+      builder.field("schema", schema);
+    }
     builder.endObject();
     return builder;
   }
@@ -122,9 +140,25 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
     return probe;
   }
 
+  public void setPlan(String plan) {
+    this.plan = plan;
+  }
+
+  public String getPlan() {
+    return plan;
+  }
+
+  public void setSchema(List<String> schema) {
+    this.schema = new ArrayList<>(schema);
+  }
+
+  public List<String> getSchema() {
+    return schema;
+  }
+
   @Override
   public int hashCode() {
-    return Objects.hash(super.hashCode(), fields, probe);
+    return Objects.hash(super.hashCode(), fields, probe, plan, schema);
   }
 
   @Override
@@ -133,6 +167,7 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
     if (obj == null || getClass() != obj.getClass()) return false;
     if (!super.equals(obj)) return false;
     CalciteExecAggregationBuilder other = (CalciteExecAggregationBuilder) obj;
-    return Objects.equals(fields, other.fields) && probe == other.probe;
+    return Objects.equals(fields, other.fields) && probe == other.probe
+        && Objects.equals(plan, other.plan) && Objects.equals(schema, other.schema);
   }
 }
