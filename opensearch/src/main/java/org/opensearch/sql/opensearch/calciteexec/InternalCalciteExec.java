@@ -5,23 +5,23 @@
 
 package org.opensearch.sql.opensearch.calciteexec;
 
-import org.opensearch.core.common.io.stream.StreamInput;
-import org.opensearch.core.common.io.stream.StreamOutput;
-import org.opensearch.core.xcontent.XContentBuilder;
-import org.opensearch.search.aggregations.InternalAggregation;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.opensearch.core.common.io.stream.StreamInput;
+import org.opensearch.core.common.io.stream.StreamOutput;
+import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.search.aggregations.InternalAggregation;
 
 public class InternalCalciteExec extends InternalAggregation {
 
   private final List<Object[]> rows;
   private final String probeResult;
 
-  public InternalCalciteExec(String name, List<Object[]> rows, String probeResult, Map<String, Object> metadata) {
+  public InternalCalciteExec(
+      String name, List<Object[]> rows, String probeResult, Map<String, Object> metadata) {
     super(name, metadata);
     this.rows = rows;
     this.probeResult = probeResult;
@@ -60,7 +60,8 @@ public class InternalCalciteExec extends InternalAggregation {
   }
 
   @Override
-  public InternalAggregation reduce(List<InternalAggregation> aggregations, ReduceContext reduceContext) {
+  public InternalAggregation reduce(
+      List<InternalAggregation> aggregations, ReduceContext reduceContext) {
     List<Object[]> combined = new ArrayList<>();
     String firstProbe = null;
     for (InternalAggregation agg : aggregations) {

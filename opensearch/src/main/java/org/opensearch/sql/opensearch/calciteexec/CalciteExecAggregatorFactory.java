@@ -5,16 +5,15 @@
 
 package org.opensearch.sql.opensearch.calciteexec;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 import org.opensearch.index.query.QueryShardContext;
 import org.opensearch.search.aggregations.Aggregator;
 import org.opensearch.search.aggregations.AggregatorFactories;
 import org.opensearch.search.aggregations.AggregatorFactory;
 import org.opensearch.search.aggregations.CardinalityUpperBound;
 import org.opensearch.search.internal.SearchContext;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 
 public class CalciteExecAggregatorFactory extends AggregatorFactory {
 
@@ -32,8 +31,8 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
       QueryShardContext queryShardContext,
       AggregatorFactory parent,
       AggregatorFactories.Builder subFactories,
-      Map<String, Object> metadata
-  ) throws IOException {
+      Map<String, Object> metadata)
+      throws IOException {
     super(name, queryShardContext, parent, subFactories, metadata);
     this.fields = fields;
     this.probe = probe;
@@ -46,8 +45,9 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
       SearchContext searchContext,
       Aggregator parent,
       CardinalityUpperBound cardinality,
-      Map<String, Object> metadata
-  ) throws IOException {
-    return new CalciteExecAggregator(name, fields, probe, plan, schema, searchContext, parent, metadata);
+      Map<String, Object> metadata)
+      throws IOException {
+    return new CalciteExecAggregator(
+        name, fields, probe, plan, schema, searchContext, parent, metadata);
   }
 }

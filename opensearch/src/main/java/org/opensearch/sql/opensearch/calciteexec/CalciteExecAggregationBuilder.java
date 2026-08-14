@@ -5,26 +5,25 @@
 
 package org.opensearch.sql.opensearch.calciteexec;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import org.opensearch.core.ParseField;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ContextParser;
 import org.opensearch.core.xcontent.ObjectParser;
 import org.opensearch.core.xcontent.XContentBuilder;
-import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.index.query.QueryShardContext;
 import org.opensearch.search.aggregations.AbstractAggregationBuilder;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregatorFactories;
 import org.opensearch.search.aggregations.AggregatorFactory;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-
-public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<CalciteExecAggregationBuilder> {
+public class CalciteExecAggregationBuilder
+    extends AbstractAggregationBuilder<CalciteExecAggregationBuilder> {
 
   public static final String NAME = "calcite_exec";
 
@@ -37,17 +36,21 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
       new ObjectParser<>(NAME);
 
   static {
-    INTERNAL_PARSER.declareStringArray(CalciteExecAggregationBuilder::setFields, new ParseField("fields"));
-    INTERNAL_PARSER.declareBoolean(CalciteExecAggregationBuilder::setProbe, new ParseField("probe"));
+    INTERNAL_PARSER.declareStringArray(
+        CalciteExecAggregationBuilder::setFields, new ParseField("fields"));
+    INTERNAL_PARSER.declareBoolean(
+        CalciteExecAggregationBuilder::setProbe, new ParseField("probe"));
     INTERNAL_PARSER.declareString(CalciteExecAggregationBuilder::setPlan, new ParseField("plan"));
-    INTERNAL_PARSER.declareStringArray(CalciteExecAggregationBuilder::setSchema, new ParseField("schema"));
+    INTERNAL_PARSER.declareStringArray(
+        CalciteExecAggregationBuilder::setSchema, new ParseField("schema"));
   }
 
-  public static final ContextParser<String, CalciteExecAggregationBuilder> PARSER = (parser, aggName) -> {
-    CalciteExecAggregationBuilder builder = new CalciteExecAggregationBuilder(aggName);
-    INTERNAL_PARSER.parse(parser, builder, null);
-    return builder;
-  };
+  public static final ContextParser<String, CalciteExecAggregationBuilder> PARSER =
+      (parser, aggName) -> {
+        CalciteExecAggregationBuilder builder = new CalciteExecAggregationBuilder(aggName);
+        INTERNAL_PARSER.parse(parser, builder, null);
+        return builder;
+      };
 
   public CalciteExecAggregationBuilder(String name) {
     super(name);
@@ -68,8 +71,7 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
   protected CalciteExecAggregationBuilder(
       CalciteExecAggregationBuilder clone,
       AggregatorFactories.Builder factoriesBuilder,
-      Map<String, Object> metadata
-  ) {
+      Map<String, Object> metadata) {
     super(clone, factoriesBuilder, metadata);
     this.fields = clone.fields;
     this.probe = clone.probe;
@@ -78,7 +80,8 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
   }
 
   @Override
-  protected AggregationBuilder shallowCopy(AggregatorFactories.Builder factoriesBuilder, Map<String, Object> metadata) {
+  protected AggregationBuilder shallowCopy(
+      AggregatorFactories.Builder factoriesBuilder, Map<String, Object> metadata) {
     return new CalciteExecAggregationBuilder(this, factoriesBuilder, metadata);
   }
 
@@ -94,13 +97,23 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
   protected AggregatorFactory doBuild(
       QueryShardContext queryShardContext,
       AggregatorFactory parent,
-      AggregatorFactories.Builder subfactoriesBuilder
-  ) throws IOException {
-    return new CalciteExecAggregatorFactory(name, fields, probe, plan, schema, queryShardContext, parent, subfactoriesBuilder, metadata);
+      AggregatorFactories.Builder subfactoriesBuilder)
+      throws IOException {
+    return new CalciteExecAggregatorFactory(
+        name,
+        fields,
+        probe,
+        plan,
+        schema,
+        queryShardContext,
+        parent,
+        subfactoriesBuilder,
+        metadata);
   }
 
   @Override
-  protected XContentBuilder internalXContent(XContentBuilder builder, Params params) throws IOException {
+  protected XContentBuilder internalXContent(XContentBuilder builder, Params params)
+      throws IOException {
     builder.startObject();
     builder.field("fields", fields);
     builder.field("probe", probe);
@@ -167,7 +180,9 @@ public class CalciteExecAggregationBuilder extends AbstractAggregationBuilder<Ca
     if (obj == null || getClass() != obj.getClass()) return false;
     if (!super.equals(obj)) return false;
     CalciteExecAggregationBuilder other = (CalciteExecAggregationBuilder) obj;
-    return Objects.equals(fields, other.fields) && probe == other.probe
-        && Objects.equals(plan, other.plan) && Objects.equals(schema, other.schema);
+    return Objects.equals(fields, other.fields)
+        && probe == other.probe
+        && Objects.equals(plan, other.plan)
+        && Objects.equals(schema, other.schema);
   }
 }
