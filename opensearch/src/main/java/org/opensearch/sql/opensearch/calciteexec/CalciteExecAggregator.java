@@ -1,0 +1,121 @@
+/*
+ * Copyright OpenSearch Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+package org.opensearch.sql.opensearch.calciteexec;
+
+import org.apache.lucene.index.DocValues;
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.SortedDocValues;
+import org.apache.lucene.search.ScoreMode;
+import org.opensearch.search.aggregations.Aggregator;
+import org.opensearch.search.aggregations.InternalAggregation;
+import org.opensearch.search.aggregations.LeafBucketCollector;
+import org.opensearch.search.aggregations.LeafBucketCollectorBase;
+import org.opensearch.search.aggregations.metrics.MetricsAggregator;
+import org.opensearch.search.internal.SearchContext;
+import org.opensearch.sql.calcite.utils.CalciteClassLoaderHelper;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+public class CalciteExecAggregator extends MetricsAggregator {
+
+  private final List<String> fields;
+  private final boolean probe;
+  private final List<Object[]> collectedRows = new ArrayList<>();
+  private volatile String probeResult;
+  private volatile boolean probeExecuted = false;
+
+  CalciteExecAggregator(
+      String name,
+      List<String> fields,
+      boolean probe,
+      SearchContext context,
+      Aggregator parent,
+      Map<String, Object> metadata
+  ) throws IOException {
+    super(name, context, parent, metadata);
+    this.fields = fields;
+    this.probe = probe;
+  }
+
+  @Override
+  public ScoreMode scoreMode() {
+    return ScoreMode.COMPLETE_NO_SCORES;
+  }
+
+  @Override
+  public LeafBucketCollector getLeafCollector(LeafReaderContext ctx, LeafBucketCollector sub) throws IOException {
+    // Detect field types from the leaf reader's field infos and load appropriate doc values
+    NumericDocValues[] numericDvs = new NumericDocValues[fields.size()];
+    SortedDocValues[] sortedDvs = new SortedDocValues[fields.size()];
+    for (int i = 0; i < fields.size(); i++) {
+      var fieldInfo = ctx.reader().getFieldInfos().fieldInfo(fields.get(i));
+      if (fieldInfo != null && fieldInfo.getDocValuesType() == org.apache.lucene.index.DocValuesType.SORTED_NUMERIC) {
+        numericDvs[i] = DocValues.getNumeric(ctx.reader(), fields.get(i));
+      } else if (fieldInfo != null && fieldInfo.getDocValuesType() == org.apache.lucene.index.DocValuesType.NUMERIC) {
+        numericDvs[i] = DocValues.getNumeric(ctx.reader(), fields.get(i));
+      } else if (fieldInfo != null && fieldInfo.getDocValuesType() == org.apache.lucene.index.DocValuesType.SORTED) {
+        sortedDvs[i] = DocValues.getSorted(ctx.reader(), fields.get(i));
+      }
+    }
+
+    // Run Janino probe once
+    if (probe && !probeExecuted) {
+      probeExecuted = true;
+      try {
+        String result = CalciteClassLoaderHelper.withCalciteClassLoader(() -> {
+          // Generate and compile a trivial expression through Calcite's Janino path,
+          // same pattern as CalciteScriptEngine.compile()
+          String code =
+              "public Object[] apply(Object root0) {\n"
+              + "  return new Object[] { Integer.valueOf(40 + 2) };\n"
+              + "}\n";
+          org.apache.calcite.rex.RexExecutable executable =
+              new org.apache.calcite.rex.RexExecutable(code, "calcite_exec probe");
+          org.apache.calcite.linq4j.function.Function1 fn = executable.getFunction();
+          Object[] result1 = (Object[]) fn.apply(null);
+          if (result1 != null && result1.length == 1 && Integer.valueOf(42).equals(result1[0])) {
+            return "JANINO_COMPILE_OK";
+          }
+          return "JANINO_COMPILE_WRONG_RESULT: " + java.util.Arrays.toString(result1);
+        }, CalciteExecAggregator.class);
+        probeResult = result;
+      } catch (Exception e) {
+        probeResult = "JANINO_COMPILE_FAILED: " + e.getMessage();
+      }
+    }
+
+    return new LeafBucketCollectorBase(sub, null) {
+      @Override
+      public void collect(int doc, long owningBucketOrd) throws IOException {
+        Object[] row = new Object[fields.size()];
+        for (int i = 0; i < fields.size(); i++) {
+          if (numericDvs[i] != null && numericDvs[i].advanceExact(doc)) {
+            row[i] = numericDvs[i].longValue();
+          } else if (sortedDvs[i] != null && sortedDvs[i].advanceExact(doc)) {
+            row[i] = sortedDvs[i].lookupOrd(sortedDvs[i].ordValue()).utf8ToString();
+          } else {
+            row[i] = null;
+          }
+        }
+        collectedRows.add(row);
+      }
+    };
+  }
+
+  @Override
+  public InternalAggregation buildAggregation(long owningBucketOrd) throws IOException {
+    return new InternalCalciteExec(name, new ArrayList<>(collectedRows), probeResult, metadata());
+  }
+
+  @Override
+  public InternalAggregation buildEmptyAggregation() {
+    return new InternalCalciteExec(name, List.of(), probeResult, metadata());
+  }
+}

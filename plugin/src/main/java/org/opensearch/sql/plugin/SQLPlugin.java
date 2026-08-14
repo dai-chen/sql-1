@@ -53,6 +53,7 @@ import org.opensearch.plugins.ActionPlugin;
 import org.opensearch.plugins.ExtensiblePlugin;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.plugins.ScriptPlugin;
+import org.opensearch.plugins.SearchPlugin;
 import org.opensearch.plugins.SystemIndexPlugin;
 import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.rest.BytesRestResponse;
@@ -62,6 +63,9 @@ import org.opensearch.rest.RestHandler;
 import org.opensearch.script.ScriptContext;
 import org.opensearch.script.ScriptEngine;
 import org.opensearch.script.ScriptService;
+import org.opensearch.search.aggregations.AggregationBuilder;
+import org.opensearch.sql.opensearch.calciteexec.CalciteExecAggregationBuilder;
+import org.opensearch.sql.opensearch.calciteexec.InternalCalciteExec;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.common.utils.QueryContext;
@@ -152,6 +156,7 @@ import org.opensearch.watcher.ResourceWatcherService;
 public class SQLPlugin extends Plugin
     implements ActionPlugin,
         ScriptPlugin,
+        SearchPlugin,
         SystemIndexPlugin,
         JobSchedulerExtension,
         ExtensiblePlugin {
@@ -510,6 +515,17 @@ public class SQLPlugin extends Plugin
   @Override
   public ScriptEngine getScriptEngine(Settings settings, Collection<ScriptContext<?>> contexts) {
     return new CompoundedScriptEngine();
+  }
+
+  @Override
+  public List<AggregationSpec> getAggregations() {
+    return List.of(
+        new AggregationSpec(
+            CalciteExecAggregationBuilder.NAME,
+            CalciteExecAggregationBuilder::new,
+            CalciteExecAggregationBuilder.PARSER
+        ).addResultReader(InternalCalciteExec::new)
+    );
   }
 
   private DataSourceServiceImpl createDataSourceService() {
