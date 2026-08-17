@@ -1,0 +1,59 @@
+# Codebase Patterns
+
+Seeded from the design session on 2026-08-17. These are verified against source; trust them.
+
+## Build and test commands
+- Build (skip ITs): `./gradlew build -x :integ-test:integTest`
+- Unit tests: `./gradlew test`
+- All integration tests: `./gradlew :integ-test:integTest`
+- Single IT class: `./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.CalciteDedupCommandIT"`
+- Single IT method: `./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.CalciteExplainIT.testComplexDedup"`
+- `-Dtests.security.manager=false` is already set in build.gradle.
+
+## Settings that already exist — do not add new ones
+- `plugins.calcite.enabled` → CALCITE_ENGINE_ENABLED
+- `plugins.calcite.pushdown.enabled` → CALCITE_PUSHDOWN_ENABLED
+- `plugins.calcite.fallback.allowed` → CALCITE_FALLBACK_ALLOWED
+- Defined in `common/src/main/java/org/opensearch/sql/common/setting/Settings.java:42-47`
+- The PoC posture is `pushdown.enabled=false` and `fallback.allowed=false`. This is a config flip, not new code.
+
+## Plan-level limit already exists — do not add a second limit concept
+- `QueryService.convertToCalcitePlan` (`core/src/main/java/org/opensearch/sql/executor/QueryService.java:1032-1036`) wraps every plan in `LogicalSystemLimit(QUERY_SIZE_LIMIT, querySizeLimit())`.
+- `LogicalSystemLimit extends Sort`, so it has a `fetch` and is optimizer-visible.
+- It is already matched by `LimitIndexScanRule` (`opensearch/src/main/java/org/opensearch/sql/opensearch/planner/rules/LimitIndexScanRule.java:24`).
+- `plugins.query.size_limit` (`OpenSearchSettings.java:204`) falls back to `IndexSettings.MAX_RESULT_WINDOW_SETTING` = 10000.
+
+## Explain goldens
+- YAML files under `integ-test/src/test/resources/expectedOutput/calcite/`
+- Loaded via `loadExpectedPlan("name.yaml")` at `PPLIntegTestCase:484`, asserted with `assertEquals`
+- Re-baselining means editing the YAML
+
+## OpenSearch aggregation lifecycle constraints
+- `InternalAggregation.reduce()` is called in batches of `batched_reduce_size` (default 512) by `QueryPhaseResultConsumer.PendingReduces`. It MUST be associative. There is no opt-out.
+- `mustReduceOnSingleInternalAgg()` only forces reduce() when a single shard returned; it does NOT disable batching.
+- Therefore the wire type must carry UNFINALIZED accumulator state (avg ships {sum, count}, never an average).
+- Batched reduce lowers peak memory only when the combine reduces volume. CONCAT gains nothing.
+- `Aggregator.collect()` can read _source via `SearchContext.lookup().getLeafSearchLookup(ctx).source()`, and this works under `size: 0` because it is independent of the fetch phase.
+- `size: 0` sets `hasTopDocs=false`, skipping the fetch phase, so no reader context and no PIT is created.
+- `CollectionTerminatedException` terminates the CURRENT LEAF ONLY — it is caught by `ContextIndexSearcher#searchLeaf()` and the leaf loop continues. Stopping a whole shard needs a shard-global counter plus a guard in `getLeafCollector()`.
+- `allow_partial_search_results` defaults to TRUE. Every request this PoC builds must set `allowPartialSearchResults(false)`, or a budget breach returns HTTP 200 with partial results.
+- Transport ceiling from data node to coordinator is 30% of JVM heap, hardcoded in `TcpTransport`. There is no `transport.max_message_size` setting.
+
+## Calcite facts
+- Aggregate splitting bottoms out per function: `SqlSplittableAggFunction` with `CountSplitter`, `SumSplitter`, `Sum0Splitter`, `SelfSplitter`. If `unwrap(SqlSplittableAggFunction.class)` returns null the call cannot be split.
+- There is no generic mechanism to split Window, Sort, Join, or Distinct. The standard fallback is gather to SINGLETON.
+- Limit-pushability is per-operator: exact below Project/Calc, merges with Sort into top-N, exact per-branch for Union ALL. NOT below Filter, Aggregate, general Window, Join, or Union DISTINCT.
+- PPL `dedup` already lowers to `ROW_NUMBER() OVER (PARTITION BY ...)` plus a `<= k` filter — no custom operator is involved on the Calcite path.
+
+## Design invariants — do not violate
+1. The split must be TOTAL over RelNode. Absence of an optimization rule means the operator runs on the coordinator. Never reject a plan.
+2. Never emit a Painless script query. If a predicate is not index-accelerable, leave it as a residual Filter in the fragment.
+3. Never silently truncate. Either the limit is provably pushable, or the budget refuses the query with a diagnosable error.
+4. One search request per OpenSearchIndexScan. Never create a PIT, scroll, or search_after on this path.
+5. Standard Calcite operators only.
+
+Full design: `docs/dev/poc-staged-calcite-exec-design.md`
+
+# Iteration Log
+
+<!-- Round summaries and human intervention notes will be appended here automatically -->

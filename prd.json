@@ -1,0 +1,280 @@
+{
+  "project": "Staged Calcite Execution on OpenSearch Data Nodes (PoC)",
+  "branchName": "poc/staged-calcite-exec",
+  "description": "Execute a PPL-generated Calcite plan on OpenSearch data nodes by splitting it at a single shard-to-coordinator gather boundary, shipping the shard-local fragment inside a plugin-registered custom aggregation (calcite_exec), and reducing on the coordinator. DSL translation is narrowed to index-accelerable predicates only and becomes a pure optimization rather than a correctness requirement. Goal: eliminate the PIT/pagination failure mode of opensearch-project/sql#5698 and remove DSL expressiveness as a source of query failures. Design: docs/dev/poc-staged-calcite-exec-design.md",
+  "buildCommand": "./gradlew build -x :integ-test:integTest",
+  "testCommand": "./gradlew test",
+  "verifyCommand": "./gradlew spotlessCheck",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Audit custom logical operators on the Calcite path",
+      "description": "As an implementer, I want a written inventory of which PPL commands still produce non-standard RelNodes so that I know whether tenet 6 (standard Calcite operators only) is already satisfied.",
+      "acceptanceCriteria": [
+        "A table is added to docs/dev/poc-staged-calcite-exec-design.md listing each PPL command that produces a custom (non-standard) logical RelNode on the Calcite path, with the class name and file path",
+        "For each, state whether it already lowers to standard Calcite operators before optimization",
+        "Confirm and cite that dedup already lowers to ROW_NUMBER() OVER (PARTITION BY ...) plus a rank filter, referencing the existing explain golden under integ-test/src/test/resources/expectedOutput/calcite/",
+        "No production code is changed by this story",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Register the calcite_exec custom aggregation skeleton",
+      "description": "As an implementer, I want calcite_exec registered from the SQL plugin so that a search request can carry a plan fragment with zero OpenSearch core changes.",
+      "acceptanceCriteria": [
+        "SearchPlugin.getAggregations() returns an AggregationSpec for name calcite_exec with a Writeable reader, an XContent parser, and addResultReader(InternalCalciteExec::new)",
+        "CalciteExecAggregationBuilder carries fields: plan (String, base64), fields (list of name+type), combine (descriptor object), rowBudget (int)",
+        "CalciteExecAggregatorFactory and CalciteExecAggregator exist; the aggregator collects nothing and buildAggregation returns an empty InternalCalciteExec",
+        "InternalCalciteExec implements InternalAggregation with a CONCAT reduce and carries the echoed combine descriptor plus collection stats fields (rowsCollected, rowsEmitted)",
+        "A new integration test issues a search containing the calcite_exec aggregation against a test index and receives a well-formed empty result without error",
+        "No file under any OpenSearch core dependency is modified",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Serialize and deserialize a Rel fragment as base64 RelJson",
+      "description": "As an implementer, I want a fragment codec so that a shard-local RelNode subtree can travel inside the aggregation.",
+      "acceptanceCriteria": [
+        "A codec class serializes a RelNode to RelJson and base64-encodes it, and deserializes the reverse",
+        "Deserialization builds a RelOptCluster, a schema exposing the shard row-source table, and the plugin operator table",
+        "A unit test round-trips a Project over Filter over TableScan tree and asserts the RelOptUtil.toString() output is identical before and after",
+        "A unit test round-trips a tree containing a ROW_NUMBER() window and asserts identical plan text",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Read shard rows from doc_values with a _source fallback",
+      "description": "As an implementer, I want the aggregator to materialize rows for the fields a fragment references so that fields lacking doc_values do not limit coverage.",
+      "acceptanceCriteria": [
+        "Per-type readers materialize values from doc_values for keyword, long, double, boolean, and date fields",
+        "Fields without doc_values fall back to _source via SearchContext.lookup().getLeafSearchLookup(ctx).source()",
+        "CalciteExecAggregator.collect(doc) appends one Object[] row per matching document to a buffer",
+        "InternalCalciteExec reports rowsCollected and rowsEmitted",
+        "An integration test asserts correct values for a keyword field, a long field, and a text field with no keyword subfield, the last proving the _source path works under size:0",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Execute the shard fragment with Janino inside the aggregator",
+      "description": "As an implementer, I want the shard to run the deserialized fragment through Calcite so that arbitrary relational operators execute on the data node.",
+      "acceptanceCriteria": [
+        "buildAggregation() compiles the fragment to a Bindable and runs it, wrapped in CalciteClassLoaderHelper.withCalciteClassLoader()",
+        "Buffered rows are supplied to the plan through a DataContext stash slot read by a ScannableTable",
+        "An integration test ships a fragment containing a Filter and a Project and asserts the shard returns only the filtered, projected rows",
+        "An integration test ships a fragment containing a ROW_NUMBER() window and asserts the shard returns per-shard ranked rows",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add OpenSearchIndexScan and restrict PredicateAnalyzer to index-accelerable predicates",
+      "description": "As an implementer, I want one physical scan carrying an optional query so that pushdown becomes an access-path choice and never emits a script query.",
+      "acceptanceCriteria": [
+        "A single physical operator OpenSearchIndexScan(index, queryDsl, projects) exists; queryDsl defaults to match_all",
+        "The existing DSL predicate translation is reused rather than rewritten; its script-query emission path is deleted",
+        "Pushable set is limited to: full-text and relevance functions, term/terms equality, numeric and date ranges, exists/IS NOT NULL, and conjunctions of those",
+        "A table-driven unit test asserts pushed versus residual for each of: term equality, numeric range, date range, exists, match, arithmetic comparison, string function, regex, and a non-decomposable disjunction",
+        "A unit test asserts no generated query ever contains a script clause",
+        "Residual conjuncts remain in the plan as a Filter above the scan",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add StagePlanner with the generic placement floor and DAG cut",
+      "description": "As an implementer, I want a total split over RelNode so that absence of an optimization rule is never a coverage gap.",
+      "acceptanceCriteria": [
+        "StagePlanner computes SHARD_LOCAL or NEEDS_GATHER bottom-up; OpenSearchIndexScan is SHARD_LOCAL; Project, Calc, and Filter are SHARD_LOCAL when their input is; every other operator defaults to NEEDS_GATHER",
+        "The cut is placed at the highest SHARD_LOCAL node, producing shardFragment, a CONCAT combine descriptor, and coordinatorTree whose scan is replaced by a gathered-rows scan",
+        "Unit tests assert placement for scan, project, filter, and calc, and assert the default gather for aggregate, window, join, and sort",
+        "A unit test asserts the split is total: for a plan containing every operator type exercised by the PPL IT suite, split() returns a result and never throws or returns empty",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Wire end-to-end staged execution for where, fields, and eval",
+      "description": "As a user, I want simple row-shaped PPL queries to execute through the staged path so that the architecture is proven end to end.",
+      "acceptanceCriteria": [
+        "The request builder emits size 0, allowPartialSearchResults(false), the PredicateAnalyzer query clause, and calcite_exec as the only aggregation",
+        "InternalCalciteExec.reduce() applies the combine descriptor as tier 1",
+        "Plugin code executes coordinatorTree through Calcite over the gathered rows as tier 2",
+        "CalciteWhereCommandIT, CalciteFieldsCommandIT, and CalciteEvalCommandIT pass with plugins.calcite.pushdown.enabled=false and plugins.calcite.fallback.allowed=false",
+        "A test asserts no PIT, scroll, or search_after is created anywhere on this path",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Enforce a shard row budget that fails fast",
+      "description": "As an operator, I want an unbounded gather to fail with a diagnosable error so that a resource limit never becomes a silently wrong answer.",
+      "acceptanceCriteria": [
+        "A shard-global counter in collect() throws a dedicated exception when rowBudget is exceeded, and the message names the row count and the operator that forced the gather",
+        "The aggregator calls addRequestCircuitBreakerBytes for buffered state",
+        "Every generated request sets allowPartialSearchResults(false)",
+        "An integration test with a very small rowBudget asserts the query fails, the error message contains the row count and the forcing operator name, and the response contains no partial results",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Measure and record baseline coverage with pushdown disabled",
+      "description": "As a reviewer, I want a truthful coverage number so that the PoC's central claim of totality is verified rather than assumed.",
+      "acceptanceCriteria": [
+        "The ten IT classes named in the design doc's acceptance test plan are run with plugins.calcite.pushdown.enabled=false and plugins.calcite.fallback.allowed=false",
+        "Results are recorded per class in three separate buckets: pass, fail-on-assertion, fail-on-ceiling",
+        "The results table is committed into docs/dev/poc-staged-calcite-exec-design.md",
+        "Each fail-on-assertion entry is annotated as either an explain re-baseline or a suspected real defect",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Render the stage split in explain output",
+      "description": "As a reviewer, I want explain to show shardFragment, combine, and coordinatorTree so that the split is verifiable without inspecting row counts.",
+      "acceptanceCriteria": [
+        "Explain output for a staged query renders three labelled sections: shardFragment, combine, and coordinatorTree",
+        "The shardFragment section shows the pushed query DSL on the OpenSearchIndexScan",
+        "New or updated YAML goldens under integ-test/src/test/resources/expectedOutput/calcite/ cover a where plus fields query",
+        "CalciteExplainIT passes",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Add split rule 1: Aggregate partial and final",
+      "description": "As a user, I want stats queries to aggregate per shard so that only one row per group per shard crosses the wire.",
+      "acceptanceCriteria": [
+        "AggregateReduceFunctionsRule runs before the split so AVG is decomposed into SUM and COUNT",
+        "The rule fires only when every AggregateCall is splittable; an unsplittable call leaves the Aggregate on the coordinator without failing",
+        "The shard emits unfinalized accumulator state and the MERGE_AGG combine descriptor merges it associatively in InternalCalciteExec.reduce()",
+        "CalciteStatsCommandIT passes",
+        "An explain golden for a stats-by query shows MERGE_AGG and a partial Aggregate in shardFragment",
+        "A test asserts an avg query ships sum and count and that the division appears in coordinatorTree",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Add split rule 4: limit pushdown with early termination",
+      "description": "As a user, I want an unordered head N to stop collecting once N rows are found so that the common bounded query does minimal work.",
+      "acceptanceCriteria": [
+        "LogicalSystemLimit or Fetch is pushed into the shard stage only when no gather-forcing operator sits between it and the scan",
+        "The LIMIT combine descriptor re-applies the limit on the coordinator",
+        "For an unordered limit the aggregator terminates the shard by throwing CollectionTerminatedException from collect() and guarding getLeafCollector() for subsequent leaves",
+        "CalciteHeadCommandIT passes",
+        "A test asserts rowsCollected is bounded by the limit for an unordered head N",
+        "A test asserts the limit is NOT pushed below an Aggregate, a general Window, or a Join",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Add split rule 2: Sort plus Fetch top-N",
+      "description": "As a user, I want sort then head to keep only N rows per shard so that ordered bounded queries do not ship everything.",
+      "acceptanceCriteria": [
+        "Sort with a fetch is decomposed into a shard-local top-N and a coordinator merge",
+        "The shard bounds memory with a priority queue of size N rather than early terminating, because an unmatched index sort requires examining all matching documents",
+        "The TOP_N combine descriptor merges the sorted runs associatively",
+        "CalcitePPLSortIT and CalciteTopCommandIT pass",
+        "An explain golden for sort-then-head shows TOP_N",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Add split rule 3: window rank-filter partial for dedup",
+      "description": "As a user, I want dedup to run per shard so that the query that motivated issue 5698 no longer ships every document to the coordinator.",
+      "acceptanceCriteria": [
+        "The rule matches a Filter of the form rank = k, rank < k, or rank <= k over a Window computing ROW_NUMBER, RANK, or DENSE_RANK",
+        "The rule asserts its correctness justification explicitly: nondeterminism when the window has no ORDER BY, or rank monotonicity when it does; it does not fire otherwise",
+        "The shard fragment drops the rank column before shipping, since shard-local ranks are meaningless to the coordinator",
+        "The RANK_LIMIT combine descriptor recomputes rank over the union and is associative",
+        "CalciteDedupCommandIT passes",
+        "An explain golden for dedup matches the staged plan shown in docs/dev/poc-staged-calcite-exec-design.md",
+        "A test asserts rowsEmitted per shard is strictly less than documents matched for a low-cardinality dedup key",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Publish the final PoC report",
+      "description": "As a reviewer, I want the coverage number, ceiling map, and wire-volume deltas in one place so that the PoC can be judged on evidence.",
+      "acceptanceCriteria": [
+        "docs/dev/poc-staged-calcite-exec-design.md gains a Results section with the final three-bucket coverage table",
+        "A ceiling map lists which PPL shapes exceeded the row budget and at what data volume",
+        "Wire-volume deltas are reported for dedup and stats, comparing rowsEmitted per shard against documents matched",
+        "Remaining gaps are listed with the reason each would require a shuffle or the option-C lazy bridge",
+        "Build passes",
+        "Tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

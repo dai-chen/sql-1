@@ -1,0 +1,378 @@
+# PoC Design: Staged Calcite Execution on OpenSearch Data Nodes
+
+Status: PoC design, approved for implementation
+Date: 2026-08-17
+Related: [opensearch-project/sql#5698](https://github.com/opensearch-project/sql/issues/5698) option 4
+
+## Problem
+
+The V3 (Calcite) PPL engine translates as much of the Calcite plan as it can into OpenSearch Query DSL. Two failure modes follow from that strategy:
+
+1. **Expressiveness.** DSL cannot express large parts of relational algebra. When translation falls short the engine either refuses the query or emits a Painless script query, which is a second, semantically divergent implementation of the same expression language.
+2. **Pagination.** When an operator cannot absorb the limit, the scan below it must return every matching document. That exceeds `max_result_window`, so a PIT is opened. Over a wildcard index pattern this opens one reader context per matching shard across hundreds of daily indices and exhausts `search.max_open_pit_context` (default 300).
+
+`dedup` is the canonical instance of (2), and it is worked through in detail below.
+
+This design inverts the strategy: the plan is **executed** on data nodes as a Calcite plan, and DSL translation is reduced to a narrow optimization.
+
+## Tenets
+
+1. **Execution is the default; translation is an optimization.** DSL translation may fail freely — the consequence is slower, never unsupported. This converts *capability* failures ("unsupported operation", a dead end for the user) into *resource* failures ("this query needed 40M rows on one node"), which are diagnosable and actionable.
+2. **The split is total by construction.** Absence of an optimization rule means an operator runs on the coordinator, correctly. It is never a coverage gap.
+3. **Push only what the index accelerates.** If a predicate does not consult an inverted index, BKD tree, or norms, pushing it buys nothing. No Painless script queries, ever.
+4. **One semantic limit in the plan; physical caps only where provably exact; a budget that refuses rather than truncates.** No silent approximation anywhere.
+5. **One search request per index scan. Never a cursor.** Multiple bounded requests are categorically different from pagination.
+6. **Standard Calcite operators only.** Calcite's Enumerable rule set cannot execute custom logical operators, so they must not exist.
+
+## Architecture
+
+```
+PPL text → AstBuilder → CalciteRelNodeVisitor          [standard operators only]
+                             ↓
+                    LogicalSystemLimit(10000)          [existing; it IS the semantic limit]
+                             ↓
+                    AggregateReduceFunctionsRule       [AVG→SUM/COUNT; MUST precede split]
+                             ↓
+                    OpenSearchIndexScan + PredicateAnalyzer
+                             ↓
+                    StagePlanner                       [generic floor + 4 optional rules]
+                             ↓
+        ┌────────────────────┼─────────────────────────┐
+   shardFragment      combineDescriptor          coordinatorTree
+   (RelJson base64)   (declarative, 5 modes)     (in-memory RelNode)
+        ↓                    ↓                          ↓
+   calcite_exec agg    InternalCalciteExec        plugin, post-SearchResponse
+   per shard            .reduce()   [tier 1]      [tier 2]
+```
+
+### Component inventory
+
+Everything below is required for the PoC. Nothing is inherited from prior work.
+
+| Component | Module | Responsibility |
+|---|---|---|
+| `PredicateAnalyzer` | `opensearch` | the **only** Rel→DSL translation; index-accelerable predicates only |
+| `OpenSearchIndexScan` | `opensearch` | single physical scan carrying `(index, queryDsl, projects)` |
+| `StagePlanner` | `core` | computes placement, applies split rules, cuts the DAG |
+| `CalciteExecAggregationBuilder` | `opensearch` | `AggregationBuilder`; fields `plan`, `fields`, `combine`, `rowBudget`; XContent + `Writeable` |
+| aggregation registration | `opensearch` | `SearchPlugin.getAggregations()` → `AggregationSpec(NAME, reader, parser).addResultReader(InternalCalciteExec::new)` |
+| `CalciteExecAggregatorFactory` / `CalciteExecAggregator` | `opensearch` | single-bucket aggregator; `collect(doc)` buffers a row, `buildAggregation()` runs the fragment |
+| shard row source | `opensearch` | per-type doc_values readers, `_source` fallback, budget counter |
+| fragment codec | `opensearch` | RelJson ⇄ base64; deserialization needs a `RelOptCluster`, a schema exposing the shard row-source table, and the plugin operator table |
+| shard executor | `opensearch` | Janino-compiled `Bindable` under `CalciteClassLoaderHelper.withCalciteClassLoader()`; rows injected through a `DataContext` stash slot read by a `ScannableTable` |
+| `InternalCalciteExec` | `opensearch` | `InternalAggregation`; carries rows/accumulator state, the echoed combine descriptor, and collection stats; `reduce()` applies the descriptor |
+| tier-2 executor | `opensearch` | runs `coordinatorTree` through Calcite over gathered rows |
+
+### Minimal-change notes
+
+- `plugins.calcite.pushdown.enabled` and `plugins.calcite.fallback.allowed` **already exist** (`common/src/main/java/org/opensearch/sql/common/setting/Settings.java:42-47`). Tenet 1 and the coverage measurement are configuration flips, not new code.
+- `LogicalSystemLimit` already wraps every plan (`core/src/main/java/org/opensearch/sql/executor/QueryService.java:1032-1036`) and already extends `Sort`, so it is optimizer-visible and already matched by `LimitIndexScanRule` (`opensearch/src/main/java/org/opensearch/sql/opensearch/planner/rules/LimitIndexScanRule.java:24`). Keep it. Do not add a second limit concept.
+- Before writing `PredicateAnalyzer`, inventory the existing DSL predicate translation and reuse it. Do not author a new translator; restrict the existing one and delete its script-query path.
+- Explain goldens are YAML under `integ-test/src/test/resources/expectedOutput/calcite/`, loaded via `loadExpectedPlan(...)` (`PPLIntegTestCase:484`). Re-baselining is editing YAML.
+
+## Key decisions
+
+### One physical scan operator
+
+`OpenSearchIndexScan(index, queryDsl, projects)`. "Table scan" and "index scan" are the same operator; `match_all` is the degenerate case. No code path exists solely for the unaccelerated case, which is where divergence bugs breed.
+
+### The pushable set is closed and small
+
+Push a predicate only if it consults an index structure:
+
+| Pushed | Structure |
+|---|---|
+| `match`, `match_phrase`, `query_string`, relevance functions | inverted index, scoring — and *cannot* be evaluated from doc_values at all |
+| term / terms equality | inverted index, global ordinals |
+| range on numeric or date | BKD tree, plus `can_match` shard skipping |
+| `exists` / `IS NOT NULL` | field-names, norms |
+| conjunctions of the above | — |
+
+Everything else — arithmetic, string functions, `case`, regex, disjunctions that do not decompose — stays as a residual `Filter` inside the shard fragment and runs as compiled Java. A residual filter does **not** block staging; it is shard-local.
+
+The range row is what closes #5698: a `@timestamp` range pushed as a real range query enables `can_match`, so a wildcard pattern prunes non-matching daily indices before any shard work.
+
+Predicates go in `bool.filter` (filter context: cacheable, no scoring). The exception is a query ranking by relevance (`_score`), where they must move to `must` so scores are computed.
+
+### StagePlanner is a rewrite pass, not Volcano trait plumbing
+
+Trino's `AddExchanges` is itself a plan rewrite visitor rather than an iterative rule set, so there is direct precedent, and it is substantially less machinery for identical results. The trait-based formulation is where this goes *if* cost-based push decisions ever become necessary — they are not, because pushing an index-accelerable predicate is monotonically better.
+
+One property, computed bottom-up:
+
+```
+SHARD_LOCAL   – subtree runs on a shard; concatenating per-shard
+                results is a valid input to the parent
+NEEDS_GATHER  – this node requires all rows in one place
+```
+
+Generic floor, zero per-operator work:
+
+| Node | Placement |
+|---|---|
+| `OpenSearchIndexScan` | `SHARD_LOCAL` |
+| `Project` / `Calc` / `Filter` | `SHARD_LOCAL` if input is (distribution-preserving) |
+| **everything else** | `NEEDS_GATHER` — the default, and why the split is total |
+
+The cut is placed at the highest `SHARD_LOCAL` node. Everything above becomes `coordinatorTree` with the scan replaced by a gathered-rows scan.
+
+### Four optional decomposition rules
+
+Each fires only when a `NEEDS_GATHER` node sits directly on a `SHARD_LOCAL` input. Each is an optimization that cannot affect coverage.
+
+| # | Rule | Precedent |
+|---|---|---|
+| 1 | `Aggregate` → partial + final, iff every agg call is splittable | Calcite `SqlSplittableAggFunction`; Spark `AggUtils`; Trino `AggregationNode.Step` |
+| 2 | `Sort`+`Fetch` → shard top-N + coordinator merge | Spark `TakeOrderedAndProjectExec`; Trino `TopNNode.Step` |
+| 3 | `Filter(rank ≤ k)` over `Window(ROW_NUMBER/RANK/DENSE_RANK)` → partial rank limit | Spark `InferWindowGroupLimit` / `WindowGroupLimitExec` (SPARK-37099); Trino `TopNRankingNode(partial=true)` |
+| 4 | `Fetch(N)`, unordered → shard `Fetch(N)` + early termination | Trino `MergeLimitWithSort` family |
+
+Rule 3's correctness is rank monotonicity: adding rows to a partition can only push a row's rank higher, so a locally-disqualified row is globally disqualified.
+
+Only `Aggregate` and top-N receive bespoke partial/final treatment in any surveyed engine (Calcite, Ignite, Flink, Spark, Trino, CockroachDB). Per-operator decomposition rules are the industry norm, not a design smell. `eventstats` gets no rule because unbounded-frame aggregate windows admit no partial anywhere; same for `LAG`/`LEAD`, moving frames, `NTILE`, `PERCENT_RANK`, `CUME_DIST`.
+
+### Two-tier reduce
+
+`InternalAggregation.reduce()` is called in batches of `batched_reduce_size` (default 512) by `QueryPhaseResultConsumer.PendingReduces`. Anything inside it **must be associative** and must carry **unfinalized** accumulator state. There is no opt-out. A general RelNode tree — a window, a global sort, a join — is not associative; putting one there yields silently wrong answers past 512 shards, which is exactly the wildcard-daily-index case.
+
+| Tier | Where | Contract | Content |
+|---|---|---|---|
+| 1 | `InternalCalciteExec.reduce()` | associative | one of five declarative descriptors |
+| 2 | plugin, after `SearchResponse` | none | `coordinatorTree`, executed once |
+
+Descriptors: `CONCAT`, `MERGE_AGG{groupKeys, aggs}`, `TOP_N{keys, dirs, n}`, `RANK_LIMIT{partKeys, orderKeys, k}`, `LIMIT{n}`. Tier 1 needs no serialized RelNode, which is why no reduce fragment appears in the DSL. The descriptor travels in the request and the shard echoes it back inside `InternalCalciteExec`, because the reducing node may not be the plugin node that built the plan.
+
+Batched reduce genuinely lowers peak memory — `partialReduce()` calls `consumeAggs().expand()`, `onAfterReduce()` rebases the breaker to `reduceResult.estimatedSize - estimatedSize`, and the buffer is `clear()`'d — **but only when the combine reduces volume.** `CONCAT` gains nothing, which is precisely the case the budget guards.
+
+### Shard bridge: buffer rows plus a budget counter
+
+A shard-global counter in `collect()` with two throw sites:
+
+- **Exact early termination**, when rule 4 established a legitimately pushable limit: `CollectionTerminatedException` plus a guard in `getLeafCollector()`. `CollectionTerminatedException` alone is **per-segment only** — it is caught by `ContextIndexSearcher#searchLeaf()` and the leaf loop continues — so stopping a whole shard requires both. Core precedent is `EarlyTerminatingCollector` with `forceTermination=true`.
+- **Safety budget breach**: a hard exception naming the operator that forced the gather.
+
+`allowPartialSearchResults(false)` is **mandatory** on every request. The default is `true`, so a budget breach would otherwise return HTTP 200 with `_shards.failures` and partial results — the exact silent-wrong-answer this design exists to eliminate. Also call `addRequestCircuitBreakerBytes` for buffered state so the cluster sees the query's footprint.
+
+Two plan shapes need different shard structures, which is why a `Fetch` node alone cannot express this:
+
+| Shape | Shard structure | Docs examined | Shard memory |
+|---|---|---|---|
+| `head N`, unordered | counter → early terminate | stops at N | N rows |
+| `sort X \| head N` | bounded priority queue of size N | all matching | N rows |
+
+**Known limitation, accepted for the PoC.** The bridge remains buffer-then-execute, so a `Fetch` in the fragment bounds what is *emitted*, not what is *collected*. The budget bounds the failure; it does not make the common case fast. The correct end-state bridge collects compact doc IDs and materializes rows lazily as Calcite pulls — mirroring OpenSearch's own query-phase/fetch-phase division — which is what makes rule 4 reduce *work* rather than only wire bytes. Out of PoC scope. Its constraint, for the record: doc_values iterators are forward-only per segment, so lazy materialization must walk segments in order and doc IDs ascending within each.
+
+### One search request per index scan
+
+Single-index queries issue one request; a join issues one per scan and joins on the coordinator. Neither needs a cursor. Multiple bounded requests are not pagination — cursor state exists to stream an *unbounded* result across round trips.
+
+## Worked example 1: `dedup` — the #5698 failure, and its fix
+
+```
+source=accounts | dedup gender | fields account_number, gender, age
+```
+
+### Today
+
+Logical plan (verbatim, from the existing no-pushdown golden):
+
+```
+LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+  LogicalProject(account_number=[$0], gender=[$1], age=[$2])
+    LogicalFilter(condition=[<=($3, 1)])
+      LogicalProject(account_number=[$0], gender=[$1], age=[$2], _row_number_dedup_=[ROW_NUMBER() OVER (PARTITION BY $1)])
+        LogicalFilter(condition=[IS NOT NULL($1)])
+          LogicalProject(account_number=[$0], gender=[$4], age=[$8])
+            CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+```
+
+Physical plan:
+
+```
+EnumerableLimit(fetch=[10000])
+  EnumerableCalc(...)
+    EnumerableWindow(window#0=[window(partition {4} rows between UNBOUNDED PRECEDING and CURRENT ROW aggs [ROW_NUMBER()])])
+      EnumerableCalc(...)
+        CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+```
+
+`EnumerableWindow` runs **in the plugin, on the coordinator**. The limit sits above the window and cannot be pushed below it, so `CalciteEnumerableIndexScan` must return every matching document. Beyond `max_result_window` that triggers PIT (`OpenSearchRequestBuilder.java:127-140`), and over a wildcard pattern the PIT-per-shard fan-out exhausts `search.max_open_pit_context`. This single query shape is #5698.
+
+### Staged
+
+`IS NOT NULL(gender)` is a candidate for the `exists` query (see caveat below). `Filter(rank ≤ 1)` over `ROW_NUMBER() OVER (PARTITION BY gender)` is exactly rule 3's pattern.
+
+```
+shardFragment:
+  LogicalProject(account_number=[$0], gender=[$1], age=[$2])          ← drops the rank column
+    LogicalFilter(condition=[<=($3, 1)])
+      LogicalProject(account_number=[$0], gender=[$1], age=[$2],
+                     _row_number_dedup_=[ROW_NUMBER() OVER (PARTITION BY $1)])
+        LogicalProject(account_number=[$0], gender=[$4], age=[$8])
+          OpenSearchIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]],
+                              query=[{"exists":{"field":"gender"}}])
+
+combine:  RANK_LIMIT{partitionKeys:[1], k:1}       ← recomputes rank over the union
+
+coordinatorTree:
+  LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+    LogicalProject(account_number=[$0], gender=[$1], age=[$2])
+      «gathered rows»
+```
+
+Two details that matter:
+
+**The shard must drop `_row_number_dedup_` before shipping.** Shard-local rank values are meaningless to the coordinator, which has to re-rank over the union of shard outputs. `RANK_LIMIT` therefore *recomputes* rank rather than filtering the shipped column — for `k=1` that is a hash-distinct on the partition keys, for `k>1` it is "keep first k per key". Both are associative, so tier 1 is legal. Shipping the column would be pure waste.
+
+**Why the partial is correct here is nondeterminism, not monotonicity.** `ROW_NUMBER() OVER (PARTITION BY gender)` has no `ORDER BY`, so which row receives rank 1 is unconstrained; any one row per partition is a valid answer, and composing per-shard choices with a coordinator choice yields another valid answer. Rule 3's general justification — rank monotonicity, where adding rows can only push a rank higher — is what covers the `RANK`/`DENSE_RANK`-with-`ORDER BY` cases. Both arguments must hold for the rule to fire; the implementation should assert which one applies.
+
+**Caveat on the `exists` push.** `IS NOT NULL` and OpenSearch `exists` are not unconditionally equivalent — `null_value` mappings, empty strings, and multi-valued fields can diverge. If equivalence is not certain for a field's mapping, leave the predicate as a residual filter in the fragment. Under tenet 1 that costs only speed, which is precisely the freedom this design buys; the previous engine had to get it right or refuse the query.
+
+Request:
+
+```json
+{
+  "size": 0,
+  "query": { "bool": { "filter": [ {"exists": {"field": "gender"}} ] } },
+  "aggs": { "calcite_stage": { "calcite_exec": {
+      "plan": "<base64 RelJson shardFragment>",
+      "fields": [{"name":"account_number","type":"long"},
+                 {"name":"gender","type":"keyword"},
+                 {"name":"age","type":"long"}],
+      "combine": {"mode":"RANK_LIMIT","partitionKeys":[1],"k":1},
+      "row_budget": 200000
+  }}}
+}
+```
+with `allowPartialSearchResults(false)`.
+
+Each shard returns **at most one row per distinct `gender`** — two or three rows — instead of every matching document. No PIT, no cursor, one request. The wire volume goes from O(documents) to O(distinct keys × shards).
+
+## Worked example 2: `stats` — aggregate decomposition
+
+```
+source=logs-* | where status = 500 and lower(host) like 'web%'
+| stats count() as c by service | sort - c | head 10
+```
+
+`PredicateAnalyzer` splits the conjunction: `status = 500` becomes a term query; `lower(host) LIKE 'web%'` is not index-accelerable and stays as a residual filter inside the fragment. Rule 1 fires because `COUNT` is splittable (`CountSplitter`). `Sort`+`Fetch(10)` sits above the *final* aggregate and a limit cannot push below an `Aggregate`, so it stays on the coordinator.
+
+```
+shardFragment:    Aggregate(group={service}, pc=COUNT())
+                    ← Project(service)
+                      ← Filter(LOWER(host) LIKE 'web%')
+                        ← OpenSearchIndexScan(logs-*, {"term":{"status":500}})
+
+combine:          MERGE_AGG{groupKeys:[0], aggs:[SUM(1)]}     ← this IS the final aggregate
+
+coordinatorTree:  Sort(c DESC, fetch=10) ← «gathered rows»
+```
+
+One row per distinct `service` per shard. Because `AggregateReduceFunctionsRule` ran pre-split, tier 1 needs no finalization: had this been `avg`, the shard would ship `{sum, count}` and the division would appear as a `Project` in `coordinatorTree`.
+
+## Worked example 3: `eventstats` — the ceiling
+
+```
+source=logs-* | eventstats avg(latency) as avg_latency by service | where latency > avg_latency
+```
+
+The window is `NEEDS_GATHER` with no applicable rule, so the cut falls to the `Project` beneath it, the combine is `CONCAT`, and every matching row gathers. On a large index this trips the budget:
+
+```
+eventstats requires all rows on one node; gathered 12,400,000 rows, budget 200,000
+```
+
+A resource failure naming its cause, not an OOM and not a silently truncated average.
+
+## Acceptance test plan
+
+Verification runs with `plugins.calcite.pushdown.enabled=false` and `plugins.calcite.fallback.allowed=false`, so every query exercises the staged path and no query can silently escape to the old engine.
+
+Commands:
+
+```bash
+./gradlew build -x :integ-test:integTest                 # build
+./gradlew test                                           # unit tests
+./gradlew :integ-test:integTest                          # all ITs
+./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.CalciteDedupCommandIT"
+```
+
+### Phase A — execution correctness
+
+Ten existing IT classes, ~148 test methods, chosen to cover the typical PPL surface and all four rules plus the ceiling:
+
+| PPL shape | IT class (`org.opensearch.sql.calcite.remote.`) | Tests | Exercises |
+|---|---|---|---|
+| `fields` | `CalciteFieldsCommandIT` | 39 | generic floor |
+| `where` | `CalciteWhereCommandIT` | 6 | pushed + residual predicates |
+| `eval` | `CalciteEvalCommandIT` | 10 | shard-local expression evaluation |
+| `head` | `CalciteHeadCommandIT` | 6 | rule 4, early termination |
+| `sort` | `CalcitePPLSortIT` | 18 | rule 2 |
+| `top` | `CalciteTopCommandIT` | 5 | rules 1 + 2 composed |
+| `stats` | `CalciteStatsCommandIT` | 4 | rule 1, `MERGE_AGG` |
+| `dedup` | `CalciteDedupCommandIT` | 5 | rule 3, `RANK_LIMIT` |
+| `eventstats` | `CalcitePPLEventstatsIT` | 27 | `CONCAT` path and the ceiling |
+| explain | `CalciteExplainIT` | ~28 | Phase B |
+
+Results are reported in **three buckets**, never conflated:
+
+- **pass**
+- **fail-on-assertion** — a real correctness gap, or an `explain` golden needing re-baseline
+- **fail-on-ceiling** — the gather budget refused the query
+
+The bucket counts are the PoC's primary deliverable. Conflating the last two would obscure the only number that matters.
+
+### Phase B — explain shows the split
+
+`explain` output must render the three parts distinctly: `shardFragment`, `combine`, `coordinatorTree`. This is how a reviewer confirms the design works as intended rather than trusting row counts. New/updated YAML goldens under `integ-test/src/test/resources/expectedOutput/calcite/` for at minimum:
+
+- `where` + `fields` (floor only, `CONCAT`)
+- `stats ... by` (rule 1, `MERGE_AGG`)
+- `dedup` (rule 3, `RANK_LIMIT`)
+- `sort ... | head N` (rule 2, `TOP_N`)
+- `head N` (rule 4, `LIMIT`)
+- `eventstats` (no rule, `CONCAT`, full gather)
+
+### Phase C — the generated DSL is correct
+
+Assert on the captured `SearchRequest` that: `size == 0`; `allowPartialSearchResults == false`; the `query` clause contains exactly the index-accelerable conjuncts; residual predicates are **absent** from the query clause and **present** in the fragment; no PIT, scroll, or `search_after` is ever created on this path.
+
+### Phase D — ceiling behaviour
+
+With `row_budget` set very low: the query fails with an error naming the row count and the forcing operator; the response contains no partial results; the circuit breaker recorded the buffered bytes.
+
+### Phase E — the partial actually reduces
+
+`InternalCalciteExec` carries collection stats (rows collected, rows emitted). Assert that for `dedup` and `stats`, rows emitted per shard is strictly less than documents matched — proving the shard did real work rather than passing rows through, which is the specific defect this design replaces.
+
+## Out of scope
+
+Lazy doc-ID bridge (option C); approximate/truncating mode for high-cardinality `stats`; shard-to-shard shuffle; cost-based push decisions; routing-key-aligned window optimization; performance parity with today's pushdown.
+
+## Known limitations
+
+- **Performance will regress broadly** when the posture is first flipped, recovering as rules 1–4 land. The valuable output is the coverage number and the ceiling map, not a benchmark.
+- **The budget bounds failure, not memory.** Option B still materializes up to the budget. This PoC makes large queries fail cleanly and diagnosably; it does not make them work.
+- **OpenSearch has exactly one non-trivial distribution.** With no shard-to-shard shuffle, the only synthesizable distribution is a gather to the coordinator. Window (non-rank), global sort without a limit, and large×large joins are therefore permanently bounded by one node's heap, where Spark and Trino scale them out by shuffling. Roughly 15–25% of observability queries fall in that class (inference, not measured). Closing it requires a real streaming layer in core; the stage model generalizes to N stages, so it does not preclude that.
+- **`explain` goldens change wholesale.** Expect Phase A's fail-on-assertion bucket to be dominated by re-baselining rather than by real defects, especially before Phase B lands.
+
+## Evidence appendix
+
+Facts established during design, with sources, that the implementation must not contradict.
+
+| Fact | Source |
+|---|---|
+| `size: 0` sets `hasTopDocs=false`, skipping the fetch phase, so no reader context or PIT is needed | OpenSearch query phase |
+| Reduce is batched at `batched_reduce_size` (512); `reduce()` must be associative; no opt-out exists | `QueryPhaseResultConsumer.PendingReduces` |
+| `mustReduceOnSingleInternalAgg()` only forces `reduce()` when a single shard returned; it does not disable batching | `InternalAggregation` |
+| Batched reduce lowers peak memory only when the combine reduces volume | `partialReduce()`, `onAfterReduce()` |
+| `Aggregator.collect()` can read `_source`, independent of the fetch phase, so no-doc_values fields are reachable | `SearchContext.lookup().getLeafSearchLookup(ctx).source()` |
+| Transport ceiling data node → coordinator is 30% of JVM heap, hardcoded; there is no `transport.max_message_size` setting | `TcpTransport` |
+| `http.max_content_length` (100MB) binds only the final response; the plugin reads `SearchResponse` in process | — |
+| `CollectionTerminatedException` terminates the current leaf only | `ContextIndexSearcher#searchLeaf()` |
+| `allow_partial_search_results` defaults to `true` | `search.default_allow_partial_results` |
+| Calcite's aggregate split bottoms out per function; `unwrap(SqlSplittableAggFunction.class) == null` means unsplittable | `SqlSplittableAggFunction`, `CountSplitter`, `SumSplitter`, `Sum0Splitter`, `SelfSplitter` |
+| Window rank-filter has a standard partial; general and unbounded-frame windows do not | Spark `InferWindowGroupLimit` (SPARK-37099); Trino `AddExchanges.visitTopNRanking()` |
+| Limit-pushability is per-operator: exact below `Project`/`Calc`, merges with `Sort`, exact per-branch for `Union ALL`; not below `Filter`, `Aggregate`, general `Window`, `Join`, `Union DISTINCT` | Calcite `SortProjectTransposeRule`, `SortUnionTransposeRule` |
+| `terms` agg approximation is bespoke `TermsAggregator` code, not a lifecycle feature; per-shard truncation is semantically valid only when `Sort`+`Fetch` sits above the `Aggregate` | `doc_count_error_upper_bound`, `sum_other_doc_count` |
+| PIT today triggers on `startFrom + size > maxResultWindow`, or any paginated query | `OpenSearchRequestBuilder.java:127-140` |
