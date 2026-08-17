@@ -166,6 +166,37 @@ Two plan shapes need different shard structures, which is why a `Fetch` node alo
 
 Single-index queries issue one request; a join issues one per scan and joins on the coordinator. Neither needs a cursor. Multiple bounded requests are not pagination — cursor state exists to stream an *unbounded* result across round trips.
 
+## Custom logical operator audit (US-001)
+
+Does tenet 6 ("standard Calcite operators only") already hold on the Calcite path?
+
+| PPL command(s) | Custom RelNode class | File path | Lowers to standard operators before optimization? |
+|---|---|---|---|
+| all queries, `join`, `lookup`, `union`, subqueries | `LogicalSystemLimit` | `core/src/main/java/org/opensearch/sql/calcite/plan/rel/LogicalSystemLimit.java:25` | No — persists as a `Sort` subclass (fetch-only, no ordering). Matched by `LimitIndexScanRule`. |
+| `dedup` (mid-optimization only) | `LogicalDedup` | `core/src/main/java/org/opensearch/sql/calcite/plan/rel/LogicalDedup.java:20` | Yes — `PPLDedupConvertRule` lowers back to `LogicalFilter` + `LogicalProject` (ROW_NUMBER window) + `LogicalSort`. |
+| `graphLookup` | `LogicalGraphLookup` | `core/src/main/java/org/opensearch/sql/calcite/plan/rel/LogicalGraphLookup.java:22` | **No** — irreducible; no standard equivalent exists. |
+| *(dead code, never instantiated)* | `TimeWindow` | `core/src/main/java/org/opensearch/sql/calcite/plan/TimeWindow.java:15` | N/A — dead code. |
+
+**Verdict.** `LogicalSystemLimit` is a `Sort` subclass present in every plan and already matched by `LimitIndexScanRule`; it satisfies the spirit of tenet 6.  `LogicalDedup` is transient during HEP optimization and is lowered back to standard operators by `PPLDedupConvertRule`; it satisfies tenet 6.  `LogicalGraphLookup` (from the `graphLookup` command) is irreducible and therefore the one genuine tenet-6 violation — it persists through optimization and is converted directly to a physical `CalciteEnumerableGraphLookup`.
+
+- All other PPL commands — `where`, `fields`, `eval`, `stats`, `eventstats`, `streamstats`, `sort`, `head`, `dedup`, `rare`/`top`, `trendline`, `appendcol`, `expand`, `flatten`, `mvexpand`, `patterns`, `parse`, `grok`, `rex`, `spath`, `fillnull`, `rename`, `bin`, `lookup`, `join`, `union`, `append`, `reverse`, `transpose`, `addtotals`, `chart`/`timechart`, `mvcombine`, `nomv`, `replace`, `regex`, `makeresults`, `values`, and the rest of the grammar — produce only standard Calcite logical operators.  The audit walked every command rule in `ppl/src/main/antlr/OpenSearchPPLParser.g4` (lines 58–105) so is complete over the command grammar, not merely over the discovered classes.
+
+### dedup lowers to a standard window plus rank filter
+
+The translation entry point is `CalciteRelNodeVisitor.visitDedupe()` (`core/src/main/java/org/opensearch/sql/calcite/CalciteRelNodeVisitor.java:2208`).  The lowering rule `PPLDedupConvertRule` (`core/src/main/java/org/opensearch/sql/calcite/plan/rule/PPLDedupConvertRule.java`) dispatches to `buildDedupNotNull()` (line 151) or `buildDedupOrNull()` (line 114).  Both use `ROW_NUMBER` exclusively — never `RANK` or `DENSE_RANK`.
+
+Explain goldens under `integ-test/src/test/resources/expectedOutput/calcite/` confirm the lowered form:
+
+```
+LogicalFilter(condition=[<=($3, 1)])
+  LogicalProject(..., _row_number_dedup_=[ROW_NUMBER() OVER (PARTITION BY $1)])
+    LogicalFilter(condition=[IS NOT NULL($1)])
+```
+
+IT methods that load these goldens: `ExplainIT.testDedupPushdown()` (line 489), `ExplainIT.testDedupKeepEmptyTrueNotPushed()` (line 499), `ExplainIT.testDedupKeepEmptyFalsePushdown()` (line 509), `CalciteExplainIT.testComplexDedup()` (line 2214), `CalciteExplainIT.testDedupExpr()` (line 2238).
+
+`consecutive=true` throws `CalciteUnsupportedException` at `CalciteRelNodeVisitor.java:2217`; no golden exists for it.
+
 ## Worked example 1: `dedup` — the #5698 failure, and its fix
 
 ```

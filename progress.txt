@@ -9,6 +9,8 @@ Seeded from the design session on 2026-08-17. These are verified against source;
 - Single IT class: `./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.CalciteDedupCommandIT"`
 - Single IT method: `./gradlew :integ-test:integTest --tests "org.opensearch.sql.calcite.remote.CalciteExplainIT.testComplexDedup"`
 - `-Dtests.security.manager=false` is already set in build.gradle.
+- `:doctest:bootstrap` CANNOT run on this dev host: the repo venv is python3.7 and `doctest/sql-cli` pins `boto3==1.34.34`, which requires python>=3.8. `./gradlew build -x :integ-test:integTest` therefore FAILS on `:doctest:bootstrap` for reasons unrelated to any code change. Use `./gradlew build -x :integ-test:integTest -x :doctest:bootstrap -x :doctest:doctest` instead.
+- Full Java build takes ~9 min cold; `./gradlew test` ~20s warm; `./gradlew spotlessCheck` ~35s.
 
 ## Settings that already exist — do not add new ones
 - `plugins.calcite.enabled` → CALCITE_ENGINE_ENABLED
@@ -45,6 +47,16 @@ Seeded from the design session on 2026-08-17. These are verified against source;
 - Limit-pushability is per-operator: exact below Project/Calc, merges with Sort into top-N, exact per-branch for Union ALL. NOT below Filter, Aggregate, general Window, Join, or Union DISTINCT.
 - PPL `dedup` already lowers to `ROW_NUMBER() OVER (PARTITION BY ...)` plus a `<= k` filter — no custom operator is involved on the Calcite path.
 
+## Custom logical operators (audit result, US-001)
+- Only three custom logical RelNodes exist on the Calcite path:
+  - `LogicalSystemLimit` (`core/.../calcite/plan/rel/LogicalSystemLimit.java:25`, a `Sort` subclass, present in every plan)
+  - `LogicalDedup` (`core/.../calcite/plan/rel/LogicalDedup.java:20`, transient during HEP, lowered by `PPLDedupConvertRule`)
+  - `LogicalGraphLookup` (`core/.../calcite/plan/rel/LogicalGraphLookup.java:22`, irreducible, from `graphLookup`, becomes `CalciteEnumerableGraphLookup`)
+- `TimeWindow` (`core/.../calcite/plan/TimeWindow.java:15`) is dead code never instantiated.
+- Every other PPL command produces only standard Calcite operators.
+- `dedup` uses `ROW_NUMBER` exclusively (never `RANK`/`DENSE_RANK`) via `CalciteRelNodeVisitor.visitDedupe()` (line 2208) and `PPLDedupConvertRule.buildDedupNotNull()`/`buildDedupOrNull()`.
+- `dedup consecutive=true` throws `CalciteUnsupportedException` (`CalciteRelNodeVisitor.java:2217`).
+
 ## Design invariants — do not violate
 1. The split must be TOTAL over RelNode. Absence of an optimization rule means the operator runs on the coordinator. Never reject a plan.
 2. Never emit a Painless script query. If a predicate is not index-accelerable, leave it as a residual Filter in the fragment.
@@ -57,3 +69,15 @@ Full design: `docs/dev/poc-staged-calcite-exec-design.md`
 # Iteration Log
 
 <!-- Round summaries and human intervention notes will be appended here automatically -->
+
+## 2026-08-17 - US-001
+- Audited every PPL command in `ppl/src/main/antlr/OpenSearchPPLParser.g4` for custom (non-standard) logical RelNodes on the Calcite path and recorded the inventory in the design doc. Documentation-only change; no production code touched.
+- Files changed: `docs/dev/poc-staged-calcite-exec-design.md` (new `## Custom logical operator audit (US-001)` section, 31 lines, inserted before `## Worked example 1`), `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Tenet 6 does NOT hold today. `LogicalGraphLookup` is an irreducible custom `BiRel` from the `graphLookup` command; it survives optimization and converts directly to `CalciteEnumerableGraphLookup`. US-007's StagePlanner must place it as `NEEDS_GATHER` — which the generic placement floor already does by default, so this is a documentation point, not a blocker.
+  - `LogicalSystemLimit` is in EVERY plan, so any StagePlanner placement function must handle it explicitly or it will force a gather on every query. It is a `Sort` subclass with `fetch` only and no collation.
+  - `LogicalDedup` exists but is transient: it appears only mid-HEP and `PPLDedupConvertRule` lowers it back to `LogicalFilter` + `LogicalProject`(ROW_NUMBER window). Do not build split logic against `LogicalDedup` — build it against the window + rank-filter shape, which is what US-015 already specifies.
+  - `dedup consecutive=true` is unsupported (throws `CalciteUnsupportedException`), so US-015 needs no consecutive variant and no golden exists for one.
+  - `:doctest:bootstrap` is permanently broken on this host (python3.7 vs `boto3==1.34.34` needing >=3.8). Always build with `-x :doctest:bootstrap -x :doctest:doctest` or every round will report a false build failure.
+  - Handoff research notes from this round: `.sisyphus/handoff/explorer-custom-relnodes.md`, `.sisyphus/handoff/explorer-dedup-golden.md`
+---

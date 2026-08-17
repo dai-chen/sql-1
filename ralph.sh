@@ -8,7 +8,7 @@
 set -e
 
 AGENT="sisyphus"
-MODEL="claude-opus-4.6-1m"
+MODEL="claude-opus-5"
 MAX_ITERATIONS=0  # 0 = unlimited (use STOP_RALPH to stop)
 
 while [[ $# -gt 0 ]]; do

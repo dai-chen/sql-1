@@ -19,8 +19,8 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Audit complete; doc-only change. FINDING: tenet 6 does NOT fully hold today. LogicalGraphLookup (core/src/main/java/org/opensearch/sql/calcite/plan/rel/LogicalGraphLookup.java:22, from the graphLookup command) is an irreducible custom BiRel that survives optimization and converts straight to CalciteEnumerableGraphLookup -- StagePlanner (US-007) must treat it as NEEDS_GATHER. LogicalSystemLimit is a Sort subclass in every plan and is fine. LogicalDedup is transient during HEP and is lowered by PPLDedupConvertRule. TimeWindow is dead code. Verified: spotlessCheck PASS, build PASS, test PASS. NOTE: :doctest:bootstrap cannot run on this host (only python3.7 present; boto3==1.34.34 requires >=3.8), so build was run with -x :doctest:bootstrap -x :doctest:doctest."
     },
     {
       "id": "US-002",
