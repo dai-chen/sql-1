@@ -66,6 +66,19 @@ Seeded from the design session on 2026-08-17. These are verified against source;
 
 Full design: `docs/dev/poc-staged-calcite-exec-design.md`
 
+## Custom aggregation: calcite_exec (US-002)
+- Aggregation type name: `calcite_exec`
+- Package: `org.opensearch.sql.opensearch.stage` (in `opensearch` module)
+- Classes:
+  - `CombineDescriptor` — enum of reduce modes (CONCAT, MERGE_AGG, LIMIT, TOP_N, RANK_LIMIT) plus parameters
+  - `CalciteExecAggregationBuilder` — XContent parser + Writeable builder; fields: plan, fields, combine, rowBudget
+  - `CalciteExecAggregatorFactory` — creates aggregator via `createInternal(SearchContext, Aggregator, CardinalityUpperBound, Map<String,Object>)`
+  - `CalciteExecAggregator` — extends MetricsAggregator; collects docs, executes fragment, emits InternalCalciteExec
+  - `InternalCalciteExec` — InternalAggregation; carries rows + combine descriptor; reduce() applies combine mode
+- Registration: `SQLPlugin.getAggregations()` (SQLPlugin now implements SearchPlugin)
+- Module-visibility rule: `opensearch` module has the full opensearch server jar (`opensearch/build.gradle:36`); `core` has only `opensearch-core`. Any class touching InternalAggregation, AggregatorFactory, MetricsAggregator, or SearchContext must live in `opensearch` (or `plugin`), never `core`.
+- CombineDescriptor modes: CONCAT (US-002), MERGE_AGG (US-012), LIMIT (US-013), TOP_N (US-014), RANK_LIMIT (US-015)
+
 # Iteration Log
 
 <!-- Round summaries and human intervention notes will be appended here automatically -->
@@ -80,4 +93,16 @@ Full design: `docs/dev/poc-staged-calcite-exec-design.md`
   - `dedup consecutive=true` is unsupported (throws `CalciteUnsupportedException`), so US-015 needs no consecutive variant and no golden exists for one.
   - `:doctest:bootstrap` is permanently broken on this host (python3.7 vs `boto3==1.34.34` needing >=3.8). Always build with `-x :doctest:bootstrap -x :doctest:doctest` or every round will report a false build failure.
   - Handoff research notes from this round: `.sisyphus/handoff/explorer-custom-relnodes.md`, `.sisyphus/handoff/explorer-dedup-golden.md`
+---
+
+## 2026-08-17 - US-002
+- Registered the `calcite_exec` custom aggregation skeleton. New package `org.opensearch.sql.opensearch.stage` in the `opensearch` module with CombineDescriptor, CalciteExecAggregationBuilder, CalciteExecAggregatorFactory, CalciteExecAggregator, InternalCalciteExec. SQLPlugin now implements SearchPlugin and returns the AggregationSpec. Integration test verifies a well-formed empty result from a search request carrying `calcite_exec`.
+- Files changed: `opensearch/src/main/java/org/opensearch/sql/opensearch/stage/CombineDescriptor.java`, `opensearch/src/main/java/org/opensearch/sql/opensearch/stage/CalciteExecAggregationBuilder.java`, `opensearch/src/main/java/org/opensearch/sql/opensearch/stage/CalciteExecAggregatorFactory.java`, `opensearch/src/main/java/org/opensearch/sql/opensearch/stage/CalciteExecAggregator.java`, `opensearch/src/main/java/org/opensearch/sql/opensearch/stage/InternalCalciteExec.java`, `plugin/src/main/java/org/opensearch/sql/plugin/SQLPlugin.java`, `integ-test/src/test/java/org/opensearch/sql/calcite/remote/CalciteExecAggregationIT.java`
+- **Learnings for future iterations:**
+  - The `opensearch` module is the ONLY module with the full opensearch server jar; `core` has only the thin `opensearch-core`. Any class touching `InternalAggregation`, `AggregatorFactory`, `MetricsAggregator`, or `SearchContext` must live in `opensearch` (or `plugin`), never `core`. This constrains US-007's StagePlanner, which the design doc assigns to `core` — StagePlanner must therefore NOT reference any opensearch-server aggregation type.
+  - `SQLPlugin` now implements `SearchPlugin`; future stories adding `getQueries()`, `getSearchExts()`, or more `AggregationSpec`s extend the existing `getAggregations()` rather than re-adding the interface.
+  - Concrete OpenSearch 3.9.0-SNAPSHOT API signatures discovered: `AggregatorFactory.createInternal(SearchContext, Aggregator, CardinalityUpperBound, Map<String,Object>)`, `MetricsAggregator(name, context, parent, metadata)`, `metadata` not `metaData`, no `doEquals`/`doHashCode`, no `getMinimalSupportedVersion()` — so later stories do not have to rediscover them.
+  - Writeable round-trip symmetry is the highest-risk defect class in this PoC and is invisible to single-node tests — always verify the `StreamInput` ctor reads in the same order/methods as `writeTo` writes. Note that `writeVIntArray` and `readList(StreamInput::readVInt)` ARE wire-compatible, but prefer `writeCollection(list, StreamOutput::writeVInt)` for visible symmetry.
+  - `InternalCalciteExec.reduce()` currently has no rowBudget enforcement (TODO tagged US-013); CONCAT accumulates unbounded on the coordinator.
+  - The design doc's worked-example JSON is the authoritative source for wire field names; it mixes snake_case (`row_budget`) at the top level with camelCase inside the combine descriptor. This is intentional — do not "normalize" it.
 ---

@@ -37,8 +37,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "All 7 acceptance criteria met. New package org.opensearch.sql.opensearch.stage in the opensearch module holds CombineDescriptor, CalciteExecAggregationBuilder, CalciteExecAggregatorFactory, CalciteExecAggregator, InternalCalciteExec. Registration added to plugin/src/main/java/org/opensearch/sql/plugin/SQLPlugin.java (now also implements SearchPlugin). New IT integ-test/src/test/java/org/opensearch/sql/calcite/remote/CalciteExecAggregationIT.java. Module choice: these classes MUST live in opensearch because opensearch/build.gradle:36 has api group:'org.opensearch', name:'opensearch' (full server jar), while core/build.gradle:71 only has the thin opensearch-core, so InternalAggregation/AggregatorFactory/MetricsAggregator are not visible from core. OpenSearch 3.9.0-SNAPSHOT API deviations: no doEquals/doHashCode on AbstractAggregationBuilder (overrode equals/hashCode directly); no getMinimalSupportedVersion(); AggregatorFactory.createInternal signature is (SearchContext, Aggregator, CardinalityUpperBound, Map<String,Object>); MetricsAggregator ctor is (name, context, parent, metadata). Wire naming: top-level XContent names are plan, fields, combine, row_budget (snake_case for row_budget) taken verbatim from the design doc worked-example; combine descriptor internal keys keep the doc camelCase spelling. Only CONCAT reduce implemented; MERGE_AGG/LIMIT/TOP_N/RANK_LIMIT are enum constants that throw UnsupportedOperationException naming US-012/US-013/US-014/US-015 respectively. Verification: ./gradlew build -x :integ-test:integTest -x :doctest:bootstrap -x :doctest:doctest PASS; ./gradlew test PASS; ./gradlew spotlessCheck PASS; ./gradlew :integ-test:integTest --tests 'org.opensearch.sql.calcite.remote.CalciteExecAggregationIT' PASS with XML report tests=1 skipped=0 failures=0 errors=0. Code review verdict APPROVE with no critical findings; one NIT (wire idiom) and one SUGGESTION (rowBudget TODO) were incorporated."
     },
     {
       "id": "US-003",
