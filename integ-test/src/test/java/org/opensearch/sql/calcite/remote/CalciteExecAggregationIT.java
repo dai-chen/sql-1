@@ -58,6 +58,11 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
 
   @Test
   public void testCalciteExecAggregationCollectsRows() throws IOException {
+    // Build a real identity-projection fragment that passes all fields through unchanged.
+    String identityPlan =
+        buildIdentityPlan(
+            List.of("account_number", "gender"), List.of(SqlTypeName.BIGINT, SqlTypeName.VARCHAR));
+
     String body =
         """
         {
@@ -65,7 +70,7 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
           "aggs": {
             "calcite_stage": {
               "calcite_exec": {
-                "plan": "dHJpdmlhbA==",
+                "plan": "%s",
                 "fields": [
                   {"name": "account_number", "type": "long"},
                   {"name": "gender", "type": "keyword"}
@@ -76,7 +81,8 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
             }
           }
         }
-        """;
+        """
+            .formatted(identityPlan);
 
     Request request = new Request("POST", "/" + TEST_INDEX_BANK + "/_search");
     request.setJsonEntity(body);
@@ -132,6 +138,11 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
   public void testCalciteExecAggregationKeywordLongAndTextField() throws IOException {
     // Tests: city (keyword with doc_values), balance (long with doc_values),
     //        address (bare text field, no keyword subfield — _source only)
+    String identityPlan =
+        buildIdentityPlan(
+            List.of("city", "balance", "address"),
+            List.of(SqlTypeName.VARCHAR, SqlTypeName.BIGINT, SqlTypeName.VARCHAR));
+
     String body =
         """
         {
@@ -139,7 +150,7 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
           "aggs": {
             "calcite_stage": {
               "calcite_exec": {
-                "plan": "dHJpdmlhbA==",
+                "plan": "%s",
                 "fields": [
                   {"name": "city", "type": "keyword"},
                   {"name": "balance", "type": "long"},
@@ -151,7 +162,8 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
             }
           }
         }
-        """;
+        """
+            .formatted(identityPlan);
 
     Request request = new Request("POST", "/" + TEST_INDEX_BANK + "/_search");
     request.setJsonEntity(body);
@@ -425,5 +437,45 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
     RelOptTable table =
         catalogReader.getTableForMember(List.of(RelFragmentCodec.SCHEMA_NAME, INDEX_NAME));
     return LogicalTableScan.create(CLUSTER, table, List.of());
+  }
+
+  /**
+   * Build a serialized identity-projection plan (projects every field straight through in order)
+   * over the shard row-source table. Reuses the same schema/table path convention as {@link
+   * #buildTableScan()} so that deserialization resolves the table correctly.
+   */
+  private String buildIdentityPlan(List<String> fieldNames, List<SqlTypeName> fieldTypes) {
+    // Build the row type for the table
+    RelDataTypeFactory.Builder rtBuilder = TYPE_FAC.builder();
+    for (int i = 0; i < fieldNames.size(); i++) {
+      rtBuilder.add(
+          fieldNames.get(i),
+          TYPE_FAC.createTypeWithNullability(TYPE_FAC.createSqlType(fieldTypes.get(i)), true));
+    }
+    RelDataType rowType = rtBuilder.build();
+
+    // Register the table under the same [OpenSearch, <indexName>] path
+    SchemaPlus rootSchema = Frameworks.createRootSchema(false);
+    SchemaPlus osSchema = rootSchema.add(RelFragmentCodec.SCHEMA_NAME, new AbstractSchema() {});
+    osSchema.add(INDEX_NAME, new RelFragmentCodec.ShardRowSourceTable(rowType));
+
+    CalciteSchema calciteSchema = CalciteSchema.from(rootSchema);
+    CalciteCatalogReader catalogReader =
+        new CalciteCatalogReader(
+            calciteSchema, List.of(), TYPE_FAC, new CalciteConnectionConfigImpl(new Properties()));
+
+    RelOptTable table =
+        catalogReader.getTableForMember(List.of(RelFragmentCodec.SCHEMA_NAME, INDEX_NAME));
+    RelNode tableScan = LogicalTableScan.create(CLUSTER, table, List.of());
+
+    // Build identity projection: project every field by index
+    List<RexNode> projects = new ArrayList<>();
+    for (int i = 0; i < fieldNames.size(); i++) {
+      projects.add(
+          REX_BUILDER.makeInputRef(tableScan.getRowType().getFieldList().get(i).getType(), i));
+    }
+    RelNode project = LogicalProject.create(tableScan, List.of(), projects, fieldNames);
+
+    return RelFragmentCodec.serialize(project);
   }
 }

@@ -102,18 +102,6 @@ public class CalciteExecAggregator extends MetricsAggregator {
 
   @Override
   public InternalAggregation buildAggregation(long owningBucketOrd) {
-    // If plan is trivial (placeholder "dHJpdmlhbA==" == base64("trivial")), skip execution and
-    // return raw rows. This preserves backward compatibility with US-002/US-004 tests that ship
-    // a placeholder plan.
-    if ("dHJpdmlhbA==".equals(plan)) {
-      List<List<Object>> rowLists = new ArrayList<>(rows.size());
-      for (Object[] row : rows) {
-        rowLists.add(Arrays.asList(row));
-      }
-      return new InternalCalciteExec(
-          name, combine, rowsCollected, rowsCollected, rowLists, metadata());
-    }
-
     // Compile the fragment to a Bindable and execute it, wrapped in the Calcite classloader
     // helper to ensure Janino can resolve plugin classes (CALCITE-3745 workaround).
     List<List<Object>> outputRows =
