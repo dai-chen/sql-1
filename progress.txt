@@ -79,6 +79,20 @@ Full design: `docs/dev/poc-staged-calcite-exec-design.md`
 - Module-visibility rule: `opensearch` module has the full opensearch server jar (`opensearch/build.gradle:36`); `core` has only `opensearch-core`. Any class touching InternalAggregation, AggregatorFactory, MetricsAggregator, or SearchContext must live in `opensearch` (or `plugin`), never `core`.
 - CombineDescriptor modes: CONCAT (US-002), MERGE_AGG (US-012), LIMIT (US-013), TOP_N (US-014), RANK_LIMIT (US-015)
 
+## Fragment codec: RelFragmentCodec (US-003)
+- `opensearch/src/main/java/org/opensearch/sql/opensearch/stage/RelFragmentCodec.java` — `serialize(RelNode) -> base64 RelJson` and `deserialize(base64, indexName, List<FieldDescriptor>) -> RelNode`.
+- Calcite 1.42.0 signatures that make custom RelJson injection possible: `RelJsonWriter(JsonBuilder, UnaryOperator<RelJson>)` and `RelJsonReader(RelOptCluster, RelOptSchema, Schema, UnaryOperator<RelJson>)`. Use these to inject `ExtendedRelJson` so PPL operators round-trip. Plain `RelJson` would silently lose them.
+- `RelJsonSerializer.getPplSqlOperatorTable()` is now `public static` (backing field is `volatile`, so the double-checked-locking singleton is correct). ALWAYS reuse it — never re-chain PPLBuiltinOperators + SqlStdOperatorTable + OperatorTable + SqlLibrary by hand.
+- `ExtendedRelJson.create(jsonBuilder)` leaves `inputTranslator = null`, and `withOperatorTable()` NPEs on a null translator because the 3-arg ctor `requireNonNull`s it. So on the read path you MUST chain `.withInputTranslator(...)` before `.withOperatorTable(...)`. The translator itself is never invoked — `RelJsonReader` resolves input refs through its own `RelInput` — so it should throw `UnsupportedOperationException` rather than fabricate refs. An earlier draft fabricated `SqlTypeName.ANY` refs, which would have been silently wrong if ever reached.
+- Table path convention is `[OpenSearch, <indexName>]` (`RelFragmentCodec.SCHEMA_NAME`). The SAME path must be registered on both the serialization and the deserialization side or `RelOptUtil.toString()` will not match.
+- `RelFragmentCodec.SHARD_ROWS_STASH_KEY` = `"calcite_exec.shard_rows"`. `ShardRowSourceTable` is a `ScannableTable` that reads `List<Object[]>` from `DataContext.get(SHARD_ROWS_STASH_KEY)` and returns an empty enumerable when absent. US-005 injects rows here.
+
+## Wire type strings are OPENSEARCH type names, not SqlTypeName names
+- `CalciteExecAggregationBuilder.FieldDescriptor.type` is a free-form `String` carrying an OpenSearch field type. The authoritative example at `docs/dev/poc-staged-calcite-exec-design.md:270-272` is `{"name":"account_number","type":"long"}` / `{"name":"gender","type":"keyword"}`.
+- Therefore `SqlTypeName.valueOf(fd.getType())` ALWAYS throws on real wire data. `RelFragmentCodec` owns the mapping: keyword/text→VARCHAR, long→BIGINT, integer→INTEGER, double→DOUBLE, float→REAL, boolean→BOOLEAN, date→TIMESTAMP; anything else throws naming the field and the type. Extend that map when a story needs a new type — do not add a second mapping elsewhere.
+- Do NOT reuse `OpenSearchTypeFactory.convertExprTypeToRelDataType` for this: it takes an `ExprType` object rather than a string, and returns UDT wrapper types (ExprDateType, ExprTimeStampType, …) for date/time/timestamp/ip that do not survive the RelJson round-trip.
+- Lesson: write unit tests against the REAL wire spellings from the design doc. The first draft's tests fed `"BIGINT"`/`"VARCHAR"` and passed green while the production path was broken for every actual caller.
+
 # Iteration Log
 
 <!-- Round summaries and human intervention notes will be appended here automatically -->
@@ -105,4 +119,18 @@ Full design: `docs/dev/poc-staged-calcite-exec-design.md`
   - Writeable round-trip symmetry is the highest-risk defect class in this PoC and is invisible to single-node tests — always verify the `StreamInput` ctor reads in the same order/methods as `writeTo` writes. Note that `writeVIntArray` and `readList(StreamInput::readVInt)` ARE wire-compatible, but prefer `writeCollection(list, StreamOutput::writeVInt)` for visible symmetry.
   - `InternalCalciteExec.reduce()` currently has no rowBudget enforcement (TODO tagged US-013); CONCAT accumulates unbounded on the coordinator.
   - The design doc's worked-example JSON is the authoritative source for wire field names; it mixes snake_case (`row_budget`) at the top level with camelCase inside the combine descriptor. This is intentional — do not "normalize" it.
+---
+
+## 2026-08-17 - US-003
+- Implemented the fragment codec: `RelFragmentCodec` serializes a shard-local RelNode subtree to RelJson and base64-encodes it, and deserializes the reverse by building a `RelOptCluster` (VolcanoPlanner + RexBuilder over `OpenSearchTypeFactory.TYPE_FACTORY`), registering a schema named `OpenSearch` holding the shard row-source table under the index name, and wiring the chained PPL operator table. `ExtendedRelJson` is injected into both `RelJsonWriter` and `RelJsonReader` through their Calcite 1.42 `UnaryOperator<RelJson>` constructors so PPL operators round-trip. `ShardRowSourceTable` is a `ScannableTable` stub reading rows from a `DataContext` stash slot, forward-compatible with US-005.
+- Files changed: `opensearch/src/main/java/org/opensearch/sql/opensearch/stage/RelFragmentCodec.java` (new), `opensearch/src/test/java/org/opensearch/sql/opensearch/stage/RelFragmentCodecTest.java` (new, 3 tests), `opensearch/src/main/java/org/opensearch/sql/opensearch/storage/serde/RelJsonSerializer.java` (`getPplSqlOperatorTable()` promoted private -> public static, Javadoc added, no behaviour change), `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - The repo already had RexNode-level JSON serde (`RelJsonSerializer` + `ExtendedRelJson` in `org.opensearch.sql.opensearch.storage.serde`) but NO full-RelNode-tree serde, and no prior use of `RelJsonWriter`/`RelJsonReader` anywhere. The tree walk is new as of this story; the Rex-level machinery was reusable as-is.
+  - Calcite 1.42.0's `RelJsonWriter`/`RelJsonReader` both accept a `UnaryOperator<RelJson>` customizer. Always check the actual constructor set on the classpath before coding against Calcite — the overload that makes custom-operator round-trip possible is not the obvious one.
+  - `ExtendedRelJson.create()` + `withOperatorTable()` NPEs unless `withInputTranslator()` is chained first (the 3-arg ctor `requireNonNull`s the translator). The translator is dead on the read path because `RelJsonReader` resolves input refs itself, so make it throw rather than fabricate refs.
+  - `ExtendedRelJson::translateInput` is package-private in `...storage.serde`, so classes in `...stage` cannot reference it.
+  - BIGGEST GOTCHA, cost a full extra fix round: the `fields` wire list carries OPENSEARCH type names (`long`, `keyword`), not `SqlTypeName` enum names. `SqlTypeName.valueOf()` on them always throws. The first implementation used `valueOf` AND wrote tests feeding `"BIGINT"`/`"VARCHAR"`, so the suite was green while every real caller would have failed. Always source unit-test fixtures from the design doc's authoritative wire example, not from whatever makes the code compile.
+  - Prefer the existing wire type (`CalciteExecAggregationBuilder.FieldDescriptor`) over parallel name/type lists in any new API — the caller in a later story already holds those objects, and parallel lists can desync in length or order.
+  - Review process note: `reviewer` returned APPROVE and correctly caught the dead ANY-typed translator, the parallel-list API shape, and the FQN-vs-import style break, but MISSED the `SqlTypeName.valueOf` wire-type defect because it trusted the passing tests. Orchestrator spot-checks against the design doc caught it. Green tests are not evidence when the tests and the code share the same wrong assumption.
+  - Handoff research notes from this round: `.sisyphus/handoff/explorer-reljson-infra.md`
 ---
