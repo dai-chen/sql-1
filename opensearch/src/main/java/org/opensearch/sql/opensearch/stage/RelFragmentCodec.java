@@ -17,9 +17,11 @@ import org.apache.calcite.config.CalciteConnectionConfigImpl;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.linq4j.Linq4j;
+import org.apache.calcite.plan.ConventionTraitDef;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
+import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.externalize.RelJsonReader;
 import org.apache.calcite.rel.externalize.RelJsonWriter;
@@ -52,7 +54,7 @@ public final class RelFragmentCodec {
   public static final String SHARD_ROWS_STASH_KEY = "calcite_exec.shard_rows";
 
   /** Schema name used in the table path: [OpenSearch, &lt;indexName&gt;]. */
-  static final String SCHEMA_NAME = "OpenSearch";
+  public static final String SCHEMA_NAME = "OpenSearch";
 
   /**
    * Maps OpenSearch field type names (the wire format defined in the design doc
@@ -72,6 +74,19 @@ public final class RelFragmentCodec {
           Map.entry("date", SqlTypeName.TIMESTAMP));
 
   private RelFragmentCodec() {}
+
+  /**
+   * Looks up the Calcite {@link SqlTypeName} for a given OpenSearch field type name. Throws if the
+   * type is unrecognized. Package-private for use by {@link CalciteExecAggregator} when building
+   * the runtime DataContext schema.
+   */
+  static SqlTypeName osTypeToSqlType(String osType) {
+    SqlTypeName sqlType = OS_TYPE_TO_SQL_TYPE.get(osType.toLowerCase(Locale.ROOT));
+    if (sqlType == null) {
+      throw new IllegalArgumentException("Unrecognized OpenSearch field type '" + osType + "'");
+    }
+    return sqlType;
+  }
 
   /**
    * Serializes a {@link RelNode} tree to a base64-encoded RelJson string.
@@ -110,7 +125,12 @@ public final class RelFragmentCodec {
 
     RelDataTypeFactory typeFactory = OpenSearchTypeFactory.TYPE_FACTORY;
     RexBuilder rexBuilder = new RexBuilder(typeFactory);
-    RelOptCluster cluster = RelOptCluster.create(new VolcanoPlanner(), rexBuilder);
+    VolcanoPlanner planner = new VolcanoPlanner();
+    // Register trait defs so the planner can handle convention and collation conversions
+    // during US-005's EnumerableConvention optimization phase.
+    planner.addRelTraitDef(ConventionTraitDef.INSTANCE);
+    planner.addRelTraitDef(RelCollationTraitDef.INSTANCE);
+    RelOptCluster cluster = RelOptCluster.create(planner, rexBuilder);
 
     // Build the row type from caller-supplied field descriptors
     RelDataTypeFactory.Builder rowTypeBuilder = typeFactory.builder();
@@ -168,11 +188,11 @@ public final class RelFragmentCodec {
    * DataContext} stash slot keyed by {@link #SHARD_ROWS_STASH_KEY}. Returns an empty enumerable
    * when the stash slot is absent (US-003 scope). US-005 owns the actual row injection.
    */
-  static class ShardRowSourceTable extends AbstractTable implements ScannableTable {
+  public static class ShardRowSourceTable extends AbstractTable implements ScannableTable {
 
     private final RelDataType rowType;
 
-    ShardRowSourceTable(RelDataType rowType) {
+    public ShardRowSourceTable(RelDataType rowType) {
       this.rowType = rowType;
     }
 
