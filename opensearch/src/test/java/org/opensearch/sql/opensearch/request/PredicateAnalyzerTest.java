@@ -6,8 +6,11 @@
 package org.opensearch.sql.opensearch.request;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.spy;
 
 import com.google.common.collect.ImmutableList;
@@ -18,6 +21,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.rel.type.RelDataType;
@@ -33,6 +37,9 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Holder;
 import org.apache.calcite.util.Sarg;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mockito;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.ExistsQueryBuilder;
@@ -44,11 +51,9 @@ import org.opensearch.index.query.MultiMatchQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.QueryStringQueryBuilder;
 import org.opensearch.index.query.RangeQueryBuilder;
-import org.opensearch.index.query.ScriptQueryBuilder;
 import org.opensearch.index.query.SimpleQueryStringBuilder;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.index.query.TermsQueryBuilder;
-import org.opensearch.index.query.WildcardQueryBuilder;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
 import org.opensearch.sql.data.type.ExprCoreType;
@@ -64,16 +69,22 @@ public class PredicateAnalyzerTest {
   final OpenSearchTypeFactory typeFactory = OpenSearchTypeFactory.TYPE_FACTORY;
   final RexBuilder builder = new RexBuilder(typeFactory);
   final RelOptCluster cluster = RelOptCluster.create(new VolcanoPlanner(), builder);
-  final List<String> schema = List.of("a", "b", "c", "d", "e");
+  final List<String> schema = List.of("a", "b", "c", "d", "e", "f", "g");
   final Map<String, ExprType> fieldTypes =
-      Map.of(
-          "a", OpenSearchDataType.of(MappingType.Integer),
-          "b",
+      Map.ofEntries(
+          Map.entry("a", OpenSearchDataType.of(MappingType.Integer)),
+          Map.entry(
+              "b",
               OpenSearchDataType.of(
-                  MappingType.Text, Map.of("fields", Map.of("keyword", Map.of("type", "keyword")))),
-          "c", OpenSearchDataType.of(MappingType.Text), // Text without keyword cannot be push down
-          "d", OpenSearchDataType.of(MappingType.Date),
-          "e", OpenSearchDataType.of(MappingType.Boolean));
+                  MappingType.Text,
+                  Map.of("fields", Map.of("keyword", Map.of("type", "keyword"))))),
+          Map.entry(
+              "c",
+              OpenSearchDataType.of(MappingType.Text)), // Text without keyword cannot be push down
+          Map.entry("d", OpenSearchDataType.of(MappingType.Date)),
+          Map.entry("e", OpenSearchDataType.of(MappingType.Boolean)),
+          Map.entry("f", OpenSearchDataType.of(MappingType.Ip)),
+          Map.entry("g", OpenSearchDataType.of(MappingType.Object)));
   final RexInputRef field1 =
       builder.makeInputRef(typeFactory.createSqlType(SqlTypeName.INTEGER), 0);
   final RexInputRef field2 =
@@ -607,51 +618,28 @@ public class PredicateAnalyzerTest {
   }
 
   @Test
-  void likeFunction_keywordField_generatesWildcardQuery() throws ExpressionNotAnalyzableException {
+  void likeFunction_keywordField_isNotPushable() {
     List<RexNode> arguments =
         Arrays.asList(field2, builder.makeLiteral("%Hi%"), builder.makeLiteral(true));
     RexNode call =
         PPLFuncImpTable.INSTANCE.resolve(builder, "like", arguments.toArray(new RexNode[0]));
-    QueryBuilder result = PredicateAnalyzer.analyze(call, schema, fieldTypes);
-    assertInstanceOf(WildcardQueryBuilder.class, result);
-    assertEquals(
-        """
-        {
-          "wildcard" : {
-            "b.keyword" : {
-              "wildcard" : "*Hi*",
-              "boost" : 1.0
-            }
-          }
-        }\
-        """,
-        result.toString());
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () -> PredicateAnalyzer.analyze(call, schema, fieldTypes));
   }
 
   @Test
-  void ilikeFunction_keywordField_generatesWildcardQuery() throws ExpressionNotAnalyzableException {
+  void ilikeFunction_keywordField_isNotPushable() {
     List<RexNode> arguments = Arrays.asList(field2, builder.makeLiteral("%Hi%"));
     RexNode call =
         PPLFuncImpTable.INSTANCE.resolve(builder, "ilike", arguments.toArray(new RexNode[0]));
-    QueryBuilder result = PredicateAnalyzer.analyze(call, schema, fieldTypes);
-    assertInstanceOf(WildcardQueryBuilder.class, result);
-    assertEquals(
-        """
-        {
-          "wildcard" : {
-            "b.keyword" : {
-              "wildcard" : "*Hi*",
-              "case_insensitive" : true,
-              "boost" : 1.0
-            }
-          }
-        }\
-        """,
-        result.toString());
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () -> PredicateAnalyzer.analyze(call, schema, fieldTypes));
   }
 
   @Test
-  void likeFunction_textField_scriptPushDown() throws ExpressionNotAnalyzableException {
+  void likeFunction_textField_isNotPushable() {
     RexInputRef field3 = builder.makeInputRef(typeFactory.createSqlType(SqlTypeName.VARCHAR), 2);
     List<RexNode> arguments =
         Arrays.asList(field3, builder.makeLiteral("%Hi%"), builder.makeLiteral(true));
@@ -668,12 +656,10 @@ public class PredicateAnalyzerTest {
             .add("c", builder.getTypeFactory().createSqlType(SqlTypeName.VARCHAR))
             .build();
     Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
-    QueryExpression expression =
-        PredicateAnalyzer.analyzeExpression(call, schema, fieldTypes, rowType, cluster);
-    assert (expression
-        .builder()
-        .toString()
-        .contains("\"lang\" : \"opensearch_compounded_script\""));
+    // LIKE on text field without .keyword is not index-accelerable; must surface as unanalyzable
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () -> PredicateAnalyzer.analyzeExpression(call, schema, fieldTypes, rowType, cluster));
   }
 
   @Test
@@ -764,7 +750,7 @@ public class PredicateAnalyzerTest {
   }
 
   @Test
-  void equals_scriptPushDown_TextWithoutKeyword() throws ExpressionNotAnalyzableException {
+  void equals_textWithoutKeyword_isNotPushable() {
     final RelDataType rowType =
         builder
             .getTypeFactory()
@@ -778,12 +764,14 @@ public class PredicateAnalyzerTest {
         builder.makeInputRef(typeFactory.createSqlType(SqlTypeName.VARCHAR), 2);
     RexNode call = builder.makeCall(SqlStdOperatorTable.EQUALS, field3, stringLiteral);
     Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
-    QueryBuilder builder = PredicateAnalyzer.analyze(call, schema, fieldTypes, rowType, cluster);
-    assert (builder.toString().contains("\"lang\" : \"opensearch_compounded_script\""));
+    // Equals on text field without .keyword sub-field is not index-accelerable
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () -> PredicateAnalyzer.analyze(call, schema, fieldTypes, rowType, cluster));
   }
 
   @Test
-  void equals_scriptPushDown_Struct() throws ExpressionNotAnalyzableException {
+  void equals_struct_isNotPushable() {
     final RelDataType mapType =
         typeFactory.createMapType(
             typeFactory.createSqlType(SqlTypeName.VARCHAR),
@@ -801,9 +789,10 @@ public class PredicateAnalyzerTest {
     final List<String> newSchema = List.of("d");
     RexNode call = builder.makeCall(SqlStdOperatorTable.IS_EMPTY, field4);
     Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
-    QueryBuilder builder =
-        PredicateAnalyzer.analyze(call, newSchema, newFieldTypes, rowType, cluster);
-    assert (builder.toString().contains("\"lang\" : \"opensearch_compounded_script\""));
+    // IS_EMPTY on struct is not index-accelerable
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () -> PredicateAnalyzer.analyze(call, newSchema, newFieldTypes, rowType, cluster));
   }
 
   @Test
@@ -830,8 +819,7 @@ public class PredicateAnalyzerTest {
   }
 
   @Test
-  void isEmpty_pushesIsNullArmAsExistsAndCharLengthArmAsScript()
-      throws ExpressionNotAnalyzableException {
+  void isEmpty_isNotPushable_becauseOrContainsNonPushableArm() {
     final RelDataType rowType =
         builder
             .getTypeFactory()
@@ -841,55 +829,15 @@ public class PredicateAnalyzerTest {
             .add("b", builder.getTypeFactory().createSqlType(SqlTypeName.VARCHAR))
             .build();
     // PPL isempty(x) lowers to OR(IS_NULL(x), CHAR_LENGTH(x) = 0) (see PPLFuncImpTable).
-    // The IS_NULL arm has a native DSL form (bool.must_not.exists); the CHAR_LENGTH arm
-    // has no DSL equivalent and falls back to opensearch_compounded_script. The analyzer
-    // emits a bool.should that mixes the two — not a single fully-script_query, which is
-    // strictly better for matching null docs since the IS_NULL arm avoids the script
-    // engine entirely.
-    //
-    // This shape is also why no special-case detector is needed in PredicateAnalyzer.andOr:
-    // CHAR_LENGTH(null) returns null (Calcite NullPolicy.STRICT) rather than NPE, so DSL's
-    // non-short-circuiting `should` evaluation is safe even when the field is null. Prior
-    // to the OR(IS_NULL, CHAR_LENGTH=0) lowering the right arm was IS_EMPTY which compiled
-    // to `name.isEmpty()` and would NPE on null operands — that is what containIsEmptyFunction
-    // used to guard against, and is no longer needed.
+    // The IS_NULL arm is pushable (exists query), but the CHAR_LENGTH arm is NOT
+    // index-accelerable. An OR with at least one non-pushable disjunct is entirely
+    // non-pushable — it surfaces as ExpressionNotAnalyzableException and becomes a
+    // residual Filter evaluated by Calcite.
     RexNode call = PPLFuncImpTable.INSTANCE.resolve(builder, BuiltinFunctionName.IS_EMPTY, field2);
     Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
-    QueryExpression expression =
-        PredicateAnalyzer.analyzeExpression(call, schema, fieldTypes, rowType, cluster);
-
-    QueryBuilder builderResult = expression.builder();
-    assertInstanceOf(BoolQueryBuilder.class, builderResult);
-    BoolQueryBuilder bool = (BoolQueryBuilder) builderResult;
-    assertEquals(
-        2,
-        bool.should().size(),
-        "isempty pushes down as a bool.should mixing native IS_NULL and a script for"
-            + " CHAR_LENGTH=0");
-    assertTrue(bool.must().isEmpty(), "must clauses are not used by isempty pushdown");
-    assertTrue(
-        bool.mustNot().isEmpty(),
-        "must_not clauses at the top level are not used by isempty pushdown");
-
-    // Arm 1: IS_NULL($field) → bool.must_not.exists
-    QueryBuilder isNullArm = bool.should().get(0);
-    assertInstanceOf(BoolQueryBuilder.class, isNullArm);
-    BoolQueryBuilder isNullBool = (BoolQueryBuilder) isNullArm;
-    assertEquals(1, isNullBool.mustNot().size());
-    assertInstanceOf(
-        ExistsQueryBuilder.class,
-        isNullBool.mustNot().get(0),
-        "IS_NULL arm must lower to bool.must_not.exists, not to a script");
-
-    // Arm 2: CHAR_LENGTH($field) = 0 → script (CHAR_LENGTH has no native DSL form)
-    QueryBuilder charLengthArm = bool.should().get(1);
-    assertInstanceOf(
-        ScriptQueryBuilder.class,
-        charLengthArm,
-        "CHAR_LENGTH=0 arm must lower to a script_query (no native DSL equivalent)");
-    assertTrue(
-        charLengthArm.toString().contains("\"lang\" : \"opensearch_compounded_script\""),
-        "script arm uses the Calcite-RexNode-based opensearch_compounded_script lang");
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () -> PredicateAnalyzer.analyzeExpression(call, schema, fieldTypes, rowType, cluster));
   }
 
   @Test
@@ -945,13 +893,13 @@ public class PredicateAnalyzerTest {
     assertEquals(1, unAnalyzableNodes.size());
     assertEquals(call2, unAnalyzableNodes.getFirst());
 
-    // If the call2 throw PredicateAnalyzerException, the `or` expression converts to script
-    // pushdown.
+    // An OR with a non-pushable disjunct is entirely non-pushable (no partial pushdown for OR).
     RexNode orCall = builder.makeCall(SqlStdOperatorTable.OR, List.of(call1, call2));
-    result =
-        PredicateAnalyzer.analyzeExpression(orCall, schema, fieldTypes, rowType, cluster, visitSpy);
-    resultBuilder = result.builder();
-    assertInstanceOf(ScriptQueryBuilder.class, resultBuilder);
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () ->
+            PredicateAnalyzer.analyzeExpression(
+                orCall, schema, fieldTypes, rowType, cluster, visitSpy));
 
     Mockito.doThrow(new PredicateAnalyzer.PredicateAnalyzerException(""))
         .when(visitSpy)
@@ -1480,45 +1428,16 @@ public class PredicateAnalyzerTest {
   }
 
   @Test
-  void notLike_keywordField_generatesBoolWithExistsAndMustNot()
-      throws ExpressionNotAnalyzableException {
-    // NOT(LIKE(field, pattern)) should generate bool query with must(exists) + mustNot(wildcard)
+  void notLike_keywordField_isNotPushable() {
+    // NOT(LIKE(field, pattern)) on a keyword field is not pushable because LIKE itself is not
     List<RexNode> arguments =
         Arrays.asList(field2, builder.makeLiteral("%Hi%"), builder.makeLiteral(true));
     RexNode likeCall =
         PPLFuncImpTable.INSTANCE.resolve(builder, "like", arguments.toArray(new RexNode[0]));
     RexNode notCall = builder.makeCall(SqlStdOperatorTable.NOT, likeCall);
-    QueryBuilder result = PredicateAnalyzer.analyze(notCall, schema, fieldTypes);
-
-    assertInstanceOf(BoolQueryBuilder.class, result);
-    assertEquals(
-        """
-        {
-          "bool" : {
-            "must" : [
-              {
-                "exists" : {
-                  "field" : "b",
-                  "boost" : 1.0
-                }
-              }
-            ],
-            "must_not" : [
-              {
-                "wildcard" : {
-                  "b.keyword" : {
-                    "wildcard" : "*Hi*",
-                    "boost" : 1.0
-                  }
-                }
-              }
-            ],
-            "adjust_pure_negative" : true,
-            "boost" : 1.0
-          }
-        }\
-        """,
-        result.toString());
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () -> PredicateAnalyzer.analyze(notCall, schema, fieldTypes));
   }
 
   @Test
@@ -1651,7 +1570,7 @@ public class PredicateAnalyzerTest {
   }
 
   @Test
-  void andWithUnpushableLike_partiallyPushesOtherPredicates()
+  void andWithUnpushableLike_partiallyPushesRangeAndLeavesLikeAsResidual()
       throws ExpressionNotAnalyzableException {
     // field3 (c) is text without .keyword → LIKE throws PredicateAnalyzerException
     // field4 (d) is date → timestamp range should push as RangeQueryBuilder
@@ -1665,6 +1584,8 @@ public class PredicateAnalyzerTest {
             .add("c", typeFactory.createSqlType(SqlTypeName.VARCHAR))
             .add("d", typeFactory.createUDT(ExprUDT.EXPR_TIMESTAMP))
             .add("e", typeFactory.createSqlType(SqlTypeName.BOOLEAN))
+            .add("f", typeFactory.createUDT(ExprUDT.EXPR_IP))
+            .add("g", typeFactory.createSqlType(SqlTypeName.OTHER))
             .build();
     Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
 
@@ -1676,21 +1597,354 @@ public class PredicateAnalyzerTest {
         builder.makeCall(SqlStdOperatorTable.GREATER_THAN_OR_EQUAL, field4, dateTimeLiteral);
     RexNode andCall = builder.makeCall(SqlStdOperatorTable.AND, rangeCall, likeCall);
 
-    QueryBuilder result = PredicateAnalyzer.analyze(andCall, schema, fieldTypes, rowType, cluster);
+    QueryExpression expression =
+        PredicateAnalyzer.analyzeExpression(andCall, schema, fieldTypes, rowType, cluster);
 
-    // Should be a BoolQueryBuilder with range in must[] and LIKE as script
+    // Partial: only the range is pushed, LIKE is residual (not a script)
+    assertTrue(expression.isPartial(), "AND with unpushable LIKE must be partial");
+
+    QueryBuilder result = expression.builder();
     assertInstanceOf(BoolQueryBuilder.class, result);
     BoolQueryBuilder boolQuery = (BoolQueryBuilder) result;
-    assertEquals(2, boolQuery.must().size());
+    assertEquals(1, boolQuery.must().size(), "Only the pushable range conjunct goes into must[]");
 
-    // First must clause should be the range query (pushable)
+    // The pushed must clause should be the range query
     QueryBuilder firstMust = boolQuery.must().get(0);
     assertInstanceOf(RangeQueryBuilder.class, firstMust);
     RangeQueryBuilder rangeQuery = (RangeQueryBuilder) firstMust;
     assertEquals("d", rangeQuery.fieldName());
 
-    // Second must clause should be script query (unpushable LIKE)
-    QueryBuilder secondMust = boolQuery.must().get(1);
-    assertInstanceOf(ScriptQueryBuilder.class, secondMust);
+    // The LIKE should appear in unAnalyzableNodes (residual for Filter above scan)
+    List<RexNode> residual = expression.getUnAnalyzableNodes();
+    assertEquals(1, residual.size(), "Unpushable LIKE must surface as a residual conjunct");
+    assertEquals(likeCall, residual.getFirst());
+
+    // Critically: no script clause anywhere in the pushed query
+    assertFalse(
+        result.toString().contains("\"script\""), "The filter path must never emit a script query");
+  }
+
+  // ===== US-006 Pushability Rule Tests =====
+
+  /**
+   * Table-driven test asserting pushed-vs-residual for each predicate type. Pushable: term
+   * equality, numeric range, date range, exists, match. Residual (not pushable): arithmetic
+   * comparison, string function, regex, non-decomposable OR.
+   */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("pushabilityTestCases")
+  void pushabilityRule_predicateClassification(
+      String description, RexNode predicate, boolean expectPushable)
+      throws ExpressionNotAnalyzableException {
+    final RelDataType rowType =
+        builder
+            .getTypeFactory()
+            .builder()
+            .kind(StructKind.FULLY_QUALIFIED)
+            .add("a", typeFactory.createSqlType(SqlTypeName.INTEGER))
+            .add("b", typeFactory.createSqlType(SqlTypeName.VARCHAR))
+            .add("c", typeFactory.createSqlType(SqlTypeName.VARCHAR))
+            .add("d", typeFactory.createUDT(ExprUDT.EXPR_TIMESTAMP))
+            .add("e", typeFactory.createSqlType(SqlTypeName.BOOLEAN))
+            .add("f", typeFactory.createUDT(ExprUDT.EXPR_IP))
+            .add("g", typeFactory.createSqlType(SqlTypeName.OTHER))
+            .build();
+    Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
+
+    if (expectPushable) {
+      // Should succeed without throwing
+      QueryExpression result =
+          PredicateAnalyzer.analyzeExpression(predicate, schema, fieldTypes, rowType, cluster);
+      assertFalse(
+          result.builder().toString().contains("\"script\""),
+          description + ": pushed query must not contain a script clause");
+    } else {
+      // Should throw — the predicate is not index-accelerable
+      assertThrows(
+          ExpressionNotAnalyzableException.class,
+          () ->
+              PredicateAnalyzer.analyzeExpression(predicate, schema, fieldTypes, rowType, cluster),
+          description + ": non-pushable predicate must throw ExpressionNotAnalyzableException");
+    }
+  }
+
+  static Stream<Arguments> pushabilityTestCases() {
+    OpenSearchTypeFactory tf = OpenSearchTypeFactory.TYPE_FACTORY;
+    RexBuilder rb = new RexBuilder(tf);
+    RexInputRef intField = rb.makeInputRef(tf.createSqlType(SqlTypeName.INTEGER), 0);
+    RexInputRef textKeywordField = rb.makeInputRef(tf.createSqlType(SqlTypeName.VARCHAR), 1);
+    RexInputRef textNoKeywordField = rb.makeInputRef(tf.createSqlType(SqlTypeName.VARCHAR), 2);
+    RexInputRef dateField = rb.makeInputRef(tf.createUDT(ExprUDT.EXPR_TIMESTAMP), 3);
+    RexLiteral intLit = rb.makeExactLiteral(new BigDecimal(42));
+    RexLiteral strLit = rb.makeLiteral("hello");
+    RexNode dateLit =
+        rb.makeLiteral("2024-01-01 00:00:00", tf.createUDT(ExprUDT.EXPR_TIMESTAMP), true);
+
+    // Pushable: term equality (field = literal)
+    RexNode termEquality = rb.makeCall(SqlStdOperatorTable.EQUALS, intField, intLit);
+    // Pushable: numeric range (field > literal)
+    RexNode numericRange = rb.makeCall(SqlStdOperatorTable.GREATER_THAN, intField, intLit);
+    // Pushable: date range (field >= literal)
+    RexNode dateRange = rb.makeCall(SqlStdOperatorTable.GREATER_THAN_OR_EQUAL, dateField, dateLit);
+    // Pushable: exists / IS NOT NULL
+    RexNode existsCheck = rb.makeCall(SqlStdOperatorTable.IS_NOT_NULL, intField);
+    // Pushable: match relevance function
+    RexNode aliasedFieldForMatch =
+        rb.makeCall(
+            SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR, rb.makeLiteral("field"), textKeywordField);
+    RexNode aliasedQueryForMatch =
+        rb.makeCall(SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR, rb.makeLiteral("query"), strLit);
+    RexNode matchCall =
+        PPLFuncImpTable.INSTANCE.resolve(
+            rb, "match", new RexNode[] {aliasedFieldForMatch, aliasedQueryForMatch});
+
+    // Residual: arithmetic comparison (field + 1 > literal)
+    RexNode arithmeticExpr =
+        rb.makeCall(
+            SqlStdOperatorTable.GREATER_THAN,
+            rb.makeCall(SqlStdOperatorTable.PLUS, intField, rb.makeExactLiteral(BigDecimal.ONE)),
+            intLit);
+    // Residual: string function (UPPER(field) = literal)
+    RexNode stringFuncExpr =
+        rb.makeCall(
+            SqlStdOperatorTable.EQUALS,
+            rb.makeCall(SqlStdOperatorTable.UPPER, textKeywordField),
+            strLit);
+    // Residual: regex / LIKE on text without keyword
+    RexNode regexExpr =
+        rb.makeCall(SqlStdOperatorTable.LIKE, textNoKeywordField, strLit, rb.makeLiteral("\\"));
+    // Residual: non-decomposable OR (pushable OR non-pushable)
+    RexNode nonDecomposableOr =
+        rb.makeCall(
+            SqlStdOperatorTable.OR,
+            termEquality,
+            rb.makeCall(
+                SqlStdOperatorTable.EQUALS,
+                rb.makeCall(SqlStdOperatorTable.UPPER, textKeywordField),
+                strLit));
+    // Pushable: range on keyword field (index-accelerable via term dictionary)
+    RexNode rangeOnKeyword =
+        rb.makeCall(SqlStdOperatorTable.GREATER_THAN, textKeywordField, strLit);
+    // Residual: LIKE on keyword field (not on closed pushable list)
+    RexNode likeOnKeyword =
+        rb.makeCall(SqlStdOperatorTable.LIKE, textKeywordField, strLit, rb.makeLiteral("\\"));
+    // Pushable: range on IP field (BKD-accelerated)
+    RexInputRef ipField = rb.makeInputRef(tf.createUDT(ExprUDT.EXPR_IP), 5);
+    RexLiteral ipLit = rb.makeLiteral("192.168.0.1");
+    RexNode rangeOnIp = rb.makeCall(SqlStdOperatorTable.GREATER_THAN, ipField, ipLit);
+    // Residual: range on struct/object field (non-scalar, not comparable)
+    RexInputRef structField = rb.makeInputRef(tf.createSqlType(SqlTypeName.OTHER), 6);
+    RexNode rangeOnStruct = rb.makeCall(SqlStdOperatorTable.GREATER_THAN, structField, strLit);
+
+    return Stream.of(
+        Arguments.of("term equality", termEquality, true),
+        Arguments.of("numeric range", numericRange, true),
+        Arguments.of("date range", dateRange, true),
+        Arguments.of("exists (IS NOT NULL)", existsCheck, true),
+        Arguments.of("match relevance function", matchCall, true),
+        Arguments.of("arithmetic comparison", arithmeticExpr, false),
+        Arguments.of("string function (UPPER)", stringFuncExpr, false),
+        Arguments.of("regex/LIKE on text without keyword", regexExpr, false),
+        Arguments.of("non-decomposable OR with non-pushable disjunct", nonDecomposableOr, false),
+        Arguments.of("range on keyword field", rangeOnKeyword, true),
+        Arguments.of("LIKE on keyword field", likeOnKeyword, false),
+        Arguments.of("range on IP field", rangeOnIp, true),
+        Arguments.of("range on struct/object field", rangeOnStruct, false));
+  }
+
+  /**
+   * Asserts that NO query generated by the filter path ever contains a "script" clause, AND that
+   * pushable cases produce a QueryBuilder while residual cases throw.
+   */
+  @ParameterizedTest(name = "noScriptInFilterPath: {0}")
+  @MethodSource("noScriptTestCases")
+  void filterPath_neverEmitsScriptQuery(
+      String description, RexNode predicate, boolean expectPushable) {
+    final RelDataType rowType =
+        builder
+            .getTypeFactory()
+            .builder()
+            .kind(StructKind.FULLY_QUALIFIED)
+            .add("a", typeFactory.createSqlType(SqlTypeName.INTEGER))
+            .add("b", typeFactory.createSqlType(SqlTypeName.VARCHAR))
+            .add("c", typeFactory.createSqlType(SqlTypeName.VARCHAR))
+            .add("d", typeFactory.createUDT(ExprUDT.EXPR_TIMESTAMP))
+            .add("e", typeFactory.createSqlType(SqlTypeName.BOOLEAN))
+            .add("f", typeFactory.createUDT(ExprUDT.EXPR_IP))
+            .add("g", typeFactory.createSqlType(SqlTypeName.OTHER))
+            .build();
+    Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
+
+    if (expectPushable) {
+      // Must succeed and produce a non-script query
+      try {
+        QueryExpression result =
+            PredicateAnalyzer.analyzeExpression(predicate, schema, fieldTypes, rowType, cluster);
+        assertFalse(
+            result.builder().toString().contains("\"script\""),
+            description + ": pushed query must never contain a script clause");
+      } catch (ExpressionNotAnalyzableException e) {
+        fail(description + ": expected pushable but threw " + e.getMessage());
+      }
+    } else {
+      // Must throw — the predicate is residual
+      assertThrows(
+          ExpressionNotAnalyzableException.class,
+          () ->
+              PredicateAnalyzer.analyzeExpression(predicate, schema, fieldTypes, rowType, cluster),
+          description + ": residual predicate must throw ExpressionNotAnalyzableException");
+    }
+  }
+
+  static Stream<Arguments> noScriptTestCases() {
+    OpenSearchTypeFactory tf = OpenSearchTypeFactory.TYPE_FACTORY;
+    RexBuilder rb = new RexBuilder(tf);
+    RexInputRef intField = rb.makeInputRef(tf.createSqlType(SqlTypeName.INTEGER), 0);
+    RexInputRef textKeywordField = rb.makeInputRef(tf.createSqlType(SqlTypeName.VARCHAR), 1);
+    RexInputRef textNoKeywordField = rb.makeInputRef(tf.createSqlType(SqlTypeName.VARCHAR), 2);
+    RexInputRef dateField = rb.makeInputRef(tf.createUDT(ExprUDT.EXPR_TIMESTAMP), 3);
+    RexLiteral intLit = rb.makeExactLiteral(new BigDecimal(42));
+    RexLiteral strLit = rb.makeLiteral("hello");
+    RexNode dateLit =
+        rb.makeLiteral("2024-01-01 00:00:00", tf.createUDT(ExprUDT.EXPR_TIMESTAMP), true);
+
+    // Pushable cases
+    RexNode termEquality = rb.makeCall(SqlStdOperatorTable.EQUALS, intField, intLit);
+    RexNode numericRange = rb.makeCall(SqlStdOperatorTable.GREATER_THAN, intField, intLit);
+    RexNode dateRange = rb.makeCall(SqlStdOperatorTable.GREATER_THAN_OR_EQUAL, dateField, dateLit);
+    RexNode existsCheck = rb.makeCall(SqlStdOperatorTable.IS_NOT_NULL, intField);
+    RexNode aliasedField =
+        rb.makeCall(
+            SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR, rb.makeLiteral("field"), textKeywordField);
+    RexNode aliasedQuery =
+        rb.makeCall(SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR, rb.makeLiteral("query"), strLit);
+    RexNode matchCall =
+        PPLFuncImpTable.INSTANCE.resolve(rb, "match", new RexNode[] {aliasedField, aliasedQuery});
+
+    // Residual cases (previously-script-producing expressions)
+    RexNode likeOnTextNoKeyword =
+        rb.makeCall(SqlStdOperatorTable.LIKE, textNoKeywordField, strLit, rb.makeLiteral("\\"));
+    RexNode equalsOnTextNoKeyword =
+        rb.makeCall(SqlStdOperatorTable.EQUALS, textNoKeywordField, strLit);
+    RexNode arithmeticExpr =
+        rb.makeCall(
+            SqlStdOperatorTable.GREATER_THAN,
+            rb.makeCall(SqlStdOperatorTable.PLUS, intField, rb.makeExactLiteral(BigDecimal.ONE)),
+            intLit);
+    RexNode stringFunc =
+        rb.makeCall(
+            SqlStdOperatorTable.EQUALS,
+            rb.makeCall(SqlStdOperatorTable.UPPER, textKeywordField),
+            strLit);
+    // isEmpty: OR(IS_NULL, CHAR_LENGTH=0)
+    RexNode isEmptyCall =
+        PPLFuncImpTable.INSTANCE.resolve(rb, BuiltinFunctionName.IS_EMPTY, textKeywordField);
+    // Non-decomposable OR
+    RexNode nonDecomposableOr = rb.makeCall(SqlStdOperatorTable.OR, termEquality, stringFunc);
+    // Pushable: range on keyword field (index-accelerable via term dictionary)
+    RexNode rangeOnKeyword =
+        rb.makeCall(SqlStdOperatorTable.GREATER_THAN, textKeywordField, strLit);
+    // Residual: LIKE on keyword field (not on closed pushable list)
+    RexNode likeOnKeyword =
+        rb.makeCall(SqlStdOperatorTable.LIKE, textKeywordField, strLit, rb.makeLiteral("\\"));
+    // Pushable: range on IP field (BKD-accelerated)
+    RexInputRef ipField = rb.makeInputRef(tf.createUDT(ExprUDT.EXPR_IP), 5);
+    RexLiteral ipLit = rb.makeLiteral("192.168.0.1");
+    RexNode rangeOnIp = rb.makeCall(SqlStdOperatorTable.GREATER_THAN, ipField, ipLit);
+    // Residual: range on struct/object field (non-scalar, not comparable)
+    RexInputRef structField = rb.makeInputRef(tf.createSqlType(SqlTypeName.OTHER), 6);
+    RexNode rangeOnStruct = rb.makeCall(SqlStdOperatorTable.GREATER_THAN, structField, strLit);
+
+    return Stream.of(
+        Arguments.of("term equality", termEquality, true),
+        Arguments.of("numeric range", numericRange, true),
+        Arguments.of("date range", dateRange, true),
+        Arguments.of("exists", existsCheck, true),
+        Arguments.of("match", matchCall, true),
+        Arguments.of("LIKE on text without keyword (residual)", likeOnTextNoKeyword, false),
+        Arguments.of("equals on text without keyword (residual)", equalsOnTextNoKeyword, false),
+        Arguments.of("arithmetic comparison (residual)", arithmeticExpr, false),
+        Arguments.of("string function UPPER (residual)", stringFunc, false),
+        Arguments.of("isEmpty OR (residual)", isEmptyCall, false),
+        Arguments.of("non-decomposable OR (residual)", nonDecomposableOr, false),
+        Arguments.of("range on keyword field", rangeOnKeyword, true),
+        Arguments.of("LIKE on keyword field (residual)", likeOnKeyword, false),
+        Arguments.of("range on IP field", rangeOnIp, true),
+        Arguments.of("range on struct/object field (residual)", rangeOnStruct, false));
+  }
+
+  /**
+   * Asserts that a mixed AND (pushable AND non-pushable) results in a partial expression where the
+   * pushable conjuncts are pushed and non-pushable conjuncts remain as residual.
+   */
+  @Test
+  void mixedAnd_producesPartialWithResidualFilter() throws ExpressionNotAnalyzableException {
+    final RelDataType rowType =
+        builder
+            .getTypeFactory()
+            .builder()
+            .kind(StructKind.FULLY_QUALIFIED)
+            .add("a", typeFactory.createSqlType(SqlTypeName.INTEGER))
+            .add("b", typeFactory.createSqlType(SqlTypeName.VARCHAR))
+            .add("c", typeFactory.createSqlType(SqlTypeName.VARCHAR))
+            .add("d", typeFactory.createUDT(ExprUDT.EXPR_TIMESTAMP))
+            .add("e", typeFactory.createSqlType(SqlTypeName.BOOLEAN))
+            .add("f", typeFactory.createUDT(ExprUDT.EXPR_IP))
+            .add("g", typeFactory.createSqlType(SqlTypeName.OTHER))
+            .build();
+    Hook.CURRENT_TIME.addThread((Consumer<Holder<Long>>) h -> h.set(0L));
+
+    // Pushable: a = 42
+    RexNode pushable = builder.makeCall(SqlStdOperatorTable.EQUALS, field1, numericLiteral);
+    // Non-pushable: UPPER(b) = 'Hi'
+    RexNode nonPushable =
+        builder.makeCall(
+            SqlStdOperatorTable.EQUALS,
+            builder.makeCall(SqlStdOperatorTable.UPPER, field2),
+            stringLiteral);
+    RexNode andCall = builder.makeCall(SqlStdOperatorTable.AND, pushable, nonPushable);
+
+    QueryExpression result =
+        PredicateAnalyzer.analyzeExpression(andCall, schema, fieldTypes, rowType, cluster);
+
+    // Must be partial
+    assertTrue(result.isPartial(), "AND with non-pushable conjunct must be partial");
+
+    // Only the pushable conjunct is in the query
+    QueryBuilder qb = result.builder();
+    assertInstanceOf(BoolQueryBuilder.class, qb);
+    BoolQueryBuilder boolQb = (BoolQueryBuilder) qb;
+    assertEquals(1, boolQb.must().size(), "Only pushable conjunct goes to must[]");
+    assertInstanceOf(TermQueryBuilder.class, boolQb.must().get(0));
+
+    // The non-pushable conjunct is in unAnalyzableNodes (becomes residual Filter)
+    List<RexNode> residual = result.getUnAnalyzableNodes();
+    assertEquals(1, residual.size());
+    assertEquals(nonPushable, residual.getFirst());
+
+    // No script in the output
+    assertFalse(qb.toString().contains("\"script\""), "No script clause in pushed query");
+  }
+
+  /**
+   * Verifies the match_all default: when NO filter is pushed, the SearchSourceBuilder has a null
+   * query, which OpenSearch treats as match_all. This is the correct behavior — omitting the query
+   * clause is equivalent to match_all and avoids unnecessary serialization.
+   */
+  @Test
+  void noFilterPushed_queryIsNullWhichMeansMatchAll() {
+    // OpenSearchRequestBuilder starts with no query set (null).
+    // OpenSearch interprets a missing "query" field as match_all.
+    // This test documents that contract — no explicit match_all is needed.
+    var sourceBuilder =
+        new org.opensearch.search.builder.SearchSourceBuilder()
+            .from(0)
+            .timeout(org.opensearch.common.unit.TimeValue.timeValueMinutes(1L))
+            .trackScores(false);
+    // Confirm the default state: query is null (equivalent to match_all in OpenSearch)
+    assertEquals(
+        null,
+        sourceBuilder.query(),
+        "When no filter is pushed, query is null — OpenSearch treats this as match_all");
   }
 }

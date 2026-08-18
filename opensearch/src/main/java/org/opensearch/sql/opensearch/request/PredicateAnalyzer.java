@@ -39,7 +39,6 @@ import static org.opensearch.index.query.QueryBuilders.rangeQuery;
 import static org.opensearch.index.query.QueryBuilders.regexpQuery;
 import static org.opensearch.index.query.QueryBuilders.termQuery;
 import static org.opensearch.index.query.QueryBuilders.termsQuery;
-import static org.opensearch.index.query.QueryBuilders.wildcardQuery;
 import static org.opensearch.script.Script.DEFAULT_SCRIPT_TYPE;
 import static org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils.MULTI_FIELDS_RELEVANCE_FUNCTION_SET;
 import static org.opensearch.sql.calcite.utils.UserDefinedFunctionUtils.SINGLE_FIELD_RELEVANCE_FUNCTION_SET;
@@ -109,7 +108,6 @@ import org.opensearch.sql.opensearch.data.type.OpenSearchDataType;
 import org.opensearch.sql.opensearch.data.type.OpenSearchTextType;
 import org.opensearch.sql.opensearch.storage.script.CalciteScriptEngine.UnsupportedScriptException;
 import org.opensearch.sql.opensearch.storage.script.CompoundedScriptEngine.ScriptEngineType;
-import org.opensearch.sql.opensearch.storage.script.StringUtils;
 import org.opensearch.sql.opensearch.storage.script.filter.lucene.relevance.MatchBoolPrefixQuery;
 import org.opensearch.sql.opensearch.storage.script.filter.lucene.relevance.MatchPhrasePrefixQuery;
 import org.opensearch.sql.opensearch.storage.script.filter.lucene.relevance.MatchPhraseQuery;
@@ -237,15 +235,10 @@ public class PredicateAnalyzer {
       QueryExpression queryExpression = (QueryExpression) result;
       return queryExpression;
     } catch (Throwable e) {
-      if (e instanceof UnsupportedScriptException) {
-        throw new ExpressionNotAnalyzableException("Can't convert " + expression, e);
-      }
-      try {
-        return new ScriptQueryExpression(
-            expression, rowType, fieldTypes, cluster, Collections.emptyMap());
-      } catch (Throwable e2) {
-        throw new ExpressionNotAnalyzableException("Can't convert " + expression, e2);
-      }
+      // Unanalyzable predicates surface as ExpressionNotAnalyzableException so the conjunct
+      // becomes a residual Filter — no script query is ever emitted. The pushable set is
+      // enforced by per-form guards: like(), guardRangeFieldType(), and supportedRexCall().
+      throw new ExpressionNotAnalyzableException("Can't convert " + expression, e);
     }
   }
 
@@ -913,16 +906,9 @@ public class PredicateAnalyzer {
         }
         return qe;
       } catch (PredicateAnalyzerException firstFailed) {
-        try {
-          QueryExpression qe =
-              new ScriptQueryExpression(node, rowType, fieldTypes, cluster, Collections.emptyMap());
-          if (!qe.isPartial()) {
-            qe.updateAnalyzedNodes(node);
-          }
-          return qe;
-        } catch (UnsupportedScriptException secondFailed) {
-          throw new PredicateAnalyzerException(secondFailed);
-        }
+        // Non-index-accelerable predicates surface as unanalyzable so the conjunct becomes
+        // a residual Filter evaluated by Calcite. No script fallback.
+        throw firstFailed;
       }
     }
 
@@ -1378,23 +1364,14 @@ public class PredicateAnalyzer {
     }
 
     /*
-     * Prefer to run wildcard query for keyword type field. For text type field, it doesn't support
-     * cross term match because OpenSearch internally break text to multiple terms and apply wildcard
-     * matching one by one, which is not same behavior with regular like function without pushdown.
+     * LIKE is not pushable on the predicate path. A wildcard query on keyword fields can be
+     * pathological (leading wildcard) and is not on the closed pushable-set list. For text
+     * fields, cross-term matching semantics differ from SQL LIKE.
      */
     @Override
     public QueryExpression like(LiteralExpression literal, boolean caseSensitive) {
-      String fieldName = getFieldReference();
-      String keywordField = OpenSearchTextType.toKeywordSubField(fieldName, this.rel.getExprType());
-      boolean isKeywordField = keywordField != null;
-      if (isKeywordField) {
-        builder =
-            wildcardQuery(
-                    keywordField, StringUtils.convertSqlWildcardToLuceneSafe(literal.stringValue()))
-                .caseInsensitive(!caseSensitive);
-        return this;
-      }
-      throw new PredicateAnalyzerException("Like query is not supported for text field");
+      throw new PredicateAnalyzerException(
+          "LIKE is not pushable for field '" + getFieldReference() + "'");
     }
 
     @Override
@@ -1450,6 +1427,7 @@ public class PredicateAnalyzer {
 
     @Override
     public QueryExpression gt(LiteralExpression literal) {
+      guardRangeFieldType();
       boolean isTimeStamp = isFieldOrLiteralDateTime(literal);
       Object value = convertEndpointValue(literal.value(), isTimeStamp);
       builder = addFormatIfNecessary(isTimeStamp, rangeQuery(getFieldReference()).gt(value));
@@ -1458,6 +1436,7 @@ public class PredicateAnalyzer {
 
     @Override
     public QueryExpression gte(LiteralExpression literal) {
+      guardRangeFieldType();
       boolean isTimeStamp = isFieldOrLiteralDateTime(literal);
       Object value = convertEndpointValue(literal.value(), isTimeStamp);
       builder = addFormatIfNecessary(isTimeStamp, rangeQuery(getFieldReference()).gte(value));
@@ -1466,6 +1445,7 @@ public class PredicateAnalyzer {
 
     @Override
     public QueryExpression lt(LiteralExpression literal) {
+      guardRangeFieldType();
       boolean isTimeStamp = isFieldOrLiteralDateTime(literal);
       Object value = convertEndpointValue(literal.value(), isTimeStamp);
       builder = addFormatIfNecessary(isTimeStamp, rangeQuery(getFieldReference()).lt(value));
@@ -1474,10 +1454,57 @@ public class PredicateAnalyzer {
 
     @Override
     public QueryExpression lte(LiteralExpression literal) {
+      guardRangeFieldType();
       boolean isTimeStamp = isFieldOrLiteralDateTime(literal);
       Object value = convertEndpointValue(literal.value(), isTimeStamp);
       builder = addFormatIfNecessary(isTimeStamp, rangeQuery(getFieldReference()).lte(value));
       return this;
+    }
+
+    /**
+     * Guards that the field type is a scalar, comparable, indexed type for which a range query is
+     * meaningful. Rejects only non-scalar / non-comparable types (STRUCT, ARRAY, UNKNOWN,
+     * UNDEFINED) except for OpenSearch text types which ARE string-range-capable via the term
+     * dictionary.
+     *
+     * <p>The design doc (docs/dev/poc-staged-calcite-exec-design.md, lines 79-91) originally
+     * restricted range pushdown to numeric and date types. That is widened here because:
+     *
+     * <ul>
+     *   <li>Restricting to numeric/date breaks nested filtered aggregations (keyword range) with no
+     *       Calcite fallback, violating the "never fail a query for lack of an optimization"
+     *       invariant.
+     *   <li>IP ranges are BKD-accelerated and keyword/text ranges use the term dictionary — both
+     *       are index-accelerable in OpenSearch.
+     * </ul>
+     */
+    private void guardRangeFieldType() {
+      if (rel == null) {
+        return;
+      }
+      ExprType fieldType = rel.getExprType();
+      if (fieldType == null) {
+        return;
+      }
+      // Text fields have exprCoreType=UNKNOWN but support range queries via the term dictionary.
+      if (fieldType instanceof OpenSearchTextType) {
+        return;
+      }
+      ExprType coreType =
+          fieldType.getOriginalExprType() instanceof OpenSearchDataType osType
+              ? osType.getExprCoreType()
+              : fieldType.getOriginalExprType();
+      // Reject non-scalar / non-comparable types only.
+      if (ExprCoreType.STRUCT.equals(coreType)
+          || ExprCoreType.ARRAY.equals(coreType)
+          || ExprCoreType.UNKNOWN.equals(coreType)
+          || ExprCoreType.UNDEFINED.equals(coreType)) {
+        throw new PredicateAnalyzerException(
+            "Range comparison is not pushable for field '"
+                + rel.getRootName()
+                + "' of type "
+                + coreType);
+      }
     }
 
     /**
@@ -1615,6 +1642,7 @@ public class PredicateAnalyzer {
 
     @Override
     public QueryExpression between(Range<?> range, boolean isTimeStamp) {
+      guardRangeFieldType();
       Object lowerBound =
           range.hasLowerBound() ? convertEndpointValue(range.lowerEndpoint(), isTimeStamp) : null;
       Object upperBound =
