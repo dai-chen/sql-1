@@ -184,16 +184,24 @@ public final class RelFragmentCodec {
   }
 
   /**
-   * A stub {@link ScannableTable} representing the shard row source. Reads rows from a {@link
-   * DataContext} stash slot keyed by {@link #SHARD_ROWS_STASH_KEY}. Returns an empty enumerable
-   * when the stash slot is absent (US-003 scope). US-005 owns the actual row injection.
+   * A stub {@link ScannableTable} representing a row source fed via a {@link DataContext} stash
+   * slot. Defaults to {@link #SHARD_ROWS_STASH_KEY} for the shard side; the coordinator side uses
+   * {@link StagePlanner#GATHERED_ROWS_STASH_KEY} via the 2-arg constructor.
    */
   public static class ShardRowSourceTable extends AbstractTable implements ScannableTable {
 
     private final RelDataType rowType;
+    private final String stashKey;
 
+    /** Creates a table reading from the default shard rows stash key. */
     public ShardRowSourceTable(RelDataType rowType) {
+      this(rowType, SHARD_ROWS_STASH_KEY);
+    }
+
+    /** Creates a table reading from the specified stash key (enables reuse for gathered rows). */
+    public ShardRowSourceTable(RelDataType rowType, String stashKey) {
       this.rowType = rowType;
+      this.stashKey = stashKey;
     }
 
     @Override
@@ -205,7 +213,7 @@ public final class RelFragmentCodec {
         "unchecked") // DataContext stash returns Object; the contract is List<Object[]>
     @Override
     public Enumerable<Object[]> scan(DataContext root) {
-      Object stashed = root.get(SHARD_ROWS_STASH_KEY);
+      Object stashed = root.get(stashKey);
       if (stashed instanceof List) {
         return Linq4j.asEnumerable((List<Object[]>) stashed);
       }
