@@ -203,8 +203,8 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "All 8 acceptance criteria met. Verified by the orchestrator from JUnit XML in one integTest invocation: CalciteStatsCommandIT 63/0/0 and CalciteExplainIT 266/4 skipped/0 (non-staged production regression gates), CalciteStageSplitExplainIT 3/0/0 (holds the new MERGE_AGG explain golden explain_staged_stats_count_by.yaml), StagedCalciteExplainIT 266/80 skipped/0, StagedCalcitePPLJoinIT 43/0/0 and StagedCalciteUnionCommandIT 15/0/0 (both new), StagedCalciteWhereCommandIT 41/3/0, StagedCalciteFieldsCommandIT 39/0/0, StagedCalciteEvalCommandIT 9/0/0, CalciteExecAggregationIT 6/0/0. Stage unit tests 95/0/0 (StagePlannerTest 31), serde 35/0/0. Build, test --rerun-tasks, spotlessCheck green with zero <failure/<error across all unit-test XML. Golden gate: git diff of expectedOutput/calcite/ EMPTY; 52 changed goldens all under calcite_no_pushdown/ and confined to the shardFragment/combine/coordinatorTree sections. StagedCalciteStatsCommandIT remains @Ignore'd at 4/63 failures, down from 26, measured directly by temporarily removing the annotation; the reason text names all four and none are aggregate-split defects (2x SPAN UDF CallImplementor unresolvable in shard-side Janino compilation, 1x DISTINCT_COUNT_APPROX implementor likewise, 1x timestamp-format ExpressionEvaluationException on the coordinator). Those are shard-side UDF-implementor registration gaps, tracked for a later story. Two real defects surfaced during this story and are fixed here: the HEP pass interns structurally identical subtrees into one shared RelNode instance, which defeated the identity-keyed single-scan guard and wrongly staged UNION plans leaving a live CalciteLogicalIndexScan in coordinatorTree; and self-joins over a shared scan then still staged and threw on 2 of 43 tests. Both now refuse to stage via a shared-subtree join guard plus a post-split containsIndexScan validation. Both were invisible to explain-only coverage, which is why the two new execution ITs were added."
     },
     {
       "id": "US-013",
