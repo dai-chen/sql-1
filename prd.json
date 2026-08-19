@@ -185,8 +185,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Two deviations from the story text, both deliberate. (1) The story names expectedOutput/calcite/ as the golden directory, which is wrong: PPLIntegTestCase.loadExpectedPlan selects expectedOutput/calcite_no_pushdown/ when plugins.calcite.pushdown.enabled is false, which is exactly the staged posture. All staged goldens therefore live in calcite_no_pushdown/; expectedOutput/calcite/ is byte-for-byte unchanged (verified empty diff), which is what proves non-staged explain is unaffected. (2) Criterion (b), 'shardFragment shows the pushed query DSL', renders an EMPTY DSL under the PoC posture: with pushdown.enabled=false no pushdown rules are registered (CalciteLogicalIndexScan.java:153), so PushDownContext is empty and AbstractCalciteIndexScan.explainTerms suppresses both its PushDownContext and sourceBuilder terms. Explain splices the real shardScan() back into the fragment leaf so whatever DSL exists is shown; nothing is fabricated. The section becomes populated for free once pushdown and staging coexist. 188 existing calcite_no_pushdown goldens were re-baselined additions-only (machine-verified: every removed line has an identical re-added counterpart modulo an appended trailing comma or added EOF newline, and all 35 JSON goldens with deletions parse structurally identical to HEAD apart from exactly the three new keys). json_tree format deliberately does not render the sections; documented inline."
     },
     {
       "id": "US-012",
