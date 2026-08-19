@@ -6,24 +6,14 @@
 package org.opensearch.sql.calcite.remote;
 
 import org.junit.After;
-import org.junit.Ignore;
 import org.opensearch.sql.common.setting.Settings;
 
 /**
- * Runs all CalciteStatsCommandIT tests through the staged execution path by disabling pushdown and
- * disallowing fallback. This exercises the end-to-end staged path (US-008): StagePlanner → staged
- * SearchRequest → InternalCalciteExec.reduce → CoordinatorTreeExecutor.
+ * Runs all CalcitePPLJoinIT tests through the staged execution path by disabling pushdown and
+ * disallowing fallback. Self-joins share the same RelNode instance for both sides — this exercises
+ * that replaceSubtree correctly handles the shared-subtree case (both positions replaced).
  */
-@Ignore(
-    "US-012 complete, 4/63 remain: 'Unable to implement EnumerableAggregate' x2"
-        + " (testStatsTimeSpan, testStatsSpanSortOnMeasure — SPAN UDF CallImplementor not"
-        + " resolvable in shard-side Janino compilation, US-016 scope),"
-        + " ExpressionEvaluationException x1 (testStatsBySpanTimeWithNullBucket — timestamp"
-        + " format parsing on coordinator, also US-016 scope),"
-        + " UnsupportedOperationException x1 (testStatsSortOnMeasureComplex — plan contains"
-        + " DISTINCT_COUNT_APPROX UDF which is unsplittable and whose implementor is not"
-        + " registered in shard-side compilation context, US-016 scope).")
-public class StagedCalciteStatsCommandIT extends CalciteStatsCommandIT {
+public class StagedCalcitePPLJoinIT extends CalcitePPLJoinIT {
 
   @Override
   public void init() throws Exception {

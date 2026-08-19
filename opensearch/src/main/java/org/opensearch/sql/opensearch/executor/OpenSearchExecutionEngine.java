@@ -25,10 +25,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.apache.calcite.avatica.util.StructImpl;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.hep.HepPlanner;
+import org.apache.calcite.plan.hep.HepProgramBuilder;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.externalize.RelJsonWriter;
 import org.apache.calcite.rel.logical.LogicalTableScan;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexCall;
@@ -437,7 +440,16 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
    * they both call this method on the same pre-optimization RelNode parameter.
    */
   private static StagePlan splitIfStaged(RelNode rel) {
-    StagePlan stagePlan = StagePlanner.split(rel);
+    // Phase 0: decompose AVG/STDDEV/VAR into SUM/COUNT so their components are independently
+    // splittable. The transformed rel is used ONLY for the staged split; when staged()==false the
+    // original rel flows to the JDBC path unchanged (caller discards the StagePlan).
+    HepProgramBuilder hepBuilder = new HepProgramBuilder();
+    hepBuilder.addRuleInstance(CoreRules.AGGREGATE_REDUCE_FUNCTIONS);
+    HepPlanner hepPlanner = new HepPlanner(hepBuilder.build());
+    hepPlanner.setRoot(rel);
+    RelNode reduced = hepPlanner.findBestExp();
+
+    StagePlan stagePlan = StagePlanner.split(reduced);
     if (stagePlan.staged() && isPushdownDisabled(stagePlan)) {
       return stagePlan;
     }

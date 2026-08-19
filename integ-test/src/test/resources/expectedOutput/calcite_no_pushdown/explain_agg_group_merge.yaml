@@ -11,11 +11,11 @@ calcite:
         EnumerableAggregate(group=[{8}], count()=[COUNT()])
           CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
   shardFragment: |
-    LogicalProject(age1=[*($8, 10)], age2=[+($8, 10)], age3=[10], age=[$8])
-      CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
-  combine: CONCAT
+    LogicalAggregate(group=[{0, 1, 2, 3}], count()=[COUNT()])
+      LogicalProject(age1=[*($8, 10)], age2=[+($8, 10)], age3=[10], age=[$8])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  combine: "MERGE_AGG{groupKeys:[0, 1, 2, 3], aggs:[SUM(4)]}"
   coordinatorTree: |
     LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
       LogicalProject(count()=[$4], age1=[$0], age2=[$1], age3=[$2], age=[$3])
-        LogicalAggregate(group=[{0, 1, 2, 3}], count()=[COUNT()])
-          LogicalTableScan(table=[[OpenSearch, _gathered_rows]])
+        LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

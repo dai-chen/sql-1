@@ -11,11 +11,12 @@ calcite:
         EnumerableAggregate(group=[{4}], sum_SUM=[CHECKED_LONG_SUM($7)], sum_COUNT=[COUNT($7)])
           CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
   shardFragment: |
-    LogicalProject(len=[CHAR_LENGTH($4)], gender=[$4], $f3=[+($7, 100)])
-      CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
-  combine: CONCAT
+    LogicalAggregate(group=[{0, 1}], sum=[$SUM0($2)], agg#1=[COUNT($2)])
+      LogicalProject(len=[CHAR_LENGTH($4)], gender=[$4], $f3=[+($7, 100)])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
+  combine: "MERGE_AGG{groupKeys:[0, 1], aggs:[SUM0(2), SUM(3)]}"
   coordinatorTree: |
     LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
       LogicalProject(sum=[$2], len=[$0], gender=[$1])
-        LogicalAggregate(group=[{0, 1}], sum=[CHECKED_LONG_SUM($2)])
+        LogicalProject(len=[$0], gender=[$1], sum=[CASE(=($3, 0), null:BIGINT, $2)])
           LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

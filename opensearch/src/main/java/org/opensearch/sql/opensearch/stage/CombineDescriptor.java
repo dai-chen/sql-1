@@ -52,6 +52,11 @@ public class CombineDescriptor implements Writeable, ToXContentObject {
     return new CombineDescriptor(Mode.CONCAT, List.of(), List.of(), 0);
   }
 
+  /** Factory for MERGE_AGG: partial aggregate on shard, merge (group+sum/min/max) on reduce. */
+  public static CombineDescriptor mergeAgg(List<Integer> groupKeys, List<String> aggs) {
+    return new CombineDescriptor(Mode.MERGE_AGG, groupKeys, aggs, 0);
+  }
+
   public CombineDescriptor(StreamInput in) throws IOException {
     this.mode = in.readEnum(Mode.class);
     this.intListParam = in.readList(StreamInput::readVInt);

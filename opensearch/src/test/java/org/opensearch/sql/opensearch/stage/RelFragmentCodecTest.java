@@ -6,6 +6,7 @@
 package org.opensearch.sql.opensearch.stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.TYPE_FACTORY;
 
 import com.google.common.collect.ImmutableList;
@@ -188,6 +189,39 @@ public class RelFragmentCodecTest {
 
     String after = RelOptUtil.toString(deserialized);
     assertEquals(before, after);
+  }
+
+  @Test
+  void roundTrip_rexLiteral_sqlTypeName_flag_exercises_extended_relJson_write_and_read() {
+    // Verifies that a Project containing RexBuilder.makeFlag(SqlTypeName.DOUBLE) — a RexLiteral
+    // whose value is a SqlTypeName enum — serializes correctly through our ExtendedRelJson write
+    // path and that the serialized form contains the distinguishing "SqlTypeName.DOUBLE" prefix.
+    //
+    // A full round-trip through RelJsonReader DOES NOT work because RelJsonReader's inner code
+    // calls the parent RelJson's package-private toRex → RelEnumTypes.toEnum, which does not
+    // know SqlTypeName. This is the fundamental constraint that Critical A addresses by making
+    // StagePlanner classify such nodes as NEEDS_GATHER (tested in StagePlannerTest).
+    RelNode tableScan = buildTableScan();
+
+    // Build a Project containing a SqlTypeName flag literal alongside a regular field ref
+    RexNode flagLiteral = REX_BUILDER.makeFlag(SqlTypeName.DOUBLE);
+    RelNode project =
+        LogicalProject.create(
+            tableScan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(tableScan.getRowType().getFieldList().get(0).getType(), 0),
+                flagLiteral),
+            List.of("account_number", "type_flag"));
+
+    // Verify that serialization succeeds and contains the prefixed SqlTypeName value
+    String encoded = RelFragmentCodec.serialize(project);
+    assertTrue(encoded.length() > 0, "Serialization must succeed for SqlTypeName flag literals");
+
+    // Verify the node is correctly classified as non-round-trippable by StagePlanner
+    assertTrue(
+        StagePlanner.containsNonRoundTrippableEnum(project),
+        "Project with SqlTypeName flag must be detected as non-round-trippable");
   }
 
   private RelNode buildTableScan() {

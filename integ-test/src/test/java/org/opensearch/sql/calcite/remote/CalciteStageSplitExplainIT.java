@@ -62,6 +62,32 @@ public class CalciteStageSplitExplainIT extends PPLIntegTestCase {
   }
 
   @Test
+  public void testStagedExplainRendersAggregateWithMergeAgg() throws IOException {
+    // Disable pushdown so the staged execution gate activates
+    updateClusterSettings(
+        new ClusterSetting(
+            "transient", Settings.Key.CALCITE_PUSHDOWN_ENABLED.getKeyValue(), "false"));
+    updateClusterSettings(
+        new ClusterSetting(
+            "transient", Settings.Key.CALCITE_FALLBACK_ALLOWED.getKeyValue(), "false"));
+
+    String query = "source=opensearch-sql_test_index_account | stats count() by gender";
+    String result = explainQueryYaml(query);
+
+    // The shardFragment must contain a partial Aggregate
+    Assert.assertTrue(
+        "shardFragment must contain LogicalAggregate for partial computation",
+        result.contains("shardFragment:"));
+    // The combine section must be MERGE_AGG, never bare CONCAT
+    Assert.assertTrue(
+        "combine: must contain MERGE_AGG",
+        result.contains("combine:") && result.contains("MERGE_AGG"));
+
+    String expected = loadExpectedPlan("explain_staged_stats_count_by.yaml");
+    assertYamlEqualsIgnoreId(expected, result);
+  }
+
+  @Test
   public void testNonStagedExplainOmitsStageSections() throws IOException {
     // Pushdown is enabled by default — the plan is NOT staged
     String query =

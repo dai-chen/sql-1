@@ -30,6 +30,7 @@ import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalAggregate;
@@ -40,6 +41,7 @@ import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.rel.logical.LogicalUnion;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
@@ -150,8 +152,10 @@ public class StagePlannerTest {
     StagePlan result = StagePlanner.split(agg);
 
     assertTrue(result.staged());
-    // The cut is NOT the aggregate — it falls to the scan
-    assertEquals(scan.getRowType(), result.shardFragment().getRowType());
+    // After US-012: a pure GROUP BY (no agg calls) is splittable — MERGE_AGG fires, and the
+    // Aggregate becomes the shardFragment root. Its row type is the Aggregate's output type.
+    assertEquals(CombineDescriptor.Mode.MERGE_AGG, result.combine().getMode());
+    assertEquals(agg.getRowType(), result.shardFragment().getRowType());
   }
 
   @Test
@@ -432,6 +436,126 @@ public class StagePlannerTest {
     assertEquals(join, result.coordinatorTree());
   }
 
+  // --- DAG-sharing hazard: shared scan instance must NOT be staged ---
+
+  @Test
+  void shared_scan_instance_in_union_returns_coordinator_only() {
+    // When the SAME AbstractCalciteIndexScan instance is used as input to two parents with
+    // DIFFERENT operators above it (e.g. different filters in a union), the plan cannot be
+    // cleanly staged: only one branch's subtree matches the cut node, leaving a residual live
+    // scan in the coordinator tree. The post-split validation catches this.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RexNode condYoung =
+        REX_BUILDER.makeCall(
+            SqlStdOperatorTable.LESS_THAN,
+            REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(1).getType(), 1),
+            REX_BUILDER.makeLiteral(30, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+    RexNode condOld =
+        REX_BUILDER.makeCall(
+            SqlStdOperatorTable.GREATER_THAN_OR_EQUAL,
+            REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(1).getType(), 1),
+            REX_BUILDER.makeLiteral(30, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+    RelNode branch1 = LogicalFilter.create(scan, condYoung);
+    RelNode branch2 = LogicalFilter.create(scan, condOld);
+    RelNode union = LogicalUnion.create(List.of(branch1, branch2), true);
+
+    StagePlan result = StagePlanner.split(union);
+
+    assertFalse(result.staged());
+    assertNull(result.shardFragment());
+    assertNull(result.shardScan());
+    assertEquals(union, result.coordinatorTree());
+  }
+
+  @Test
+  void union_over_identical_scans_after_hep_pass_returns_coordinator_only() {
+    // Regression test for US-012: HepPlanner's AGGREGATE_REDUCE_FUNCTIONS pass can intern
+    // structurally identical subtrees into a single shared RelNode instance (DAG). When a UNION
+    // has two branches scanning the same index, the HEP pass may collapse them into one shared
+    // scan. The single-gather-boundary guard must still detect two occurrences and refuse to
+    // stage. This test mirrors the exact sequence splitIfStaged() uses.
+    AbstractCalciteIndexScan scan1 = buildIndexScan();
+    AbstractCalciteIndexScan scan2 = buildIndexScan();
+    // Build: Agg(COUNT()) over Union(Filter(<30, scan1), Filter(>=30, scan2))
+    RexNode condYoung =
+        REX_BUILDER.makeCall(
+            SqlStdOperatorTable.LESS_THAN,
+            REX_BUILDER.makeInputRef(scan1.getRowType().getFieldList().get(1).getType(), 1),
+            REX_BUILDER.makeLiteral(30, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+    RexNode condOld =
+        REX_BUILDER.makeCall(
+            SqlStdOperatorTable.GREATER_THAN_OR_EQUAL,
+            REX_BUILDER.makeInputRef(scan2.getRowType().getFieldList().get(1).getType(), 1),
+            REX_BUILDER.makeLiteral(30, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+    RelNode branch1 = LogicalFilter.create(scan1, condYoung);
+    RelNode branch2 = LogicalFilter.create(scan2, condOld);
+    RelNode union = LogicalUnion.create(List.of(branch1, branch2), true);
+    RelNode agg =
+        LogicalAggregate.create(
+            union,
+            List.of(),
+            ImmutableBitSet.of(2),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "cnt")));
+
+    // Apply the same HEP pass that splitIfStaged uses
+    org.apache.calcite.plan.hep.HepProgramBuilder hepBuilder =
+        new org.apache.calcite.plan.hep.HepProgramBuilder();
+    hepBuilder.addRuleInstance(CoreRules.AGGREGATE_REDUCE_FUNCTIONS);
+    org.apache.calcite.plan.hep.HepPlanner hepPlanner =
+        new org.apache.calcite.plan.hep.HepPlanner(hepBuilder.build());
+    hepPlanner.setRoot(agg);
+    RelNode reduced = hepPlanner.findBestExp();
+
+    StagePlan result = StagePlanner.split(reduced);
+
+    assertFalse(
+        result.staged(),
+        "A UNION with two scan occurrences (even if HEP-shared) must NOT be staged");
+    assertNull(result.shardFragment());
+    assertNull(result.shardScan());
+  }
+
+  @Test
+  void shared_cut_subtree_in_self_join_returns_coordinator_only() {
+    // A self-join where HEP interning causes both branches to share the SAME scan instance.
+    // collectScans counts it once (identity dedup), so scans.size()==1 passes, but the cut node
+    // is reachable from two parents — staging would conflate independent join inputs.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode join =
+        LogicalJoin.create(
+            scan,
+            scan,
+            List.of(),
+            REX_BUILDER.makeCall(
+                SqlStdOperatorTable.EQUALS,
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0),
+                REX_BUILDER.makeInputRef(
+                    scan.getRowType().getFieldList().get(0).getType(),
+                    scan.getRowType().getFieldCount())),
+            java.util.Set.of(),
+            JoinRelType.INNER);
+
+    StagePlan result = StagePlanner.split(join);
+
+    assertFalse(result.staged(), "A shared cut subtree (self-join) must NOT be staged");
+    assertNull(result.shardFragment());
+    assertNull(result.shardScan());
+    assertEquals(join, result.coordinatorTree());
+  }
+
   // --- Totality test ---
 
   @Test
@@ -481,8 +605,12 @@ public class StagePlannerTest {
             null,
             REX_BUILDER.makeLiteral(10, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
 
-    // Union (NEEDS_GATHER) — needs two inputs with same row type
-    RelNode union = LogicalUnion.create(List.of(sort, sort), true);
+    // Union (NEEDS_GATHER) — needs two inputs with same row type.
+    // Use a plain table scan for the second branch so the plan has only ONE
+    // AbstractCalciteIndexScan (the totality test's intent is "never throws for any plan shape",
+    // not testing multi-scan behaviour — that's covered by the DAG-sharing tests above).
+    RelNode sortCopy = buildTableScanWithType(sort.getRowType());
+    RelNode union = LogicalUnion.create(List.of(sort, sortCopy), true);
 
     // Window-like project with RexOver (acts like a window)
     RelDataType bigintType = TYPE_FAC.createSqlType(SqlTypeName.BIGINT);
@@ -635,8 +763,9 @@ public class StagePlannerTest {
     StagePlan result = StagePlanner.split(agg);
 
     assertTrue(result.staged());
-    // Cut is scan; forcing operator is the aggregate (immediate parent of scan)
-    assertEquals("LogicalAggregate", result.forcingOperator());
+    // After US-012: MERGE_AGG fires for the splittable aggregate. The Aggregate IS the root, so
+    // forcingOperator is null (nothing above the promoted cut).
+    assertNull(result.forcingOperator());
   }
 
   @Test
@@ -678,6 +807,285 @@ public class StagePlannerTest {
     assertTrue(result.staged());
     // Cut is project (highest SHARD_LOCAL); parent of project is the sort
     assertEquals("LogicalSort", result.forcingOperator());
+  }
+
+  // --- MERGE_AGG split rule tests (US-012) ---
+
+  @Test
+  void splittable_stats_by_produces_merge_agg_descriptor() {
+    // stats count() by gender → Aggregate(group={2}, COUNT()) over scan
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode agg =
+        LogicalAggregate.create(
+            scan,
+            List.of(),
+            ImmutableBitSet.of(2),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "cnt")));
+
+    StagePlan result = StagePlanner.split(agg);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.MERGE_AGG, result.combine().getMode());
+    assertEquals(List.of(0), result.combine().getIntListParam());
+    assertEquals(List.of("SUM(1)"), result.combine().getStringListParam());
+    // Aggregate is in shardFragment (its row type matches agg's)
+    assertEquals(agg.getRowType(), result.shardFragment().getRowType());
+  }
+
+  @Test
+  void distinct_agg_call_does_not_fire_merge_agg() {
+    // COUNT(DISTINCT gender) → should NOT fire, plan returned with Aggregate on coordinator
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode agg =
+        LogicalAggregate.create(
+            scan,
+            List.of(),
+            ImmutableBitSet.of(0),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    true, // distinct
+                    false,
+                    false,
+                    List.of(),
+                    List.of(2),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "cnt_distinct")));
+
+    StagePlan result = StagePlanner.split(agg);
+
+    assertTrue(result.staged());
+    // Falls back to CONCAT — Aggregate is NOT in shardFragment
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+    assertEquals(scan.getRowType(), result.shardFragment().getRowType());
+  }
+
+  @Test
+  void grouping_sets_does_not_fire_merge_agg() {
+    // Aggregate with multiple grouping sets → should NOT fire
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode agg =
+        LogicalAggregate.create(
+            scan,
+            List.of(),
+            ImmutableBitSet.of(0, 2),
+            ImmutableList.of(ImmutableBitSet.of(0), ImmutableBitSet.of(2)),
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "cnt")));
+
+    StagePlan result = StagePlanner.split(agg);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void unsplittable_sqlkind_does_not_fire_merge_agg() {
+    // An aggregate with an unsplittable kind (e.g., AVG — after AggregateReduceFunctionsRule it
+    // would be decomposed, but here we test that the raw AVG is correctly refused)
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode agg =
+        LogicalAggregate.create(
+            scan,
+            List.of(),
+            ImmutableBitSet.of(2),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.AVG,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(1),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.DOUBLE),
+                    "avg_age")));
+
+    StagePlan result = StagePlanner.split(agg);
+
+    assertTrue(result.staged());
+    // AVG is not in SPLITTABLE_KINDS → falls back to CONCAT
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void avg_query_after_reduction_ships_sum_and_count_in_shard_fragment() {
+    // Simulate what AggregateReduceFunctionsRule produces for AVG: SUM + COUNT with a Project
+    // above for division. The Project (div) stays on the coordinator.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    // Partial aggregate: group={2(gender)}, SUM(age), COUNT(age)
+    RelNode partialAgg =
+        LogicalAggregate.create(
+            scan,
+            List.of(),
+            ImmutableBitSet.of(2),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.SUM,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(1),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createTypeWithNullability(
+                        TYPE_FAC.createSqlType(SqlTypeName.BIGINT), true),
+                    "sum_age"),
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(1),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "count_age")));
+
+    // Division project (finalization): gender, SUM(age) / COUNT(age)
+    RelNode divProject =
+        LogicalProject.create(
+            partialAgg,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(
+                    partialAgg.getRowType().getFieldList().get(0).getType(), 0),
+                REX_BUILDER.makeCall(
+                    SqlStdOperatorTable.DIVIDE,
+                    REX_BUILDER.makeInputRef(
+                        partialAgg.getRowType().getFieldList().get(1).getType(), 1),
+                    REX_BUILDER.makeInputRef(
+                        partialAgg.getRowType().getFieldList().get(2).getType(), 2))),
+            List.of("gender", "avg_age"));
+
+    StagePlan result = StagePlanner.split(divProject);
+
+    assertTrue(result.staged());
+    // MERGE_AGG fires for the splittable aggregate (SUM+COUNT)
+    assertEquals(CombineDescriptor.Mode.MERGE_AGG, result.combine().getMode());
+    assertEquals(List.of(0), result.combine().getIntListParam());
+    assertEquals(List.of("SUM(1)", "SUM(2)"), result.combine().getStringListParam());
+    // The division project is in coordinatorTree (not in shardFragment)
+    assertEquals(partialAgg.getRowType(), result.shardFragment().getRowType());
+    // coordinatorTree root is the division project containing the DIVIDE finalization
+    String coordinatorPlan = RelOptUtil.toString(result.coordinatorTree());
+    assertTrue(
+        coordinatorPlan.contains("/"),
+        "coordinatorTree must contain the division (/) produced by AGGREGATE_REDUCE_FUNCTIONS");
+  }
+
+  // --- Non-round-trippable enum literal placement (Critical A fix) ---
+
+  @Test
+  void project_with_non_round_trippable_enum_literal_is_needs_gather() {
+    // A Project containing a RexLiteral whose SYMBOL value is SqlTypeName (non-round-trippable
+    // through the RelJson codec) must be placed as NEEDS_GATHER. This exercises the Critical A
+    // fix: instead of mutating upstream statics with Unsafe, StagePlanner prevents such nodes
+    // from reaching the shard codec. The plan still executes (coordinator-side) per Design
+    // Invariant 1 — never reject a plan.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RexNode flagLiteral = REX_BUILDER.makeFlag(SqlTypeName.DOUBLE);
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0),
+                flagLiteral),
+            List.of("account_number", "type_flag"));
+
+    StagePlan result = StagePlanner.split(project);
+
+    assertTrue(result.staged(), "Plan must still be staged — Design Invariant 1: never reject");
+    // The Project with the enum flag is NEEDS_GATHER, so the cut falls to the scan
+    assertEquals(scan.getRowType(), result.shardFragment().getRowType());
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+    // The coordinatorTree must contain the Project with the flag literal
+    String coordinatorPlan = RelOptUtil.toString(result.coordinatorTree());
+    assertTrue(
+        coordinatorPlan.contains("type_flag"),
+        "coordinatorTree must contain the non-round-trippable expression");
+  }
+
+  @Test
+  void aggregate_above_project_with_non_round_trippable_enum_falls_to_concat() {
+    // When a Project below an Aggregate contains a non-round-trippable enum literal, the
+    // Project is NOT shard-local. This means the Aggregate's input (the Project) is
+    // NEEDS_GATHER, so the MERGE_AGG split rule cannot fire (it requires its input to be
+    // shard-local). The plan falls through to CONCAT with the cut at the scan.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RexNode flagLiteral = REX_BUILDER.makeFlag(SqlTypeName.DOUBLE);
+    RelNode projectWithFlag =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0),
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(1).getType(), 1),
+                flagLiteral),
+            List.of("account_number", "age", "type_flag"));
+    RelNode agg =
+        LogicalAggregate.create(
+            projectWithFlag,
+            List.of(),
+            ImmutableBitSet.of(0),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "cnt")));
+
+    StagePlan result = StagePlanner.split(agg);
+
+    assertTrue(result.staged());
+    // Falls to CONCAT because projectWithFlag is NEEDS_GATHER (non-round-trippable enum)
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+    assertEquals(scan.getRowType(), result.shardFragment().getRowType());
   }
 
   // --- Helper methods ---

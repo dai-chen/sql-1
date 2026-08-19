@@ -13,12 +13,12 @@ calcite:
           EnumerableCalc(expr#0..18=[{inputs}], expr#19=[1], expr#20=['M'], expr#21=[SPAN($t3, $t19, $t20)], expr#22=[IS NOT NULL($t3)], span(birthdate,1M)=[$t21], $condition=[$t22])
             CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
   shardFragment: |
-    LogicalProject(span(birthdate,1M)=[SPAN($3, 1, 'M')])
-      LogicalFilter(condition=[IS NOT NULL($3)])
-        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
-  combine: CONCAT
+    LogicalAggregate(group=[{0}], count()=[COUNT()])
+      LogicalProject(span(birthdate,1M)=[SPAN($3, 1, 'M')])
+        LogicalFilter(condition=[IS NOT NULL($3)])
+          CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
+  combine: "MERGE_AGG{groupKeys:[0], aggs:[SUM(1)]}"
   coordinatorTree: |
     LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
       LogicalProject(count()=[$1], span(birthdate,1M)=[$0])
-        LogicalAggregate(group=[{0}], count()=[COUNT()])
-          LogicalTableScan(table=[[OpenSearch, _gathered_rows]])
+        LogicalTableScan(table=[[OpenSearch, _gathered_rows]])
