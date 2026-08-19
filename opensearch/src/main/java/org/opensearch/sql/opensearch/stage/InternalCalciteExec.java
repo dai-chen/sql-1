@@ -167,4 +167,9 @@ public class InternalCalciteExec extends InternalAggregation {
   public int hashCode() {
     return Objects.hash(super.hashCode(), combine, rowsCollected, rowsEmitted, rows);
   }
+
+  /** Returns the gathered rows from shard execution. */
+  public List<List<Object>> getRows() {
+    return rows;
+  }
 }

@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.DataContext;
+import org.apache.calcite.DataContext.Variable;
 import org.apache.calcite.adapter.enumerable.EnumerableConvention;
 import org.apache.calcite.adapter.enumerable.EnumerableInterpretable;
 import org.apache.calcite.adapter.enumerable.EnumerableRel;
@@ -203,6 +204,11 @@ public class CalciteExecAggregator extends MetricsAggregator {
           public Object get(String name) {
             if (RelFragmentCodec.SHARD_ROWS_STASH_KEY.equals(name)) {
               return bufferedRows;
+            }
+            // Temporal functions (MONTH, YEAR, etc.) require UTC_TIMESTAMP in the DataContext.
+            // Calcite reads it via DataContext.Variable.UTC_TIMESTAMP.get(dataContext).
+            if (Variable.UTC_TIMESTAMP.camelName.equals(name)) {
+              return System.currentTimeMillis();
             }
             return null;
           }

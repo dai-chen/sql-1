@@ -1,0 +1,10 @@
+Manifest-Version: 1.0
+Implementation-Title: Apache Calcite
+Bundle-License: Apache-2.0
+Implementation-Version: 1.42.0
+Specification-Vendor: The Apache Software Foundation
+Specification-Title: Apache Calcite
+Implementation-Vendor-Id: org.apache.calcite
+Specification-Version: 1.42.0
+Implementation-Vendor: Apache Software Foundation
+

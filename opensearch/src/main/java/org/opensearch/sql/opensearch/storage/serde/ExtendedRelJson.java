@@ -91,6 +91,9 @@ import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
  * use of these private fields has to be copied in ExtendedRelJson.
  */
 public class ExtendedRelJson extends RelJson {
+  private static final org.apache.logging.log4j.Logger LOG =
+      org.apache.logging.log4j.LogManager.getLogger(ExtendedRelJson.class);
+
   private final JsonBuilder jsonBuilder;
   private final InputTranslator inputTranslator;
   private final SqlOperatorTable operatorTable;
@@ -144,6 +147,23 @@ public class ExtendedRelJson extends RelJson {
     this.jsonBuilder = jsonBuilder;
     this.inputTranslator = requireNonNull(inputTranslator, "inputTranslator");
     this.operatorTable = requireNonNull(operatorTable, "operatorTable");
+    // Also set the parent RelJson's private operatorTable field so that the parent's
+    // package-private toOp() (called from RelJsonReader's inner RelInput implementation)
+    // uses our custom operator table instead of the default SqlStdOperatorTable.
+    try {
+      java.lang.reflect.Field parentField = RelJson.class.getDeclaredField("operatorTable");
+      parentField.setAccessible(true);
+      parentField.set(this, operatorTable);
+    } catch (NoSuchFieldException | IllegalAccessException e) {
+      // If reflection fails (e.g. future Calcite version renames the field), the parent's
+      // package-private toOp() will use SqlStdOperatorTable and fail with a CalciteException
+      // "no operator" for PPL builtins, ILIKE, and SAFE_CAST. The toRex override and
+      // WELL_KNOWN_OPERATORS fallback still handle most cases but not the RelJsonReader path.
+      LOG.warn(
+          "Failed to set RelJson.operatorTable via reflection; "
+              + "RelJsonReader deserialization of PPL builtins, ILIKE, and SAFE_CAST may fail",
+          e);
+    }
   }
 
   /** Creates a ExtendedRelJson. */
@@ -553,6 +573,19 @@ public class ExtendedRelJson extends RelJson {
   }
 
   // Copied from RelJson for the usage of custom operatorTable
+  // Well-known operators that fail standard lookupOperatorOverloads round-trip due to
+  // Calcite's operator table lookup matching nuances (ILIKE, SAFE_CAST, etc.)
+  private static final Map<String, SqlOperator> WELL_KNOWN_OPERATORS = buildWellKnownOperators();
+
+  private static Map<String, SqlOperator> buildWellKnownOperators() {
+    Map<String, SqlOperator> map = new java.util.HashMap<>();
+    // ILIKE (kind=LIKE, syntax=SPECIAL) — in SqlLibraryOperators (POSTGRESQL library)
+    map.put("ILIKE", org.apache.calcite.sql.fun.SqlLibraryOperators.ILIKE);
+    // SAFE_CAST (kind=SAFE_CAST, syntax=SPECIAL) — in SqlLibraryOperators (BIG_QUERY library)
+    map.put("SAFE_CAST", org.apache.calcite.sql.fun.SqlLibraryOperators.SAFE_CAST);
+    return map;
+  }
+
   @Nullable SqlOperator toOp(Map<String, ? extends @Nullable Object> map) {
     // in case different operator has the same kind, check with both name and kind.
     String name = get(map, "name");
@@ -572,9 +605,59 @@ public class ExtendedRelJson extends RelJson {
         return operator;
       }
     }
+    // Fallback: some operators (ILIKE, SAFE_CAST, LEFT, etc.) serialize with a syntax that
+    // lookupOperatorOverloads does not match on certain table implementations.
+    // Try FUNCTION syntax as a secondary lookup.
+    if (sqlSyntax != SqlSyntax.FUNCTION) {
+      operators.clear();
+      operatorTable.lookupOperatorOverloads(
+          new SqlIdentifier(name, SqlParserPos.ZERO),
+          null,
+          SqlSyntax.FUNCTION,
+          operators,
+          SqlNameMatchers.liberal());
+      for (SqlOperator operator : operators) {
+        if (operator.kind == sqlKind) {
+          return operator;
+        }
+      }
+      // Match by name only if kind lookup failed (e.g. LEFT has kind=OTHER_FUNCTION)
+      for (SqlOperator operator : operators) {
+        if (operator.getName().equalsIgnoreCase(name)) {
+          return operator;
+        }
+      }
+    }
+    // Check well-known operators that don't round-trip through lookupOperatorOverloads
+    SqlOperator wellKnown = WELL_KNOWN_OPERATORS.get(name.toUpperCase(java.util.Locale.ROOT));
+    if (wellKnown != null && wellKnown.kind == sqlKind) {
+      return wellKnown;
+    }
     String class_ = (String) map.get("class");
     if (class_ != null) {
-      return AvaticaUtils.instantiatePlugin(SqlOperator.class, class_);
+      // Anonymous inner classes (e.g. UserDefinedFunctionBuilder$1) cannot be instantiated.
+      // These are UDFs registered in the operator table by name; try a name-only lookup.
+      if (class_.contains("$")) {
+        operators.clear();
+        for (SqlSyntax anySyntax : SqlSyntax.values()) {
+          operatorTable.lookupOperatorOverloads(
+              new SqlIdentifier(name, SqlParserPos.ZERO),
+              null,
+              anySyntax,
+              operators,
+              SqlNameMatchers.liberal());
+        }
+        for (SqlOperator operator : operators) {
+          if (operator.getName().equalsIgnoreCase(name)) {
+            return operator;
+          }
+        }
+      }
+      try {
+        return AvaticaUtils.instantiatePlugin(SqlOperator.class, class_);
+      } catch (RuntimeException e) {
+        // If instantiation fails (e.g. no default ctor), ignore and throw the standard error
+      }
     }
     throw RESOURCE.noOperator(name, kind, syntax).ex();
   }

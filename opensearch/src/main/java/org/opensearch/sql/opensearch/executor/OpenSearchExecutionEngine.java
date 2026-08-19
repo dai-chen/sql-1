@@ -16,8 +16,10 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -28,6 +30,8 @@ import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.externalize.RelJsonWriter;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.SqlOperator;
@@ -40,6 +44,11 @@ import org.apache.calcite.sql.validate.SqlUserDefinedFunction;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.locationtech.jts.geom.Point;
+import org.opensearch.action.search.SearchRequest;
+import org.opensearch.action.search.SearchResponse;
+import org.opensearch.index.query.QueryBuilder;
+import org.opensearch.search.aggregations.InternalAggregation;
+import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
@@ -51,6 +60,7 @@ import org.opensearch.sql.common.error.ErrorCode;
 import org.opensearch.sql.common.error.ErrorReport;
 import org.opensearch.sql.common.error.ResourceLimitExceededException;
 import org.opensearch.sql.common.response.ResponseListener;
+import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.data.model.ExprTupleValue;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.data.model.ExprValueUtils;
@@ -67,10 +77,19 @@ import org.opensearch.sql.monitor.profile.MetricName;
 import org.opensearch.sql.monitor.profile.ProfileMetric;
 import org.opensearch.sql.monitor.profile.QueryProfiling;
 import org.opensearch.sql.opensearch.client.OpenSearchClient;
+import org.opensearch.sql.opensearch.data.type.OpenSearchDataType;
 import org.opensearch.sql.opensearch.data.value.OpenSearchExprGeoPointValue;
 import org.opensearch.sql.opensearch.executor.protector.ExecutionProtector;
 import org.opensearch.sql.opensearch.functions.DistinctCountApproxAggFunction;
 import org.opensearch.sql.opensearch.functions.GeoIpFunction;
+import org.opensearch.sql.opensearch.request.PredicateAnalyzer;
+import org.opensearch.sql.opensearch.stage.CalciteExecAggregationBuilder;
+import org.opensearch.sql.opensearch.stage.CoordinatorTreeExecutor;
+import org.opensearch.sql.opensearch.stage.InternalCalciteExec;
+import org.opensearch.sql.opensearch.stage.RelFragmentCodec;
+import org.opensearch.sql.opensearch.stage.StagePlan;
+import org.opensearch.sql.opensearch.stage.StagePlanner;
+import org.opensearch.sql.opensearch.storage.scan.AbstractCalciteIndexScan;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.sql.protocol.response.format.Format;
 import org.opensearch.sql.storage.TableScanOperator;
@@ -330,6 +349,19 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       RelNode rel, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
     client.schedule(
         () -> {
+          try {
+            // Staged execution gate: activate when the plan is stageable AND pushdown is disabled.
+            // This is a configuration flip — the PoC posture is pushdown.enabled=false.
+            StagePlan stagePlan = StagePlanner.split(rel);
+            if (stagePlan.staged() && isPushdownDisabled(stagePlan)) {
+              executeStagedPlan(stagePlan, context, listener);
+              return;
+            }
+          } catch (Exception e) {
+            listener.onFailure(e);
+            return;
+          }
+
           try (PreparedStatement statement = OpenSearchRelRunners.run(context, rel)) {
             ProfileMetric metric = QueryProfiling.current().getOrCreateMetric(MetricName.EXECUTE);
             long execTime = System.nanoTime();
@@ -376,6 +408,388 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       String message = cause.getMessage();
       if (message != null && message.contains(PIT_CONTEXT_LIMIT_MARKER)) {
         return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Gate condition for staged execution: returns true when pushdown is disabled. Reads the setting
+   * from the scan's index settings, which is the same path CalciteLogicalIndexScan uses at line
+   * 153.
+   */
+  private static boolean isPushdownDisabled(StagePlan stagePlan) {
+    AbstractCalciteIndexScan scan = stagePlan.shardScan();
+    Settings settings = scan.getOsIndex().getSettings();
+    return !((Boolean) settings.getSettingValue(Settings.Key.CALCITE_PUSHDOWN_ENABLED));
+  }
+
+  /**
+   * Executes a staged plan: builds a size-0 search request carrying the {@code calcite_exec}
+   * aggregation, retrieves the coordinator-side {@link InternalCalciteExec} from the response,
+   * feeds the gathered rows through the coordinator tree, and converts the result to a {@link
+   * QueryResponse}.
+   */
+  private void executeStagedPlan(
+      StagePlan stagePlan, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
+    try {
+      ProfileMetric metric = QueryProfiling.current().getOrCreateMetric(MetricName.EXECUTE);
+      long execTime = System.nanoTime();
+
+      // 1. Build the search request
+      SearchRequest searchRequest = buildStagedSearchRequest(stagePlan);
+
+      // 2. Execute the search
+      SearchResponse searchResponse =
+          client
+              .getNodeClient()
+              .orElseThrow(
+                  () -> new IllegalStateException("Staged execution requires a NodeClient"))
+              .search(searchRequest)
+              .actionGet();
+
+      // 3. Extract InternalCalciteExec from the response aggregations.
+      //    The aggregation name matches what we set in buildStagedSearchRequest.
+      InternalAggregation rawAgg = searchResponse.getAggregations().get("calcite_stage");
+      if (!(rawAgg instanceof InternalCalciteExec calciteExec)) {
+        throw new IllegalStateException(
+            "Expected InternalCalciteExec aggregation in staged response, got: "
+                + (rawAgg == null ? "null" : rawAgg.getClass().getName()));
+      }
+
+      // 4. Convert gathered rows from List<List<Object>> to List<Object[]> for the DataContext
+      // stash
+      List<Object[]> gatheredRows = new ArrayList<>(calciteExec.getRows().size());
+      for (List<Object> row : calciteExec.getRows()) {
+        gatheredRows.add(row.toArray());
+      }
+
+      // 5. Execute the coordinator tree over gathered rows (tier-2)
+      RelNode coordinatorTree = stagePlan.coordinatorTree();
+      // The row type of the gathered-rows table is the cut node's output type, which is the
+      // shardFragment's output row type. Under the generic floor, the fragment may contain a
+      // Project or Filter above the scan, narrowing the row type relative to the scan.
+      RelDataType gatheredRowType = stagePlan.shardFragment().getRowType();
+      List<Object[]> outputRows =
+          CoordinatorTreeExecutor.execute(coordinatorTree, gatheredRows, gatheredRowType);
+
+      // 6. Convert output to QueryResponse
+      RelDataType outputType = coordinatorTree.getRowType();
+      Integer querySizeLimit = context.sysLimit.querySizeLimit();
+      List<ExprValue> values = new ArrayList<>();
+      for (Object[] row : outputRows) {
+        if (querySizeLimit != null && values.size() >= querySizeLimit) {
+          break;
+        }
+        Map<String, ExprValue> tuple = new LinkedHashMap<>();
+        for (int i = 0; i < outputType.getFieldCount(); i++) {
+          String fieldName = outputType.getFieldList().get(i).getName();
+          Object value = i < row.length ? row[i] : null;
+          tuple.put(fieldName, ExprValueUtils.fromObjectValue(value));
+        }
+        values.add(ExprTupleValue.fromExprValueMap(tuple));
+      }
+
+      // Build schema columns from outputType
+      List<Column> columns = new ArrayList<>();
+      for (RelDataTypeField field : outputType.getFieldList()) {
+        ExprType exprType = OpenSearchTypeFactory.convertRelDataTypeToExprType(field.getType());
+        columns.add(new Column(field.getName(), null, exprType));
+      }
+      Schema schema = new Schema(columns);
+
+      metric.add(System.nanoTime() - execTime);
+      listener.onResponse(new QueryResponse(schema, values, null));
+    } catch (Exception e) {
+      listener.onFailure(e);
+    }
+  }
+
+  /**
+   * Builds a staged search request: size=0, allowPartialSearchResults=false, the PredicateAnalyzer
+   * query clause from the scan's PushDownContext, and exactly one {@code calcite_exec} aggregation.
+   * No PIT, scroll, or search_after is ever created on this path.
+   *
+   * <p>Package-private for unit testing from {@code StagedRequestShapeTest}.
+   */
+  public static SearchRequest buildStagedSearchRequest(StagePlan stagePlan) {
+    AbstractCalciteIndexScan scan = stagePlan.shardScan();
+    String indexName = scan.getOsIndex().getIndexName().toString();
+
+    // Extract relevance predicates from the shard fragment BEFORE serialization.
+    // Relevance functions (query_string, match, match_phrase, etc.) cannot be Janino-compiled —
+    // they require the inverted index and must always be in the DSL query clause, regardless of
+    // the pushdown.enabled setting. Per design doc: "Push a predicate only if it consults an
+    // index structure" and relevance functions "cannot be evaluated from doc_values at all".
+    RelNode fragment = stagePlan.shardFragment();
+    RelevanceExtractionResult extraction = extractRelevancePredicates(fragment, scan);
+    fragment = extraction.cleanedFragment;
+
+    // Serialize the (possibly cleaned) shard fragment
+    String serializedPlan = RelFragmentCodec.serialize(fragment);
+
+    // Build field descriptors from the scan's index field types and the fragment's row type.
+    // Use the flattened type map so dotted paths like "address.city" resolve correctly.
+    RelDataType scanRowType = scan.getRowType();
+    Map<String, OpenSearchDataType> fieldTypes =
+        OpenSearchDataType.traverseAndFlatten(scan.getOsIndex().getFieldOpenSearchTypes());
+    List<CalciteExecAggregationBuilder.FieldDescriptor> fieldDescriptors = new ArrayList<>();
+    for (RelDataTypeField field : scanRowType.getFieldList()) {
+      // Look up the OpenSearch mapping type for this field
+      OpenSearchDataType osType = fieldTypes.get(field.getName());
+      String typeName = osType != null ? osType.getMappingType().toString() : "keyword";
+      fieldDescriptors.add(
+          new CalciteExecAggregationBuilder.FieldDescriptor(field.getName(), typeName));
+    }
+
+    // Build the calcite_exec aggregation
+    CalciteExecAggregationBuilder aggBuilder =
+        new CalciteExecAggregationBuilder("calcite_stage")
+            .plan(serializedPlan)
+            .fields(fieldDescriptors)
+            .combine(stagePlan.combine());
+
+    // Build the SearchSourceBuilder: size=0, the query clause, and the aggregation
+    SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+    sourceBuilder.size(0);
+    sourceBuilder.aggregation(aggBuilder);
+
+    // Apply the pushed-down query clause from the PushDownContext (PredicateAnalyzer output).
+    // The scan's PushDownContext creates a request builder that carries the query clause.
+    org.opensearch.sql.opensearch.request.OpenSearchRequestBuilder reqBuilder =
+        scan.getPushDownContext().createRequestBuilder();
+    QueryBuilder queryClause = reqBuilder.getSourceBuilder().query();
+    // Combine with any relevance predicates extracted from the fragment
+    if (extraction.relevanceQuery != null) {
+      if (queryClause != null) {
+        queryClause =
+            org.opensearch.index.query.QueryBuilders.boolQuery()
+                .filter(queryClause)
+                .filter(extraction.relevanceQuery);
+      } else {
+        queryClause = extraction.relevanceQuery;
+      }
+    }
+    if (queryClause != null) {
+      sourceBuilder.query(queryClause);
+    }
+
+    // Build the SearchRequest: no PIT, no scroll, no search_after
+    SearchRequest searchRequest =
+        new SearchRequest()
+            .indices(scan.getOsIndex().getIndexName().getIndexNames())
+            .source(sourceBuilder);
+    // Design invariant 7: every staged request sets allowPartialSearchResults(false)
+    searchRequest.allowPartialSearchResults(false);
+
+    return searchRequest;
+  }
+
+  /**
+   * Names of relevance functions that cannot be Janino-compiled and MUST be pushed to the DSL query
+   * clause regardless of pushdown settings. These consult the inverted index and have no doc_values
+   * or _source representation.
+   */
+  private static final Set<String> RELEVANCE_FUNCTION_NAMES =
+      Set.of(
+          "query_string",
+          "simple_query_string",
+          "match",
+          "match_phrase",
+          "match_bool_prefix",
+          "match_phrase_prefix",
+          "multi_match");
+
+  /** Result of extracting relevance predicates from a shard fragment. */
+  private static class RelevanceExtractionResult {
+    final RelNode cleanedFragment;
+    final QueryBuilder relevanceQuery;
+
+    RelevanceExtractionResult(RelNode cleanedFragment, QueryBuilder relevanceQuery) {
+      this.cleanedFragment = cleanedFragment;
+      this.relevanceQuery = relevanceQuery;
+    }
+  }
+
+  /**
+   * Walks the shard fragment looking for {@code LogicalFilter} nodes containing relevance function
+   * calls. Extracts those predicates via {@link PredicateAnalyzer} and returns the cleaned fragment
+   * (with the relevance filter removed) plus the query clause.
+   *
+   * <p>Only handles the simple case of a top-level Filter directly above the table scan with a
+   * condition that IS a relevance call (possibly in a conjunction). Complex filter shapes pass
+   * through unchanged — if the shard fragment fails to compile, it surfaces as a loud error per
+   * design invariant.
+   */
+  private static RelevanceExtractionResult extractRelevancePredicates(
+      RelNode fragment, AbstractCalciteIndexScan scan) {
+    if (!(fragment instanceof org.apache.calcite.rel.logical.LogicalFilter)) {
+      // Not a filter at the top — check if it's a Calc with a condition containing relevance
+      if (fragment instanceof org.apache.calcite.rel.logical.LogicalCalc) {
+        return extractRelevanceFromCalc(
+            (org.apache.calcite.rel.logical.LogicalCalc) fragment, scan);
+      }
+      // Check if there's a Project over a Filter containing relevance
+      if (fragment instanceof org.apache.calcite.rel.logical.LogicalProject) {
+        org.apache.calcite.rel.logical.LogicalProject project =
+            (org.apache.calcite.rel.logical.LogicalProject) fragment;
+        if (project.getInput() instanceof org.apache.calcite.rel.logical.LogicalFilter) {
+          RelevanceExtractionResult innerResult =
+              extractRelevancePredicates(project.getInput(), scan);
+          if (innerResult.relevanceQuery != null) {
+            // Rebuild the project over the cleaned inner fragment
+            RelNode newProject =
+                project.copy(project.getTraitSet(), List.of(innerResult.cleanedFragment));
+            return new RelevanceExtractionResult(newProject, innerResult.relevanceQuery);
+          }
+        }
+      }
+      return new RelevanceExtractionResult(fragment, null);
+    }
+
+    org.apache.calcite.rel.logical.LogicalFilter filter =
+        (org.apache.calcite.rel.logical.LogicalFilter) fragment;
+    RexNode condition = filter.getCondition();
+
+    // Check if the condition contains a relevance function call
+    if (!containsRelevanceFunction(condition)) {
+      return new RelevanceExtractionResult(fragment, null);
+    }
+
+    // Try to convert the relevance predicate to a QueryBuilder via PredicateAnalyzer
+    try {
+      List<String> schema = scan.getRowType().getFieldNames();
+      Map<String, ExprType> fieldTypes = buildExprTypeMap(scan);
+      QueryBuilder qb =
+          PredicateAnalyzer.analyze(
+              condition, schema, fieldTypes, scan.getRowType(), scan.getCluster());
+      // Success: remove the entire filter from the fragment (the DSL handles it)
+      return new RelevanceExtractionResult(filter.getInput(), qb);
+    } catch (Exception e) {
+      // If PredicateAnalyzer can't handle it (e.g. mixed relevance + scalar), try to
+      // decompose conjunctions and extract only the relevance parts.
+      return extractRelevanceFromConjunction(filter, scan);
+    }
+  }
+
+  /**
+   * For a LogicalCalc, check if its condition program contains relevance functions. If so, attempt
+   * to extract and convert them.
+   */
+  private static RelevanceExtractionResult extractRelevanceFromCalc(
+      org.apache.calcite.rel.logical.LogicalCalc calc, AbstractCalciteIndexScan scan) {
+    org.apache.calcite.rex.RexProgram program = calc.getProgram();
+    if (program.getCondition() == null) {
+      return new RelevanceExtractionResult(calc, null);
+    }
+    // Expand the condition to a RexNode
+    RexNode condition = program.expandLocalRef(program.getCondition());
+    if (!containsRelevanceFunction(condition)) {
+      return new RelevanceExtractionResult(calc, null);
+    }
+
+    // Try to push the relevance predicate entirely
+    try {
+      List<String> schema = scan.getRowType().getFieldNames();
+      Map<String, ExprType> fieldTypes = buildExprTypeMap(scan);
+      QueryBuilder qb =
+          PredicateAnalyzer.analyze(
+              condition, schema, fieldTypes, scan.getRowType(), scan.getCluster());
+      // Remove the condition from the Calc (keep only the projection)
+      org.apache.calcite.rex.RexProgram newProgram =
+          org.apache.calcite.rex.RexProgram.create(
+              program.getInputRowType(),
+              program.getProjectList().stream().map(program::expandLocalRef).toList(),
+              null, // no condition
+              program.getOutputRowType(),
+              calc.getCluster().getRexBuilder());
+      RelNode newCalc =
+          org.apache.calcite.rel.logical.LogicalCalc.create(calc.getInput(), newProgram);
+      return new RelevanceExtractionResult(newCalc, qb);
+    } catch (Exception e) {
+      // Can't extract — leave as-is, will fail loudly at compile time
+      return new RelevanceExtractionResult(calc, null);
+    }
+  }
+
+  /**
+   * Decomposes a conjunction (AND) to extract relevance predicates while leaving scalar predicates
+   * in the fragment.
+   */
+  private static RelevanceExtractionResult extractRelevanceFromConjunction(
+      org.apache.calcite.rel.logical.LogicalFilter filter, AbstractCalciteIndexScan scan) {
+    RexNode condition = filter.getCondition();
+    List<RexNode> conjuncts = org.apache.calcite.rex.RexUtil.flattenAnd(List.of(condition));
+
+    List<RexNode> relevanceParts = new ArrayList<>();
+    List<RexNode> scalarParts = new ArrayList<>();
+
+    for (RexNode conjunct : conjuncts) {
+      if (containsRelevanceFunction(conjunct)) {
+        relevanceParts.add(conjunct);
+      } else {
+        scalarParts.add(conjunct);
+      }
+    }
+
+    if (relevanceParts.isEmpty()) {
+      return new RelevanceExtractionResult(filter, null);
+    }
+
+    // Convert relevance parts to QueryBuilder
+    QueryBuilder relevanceQb = null;
+    try {
+      RexNode relevanceCondition =
+          org.apache.calcite.rex.RexUtil.composeConjunction(
+              filter.getCluster().getRexBuilder(), relevanceParts);
+      List<String> schema = scan.getRowType().getFieldNames();
+      Map<String, ExprType> fieldTypes = buildExprTypeMap(scan);
+      relevanceQb =
+          PredicateAnalyzer.analyze(
+              relevanceCondition, schema, fieldTypes, scan.getRowType(), scan.getCluster());
+    } catch (Exception e) {
+      // Can't convert — leave unchanged, will fail loudly
+      return new RelevanceExtractionResult(filter, null);
+    }
+
+    // Rebuild the filter with only scalar parts (or remove it entirely)
+    RelNode cleanedFragment;
+    if (scalarParts.isEmpty()) {
+      cleanedFragment = filter.getInput();
+    } else {
+      RexNode scalarCondition =
+          org.apache.calcite.rex.RexUtil.composeConjunction(
+              filter.getCluster().getRexBuilder(), scalarParts);
+      cleanedFragment = filter.copy(filter.getTraitSet(), filter.getInput(), scalarCondition);
+    }
+
+    return new RelevanceExtractionResult(cleanedFragment, relevanceQb);
+  }
+
+  /** Builds a field name → ExprType map from the scan's OpenSearch field types. */
+  private static Map<String, ExprType> buildExprTypeMap(AbstractCalciteIndexScan scan) {
+    Map<String, OpenSearchDataType> osTypes =
+        OpenSearchDataType.traverseAndFlatten(scan.getOsIndex().getFieldOpenSearchTypes());
+    Map<String, ExprType> result = new HashMap<>();
+    for (Map.Entry<String, OpenSearchDataType> entry : osTypes.entrySet()) {
+      result.put(entry.getKey(), entry.getValue().getExprType());
+    }
+    return result;
+  }
+
+  /** Checks recursively if a RexNode contains a relevance function call. */
+  private static boolean containsRelevanceFunction(RexNode node) {
+    if (node instanceof RexCall) {
+      RexCall call = (RexCall) node;
+      String opName = call.getOperator().getName().toLowerCase(Locale.ROOT);
+      if (RELEVANCE_FUNCTION_NAMES.contains(opName)) {
+        return true;
+      }
+      // Check operands recursively (for AND/OR containing relevance)
+      for (RexNode operand : call.getOperands()) {
+        if (containsRelevanceFunction(operand)) {
+          return true;
+        }
       }
     }
     return false;

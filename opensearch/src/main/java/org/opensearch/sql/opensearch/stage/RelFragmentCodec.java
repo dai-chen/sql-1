@@ -71,7 +71,10 @@ public final class RelFragmentCodec {
           Map.entry("double", SqlTypeName.DOUBLE),
           Map.entry("float", SqlTypeName.REAL),
           Map.entry("boolean", SqlTypeName.BOOLEAN),
-          Map.entry("date", SqlTypeName.TIMESTAMP));
+          Map.entry("date", SqlTypeName.TIMESTAMP),
+          // Struct/nested types are read from _source as opaque VARCHAR (JSON string)
+          Map.entry("object", SqlTypeName.VARCHAR),
+          Map.entry("nested", SqlTypeName.VARCHAR));
 
   private RelFragmentCodec() {}
 

@@ -12,7 +12,9 @@ import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
+import org.opensearch.index.mapper.Uid;
 import org.opensearch.search.lookup.SourceLookup;
 
 /**
@@ -92,11 +94,47 @@ public class ShardRowReader {
   private static FieldReader buildReader(
       LeafReader leafReader, String fieldName, String typeName, SourceLookup sourceLookup)
       throws IOException {
+    // Metadata fields require special handling — they are not in _source or regular doc_values
+    if (fieldName.equals("_id")) {
+      // _id is stored as a binary value in Lucene; decode via Uid.decodeId which handles
+      // the encoding used by OpenSearch's IdFieldMapper.
+      return doc -> {
+        var storedFields = leafReader.storedFields();
+        var document = storedFields.document(doc);
+        BytesRef binaryId = document.getBinaryValue("_id");
+        if (binaryId != null) {
+          return Uid.decodeId(binaryId.bytes, binaryId.offset, binaryId.length);
+        }
+        // Fallback: try as a string stored field (older format or test fixtures)
+        String stringId = document.get("_id");
+        return stringId;
+      };
+    }
+    if (fieldName.equals("_index")) {
+      // _index is the index name of the shard this reader is operating on. In the aggregation
+      // context, the correct value comes from the field descriptor's context (the calling
+      // CalciteExecAggregator knows the index name). However, ShardRowReader doesn't have access
+      // to SearchContext here. For the PoC, fall back to _source metadata (not available) or null.
+      // The integration tests for _index filtering work via the non-staged path because the
+      // coordinator already routes to the correct index.
+      return doc -> null;
+    }
+    if (fieldName.equals("_routing")) {
+      // _routing is accessible via stored fields
+      return doc -> {
+        var storedFields = leafReader.storedFields();
+        var document = storedFields.document(doc);
+        return document.get("_routing");
+      };
+    }
     switch (typeName) {
       case "keyword":
         return buildKeywordReader(leafReader, fieldName, sourceLookup);
       case "long":
       case "date":
+        // Date fields are stored as epoch millis (Long). Calcite's TIMESTAMP type represents
+        // timestamps as Long internally. PPL UDFs (month, year etc.) receive the Long and
+        // ExprValueUtils.fromObjectValue(Long, TIMESTAMP) converts it to ExprTimestampValue.
         return buildNumericLongReader(leafReader, fieldName, sourceLookup);
       case "integer":
         return buildNumericIntegerReader(leafReader, fieldName, sourceLookup);
@@ -109,6 +147,12 @@ public class ShardRowReader {
       case "text":
         // text fields have no doc_values, always read from _source
         return doc -> sourceLookup.extractValue(fieldName, null);
+      case "object":
+      case "nested":
+        // Struct/nested fields: navigate the _source using the dotted path to reach the scalar
+        // leaf value. For array-of-objects (nested), extractValue returns a List; keep it opaque
+        // for projection but filter equality on scalars won't match against a List.
+        return doc -> extractNestedValue(sourceLookup, fieldName);
       default:
         throw new IllegalArgumentException(
             String.format(
@@ -245,5 +289,26 @@ public class ShardRowReader {
       }
       return null;
     };
+  }
+
+  /**
+   * Navigates the _source document along a dotted field path to extract a scalar leaf value. For
+   * nested/object fields that are arrays of objects (e.g. "address" is nested and the path is
+   * "address.city"), SourceLookup.extractValue returns a flattened List of all leaf values. For
+   * Calcite filters comparing to a scalar, a List never matches equality. This method unwraps
+   * single-element lists to enable scalar comparison in the common case.
+   */
+  @SuppressWarnings("unchecked")
+  private static Object extractNestedValue(SourceLookup sourceLookup, String fieldName) {
+    Object value = sourceLookup.extractValue(fieldName, null);
+    // If extractValue returned a single-element List, unwrap to scalar for filter comparisons
+    if (value instanceof List) {
+      List<Object> list = (List<Object>) value;
+      if (list.size() == 1) {
+        return list.get(0);
+      }
+      // Multi-value: return as-is (projection will show the list; filter equality won't match)
+    }
+    return value;
   }
 }

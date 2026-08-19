@@ -188,6 +188,9 @@ public class ShardRowReaderTest {
     ShardRowReader reader = ShardRowReader.create(ctx, fields, sourceLookup);
     Object[] row = reader.readRow(0);
 
+    // Date fields return Long epoch millis — Calcite's TIMESTAMP type uses Long internally.
+    // PPL temporal UDFs receive the Long; ExprValueUtils.fromObjectValue(Long, TIMESTAMP)
+    // converts it to ExprTimestampValue via Instant.ofEpochMilli.
     assertEquals(Long.class, row[0].getClass());
     assertEquals(epochMillis, row[0]);
   }
@@ -250,14 +253,14 @@ public class ShardRowReaderTest {
     when(ctx.reader()).thenReturn(leafReader);
     SourceLookup sourceLookup = mock(SourceLookup.class);
 
-    List<FieldDescriptor> fields = List.of(new FieldDescriptor("nested_obj", "nested"));
+    List<FieldDescriptor> fields = List.of(new FieldDescriptor("some_field", "geo_shape"));
 
     IllegalArgumentException ex =
         assertThrows(
             IllegalArgumentException.class, () -> ShardRowReader.create(ctx, fields, sourceLookup));
 
     assertEquals(
-        "Unrecognized OpenSearch field type 'nested' for field 'nested_obj'", ex.getMessage());
+        "Unrecognized OpenSearch field type 'geo_shape' for field 'some_field'", ex.getMessage());
   }
 
   @Test

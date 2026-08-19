@@ -154,6 +154,42 @@ public class RelFragmentCodecTest {
         "Unrecognized OpenSearch field type 'flattened' for field 'status'", ex.getMessage());
   }
 
+  @Test
+  void roundTrip_filter_with_ILIKE_operator_exercises_parent_toOp() {
+    // This test exercises the RelJsonReader deserialization path through the parent RelJson's
+    // package-private toOp() method. ILIKE is a library operator (SqlLibraryOperators.ILIKE)
+    // that is NOT in SqlStdOperatorTable — it can only be found if the reflection in
+    // ExtendedRelJson's 3-arg constructor successfully set the parent's operatorTable field.
+    // Without the reflection, this test produces: CalciteException "no operator ILIKE"
+    RelNode tableScan = buildTableScan();
+
+    // Build a filter: account_number ILIKE '%test%'
+    // ILIKE uses kind=LIKE, syntax=SPECIAL — it's in SqlLibraryOperators (POSTGRESQL library)
+    RexNode likeCondition =
+        REX_BUILDER.makeCall(
+            org.apache.calcite.sql.fun.SqlLibraryOperators.ILIKE,
+            REX_BUILDER.makeInputRef(tableScan.getRowType().getFieldList().get(2).getType(), 2),
+            REX_BUILDER.makeLiteral("%test%"));
+    RelNode filter = LogicalFilter.create(tableScan, likeCondition);
+
+    String before = RelOptUtil.toString(filter);
+
+    // Serialize and deserialize — the deserialize path goes through RelJsonReader which
+    // internally calls the parent RelJson.toOp() for operator lookup.
+    String encoded = RelFragmentCodec.serialize(filter);
+    RelNode deserialized =
+        RelFragmentCodec.deserialize(
+            encoded,
+            INDEX_NAME,
+            List.of(
+                new FieldDescriptor("account_number", "long"),
+                new FieldDescriptor("age", "integer"),
+                new FieldDescriptor("gender", "keyword")));
+
+    String after = RelOptUtil.toString(deserialized);
+    assertEquals(before, after);
+  }
+
   private RelNode buildTableScan() {
     // Build a schema matching [OpenSearch, test_index] with fields: account_number, age, gender
     RelDataType rowType =
