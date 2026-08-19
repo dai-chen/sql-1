@@ -353,6 +353,45 @@ Results are reported in **three buckets**, never conflated:
 
 The bucket counts are the PoC's primary deliverable. Conflating the last two would obscure the only number that matters.
 
+#### Measured baseline (US-010)
+
+Measured on 2026-08-19 on branch `poc/staged-calcite-exec` with `plugins.calcite.pushdown.enabled=false` and `plugins.calcite.fallback.allowed=false` set as transient cluster settings. Each of the ten IT classes was run through a `StagedCalcite*` subclass that sets that posture in `init()` and restores both settings to `null` in `tearDown()`. Every number below was read from the JUnit XML in `integ-test/build/test-results/integTest/`, not from a Gradle exit code.
+
+| Staged IT class | Tests | Skipped | pass | fail-on-assertion | fail-on-ceiling |
+|---|---|---|---|---|---|
+| StagedCalciteFieldsCommandIT | 39 | 0 | 39 | 0 | 0 |
+| StagedCalciteWhereCommandIT | 41 | 3 | 38 | 0 | 0 |
+| StagedCalciteEvalCommandIT | 9 | 0 | 9 | 0 | 0 |
+| StagedCalciteHeadCommandIT | 6 | 2 | 4 | 0 | 0 |
+| StagedCalcitePPLSortIT | 18 | 0 | 18 | 0 | 0 |
+| StagedCalciteTopCommandIT | 9 | 0 | 0 | 9 | 0 |
+| StagedCalciteStatsCommandIT | 63 | 0 | 37 | 26 | 0 |
+| StagedCalciteDedupCommandIT | 5 | 0 | 1 | 4 | 0 |
+| StagedCalcitePPLEventstatsIT | 27 | 0 | 1 | 26 | 0 |
+| StagedCalciteExplainIT | 266 | 80 | 186 | 0 | 0 |
+| **Total** | **483** | **85** | **333** | **65** | **0** |
+
+**Annotation of the 65 fail-on-assertion entries:**
+
+| Cause | Count | Classes | Annotation |
+|---|---|---|---|
+| `CannotPlanException` — no ENUMERABLE conversion rules for the plan | 33 | Eventstats 26, Top 6, Dedup 1 | suspected real defect; the window/aggregate plan has no enumerable implementation on the staged path |
+| `UnsupportedOperationException` | 12 | Stats 9, Dedup 3 | suspected real defect |
+| RelJson `cannot serialize enum value to JSON: SqlTypeName.<X>` (BIGINT ×7, DECIMAL ×1, INTEGER ×1) | 9 | Stats 9 | suspected real defect in fragment serialization of aggregate call types |
+| Shard `NullPointerException` (`SearchPhaseExecutionException`) | 8 | Stats 5, Top 3 | suspected real defect |
+| `Unable to implement EnumerableCalc` (`IllegalStateException`) | 2 | Stats 2 | suspected real defect |
+| `can not write type [class java.math.BigDecimal]` (`IllegalArgumentException`) | 1 | Stats 1 | suspected real defect in the staged response writer |
+
+**Caveats — read before quoting the 333/483 number:**
+
+- **fail-on-ceiling is zero, and that is not yet evidence the ceiling works.** No query in these ten classes reached the 200 000-row budget, so the row-budget refusal path (US-009) is exercised only by its own dedicated IT, not by this baseline.
+- **The explain result is narrower than it looks.** 76 of `StagedCalciteExplainIT`'s 80 skips are the suite's own `assumeTrue` guard, "This test is only for when push down is enabled". So explain coverage under the PoC posture is 186 of 266 tests, and the remaining 4 skips are pre-existing `@Ignore`s. Zero explain goldens needed re-baselining because the stage split is not rendered in explain yet — that is US-011's job.
+- **The other skips are inherited, not new.** `StagedCalciteHeadCommandIT`'s 2 skips are `@Ignore`s on the parent `org.opensearch.sql.ppl.HeadCommandIT` (issue 703); `StagedCalciteWhereCommandIT`'s 3 skips predate this measurement.
+- **Stats/Top/Dedup/Eventstats correspond exactly to the unimplemented split rules.** Their staged subclasses carry a class-level `@Ignore` naming the unblocking story (US-012 for Aggregate partial/final and MERGE_AGG, US-014 for Sort+Fetch top-N, US-015 for the window rank-filter) so CI stays green; that story removes the annotation. `Fields`, `Where`, `Eval`, `Head`, `PPLSort` and `Explain` run unignored as active regression gates.
+- **The doc's earlier per-class test counts are stale.** The table above records the counts actually observed; e.g. `stats` is 63 tests, not 4, and `top` is 9, not 5.
+
+The generic placement floor executes project/filter/eval/sort/limit shapes correctly end to end (333 passing), and no plan was ever rejected by the ceiling — every failure is a missing enumerable implementation or a serialization gap on the staged path, consistent with Design Invariant 1.
+
 ### Phase B — explain shows the split
 
 `explain` output must render the three parts distinctly: `shardFragment`, `combine`, `coordinatorTree`. This is how a reviewer confirms the design works as intended rather than trusting row counts. New/updated YAML goldens under `integ-test/src/test/resources/expectedOutput/calcite/` for at minimum:
