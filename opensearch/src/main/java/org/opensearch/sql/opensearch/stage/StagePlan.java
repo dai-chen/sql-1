@@ -24,18 +24,21 @@ public final class StagePlan {
   private final @Nullable CombineDescriptor combine;
   private final RelNode coordinatorTree;
   private final @Nullable AbstractCalciteIndexScan shardScan;
+  private final @Nullable String forcingOperator;
 
   private StagePlan(
       boolean staged,
       @Nullable RelNode shardFragment,
       @Nullable CombineDescriptor combine,
       RelNode coordinatorTree,
-      @Nullable AbstractCalciteIndexScan shardScan) {
+      @Nullable AbstractCalciteIndexScan shardScan,
+      @Nullable String forcingOperator) {
     this.staged = staged;
     this.shardFragment = shardFragment;
     this.combine = combine;
     this.coordinatorTree = coordinatorTree;
     this.shardScan = shardScan;
+    this.forcingOperator = forcingOperator;
   }
 
   /** Creates a fully staged result with a shard fragment, combine descriptor, and coordinator. */
@@ -43,8 +46,9 @@ public final class StagePlan {
       RelNode shardFragment,
       CombineDescriptor combine,
       RelNode coordinatorTree,
-      AbstractCalciteIndexScan shardScan) {
-    return new StagePlan(true, shardFragment, combine, coordinatorTree, shardScan);
+      AbstractCalciteIndexScan shardScan,
+      @Nullable String forcingOperator) {
+    return new StagePlan(true, shardFragment, combine, coordinatorTree, shardScan, forcingOperator);
   }
 
   /**
@@ -52,7 +56,7 @@ public final class StagePlan {
    * {@link AbstractCalciteIndexScan}, making a single shard-to-coordinator boundary impossible.
    */
   static StagePlan coordinatorOnly(RelNode root) {
-    return new StagePlan(false, null, null, root, null);
+    return new StagePlan(false, null, null, root, null, null);
   }
 
   /** Whether this plan was successfully split into shard + coordinator stages. */
@@ -85,5 +89,16 @@ public final class StagePlan {
   @Nullable
   public AbstractCalciteIndexScan shardScan() {
     return shardScan;
+  }
+
+  /**
+   * The Calcite RelNode type name of the operator that forced the gather (the immediate parent of
+   * the cut in the original tree). Null when the cut IS the root, i.e. nothing forced a gather —
+   * which happens when the entire plan is shard-local. Used in the row budget error message so the
+   * user knows which operation caused the full-shard gather.
+   */
+  @Nullable
+  public String forcingOperator() {
+    return forcingOperator;
   }
 }

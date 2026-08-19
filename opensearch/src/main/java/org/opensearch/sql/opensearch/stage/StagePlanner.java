@@ -73,17 +73,23 @@ public final class StagePlanner {
       cutNode = shardScan;
     }
 
-    // 3. Build shardFragment: replace the AbstractCalciteIndexScan leaf with a serializable
+    // 3. Identify the forcing operator: the immediate parent of the cut in the original tree.
+    //    This is the LOWEST NEEDS_GATHER node above the cut — i.e. the node whose input list
+    //    contains cutNode. Null when the cut IS the root (fully shard-local plan).
+    String forcingOperator = (cutNode == root) ? null : findParentOf(root, cutNode);
+
+    // 4. Build shardFragment: replace the AbstractCalciteIndexScan leaf with a serializable
     //    LogicalTableScan over [RelFragmentCodec.SCHEMA_NAME, <indexName>] carrying the same
     //    row type so that RelFragmentCodec.serialize(shardFragment) round-trips.
     String indexName = shardScan.getOsIndex().getIndexName().toString();
     RelNode shardFragment = replaceLeafWithSerializable(cutNode, shardScan, indexName);
 
-    // 4. Build coordinatorTree: replace the cut subtree with a gathered-rows scan
+    // 5. Build coordinatorTree: replace the cut subtree with a gathered-rows scan
     RelNode coordinatorTree = replaceSubtree(root, cutNode, buildGatheredRowsScan(cutNode));
 
-    // 5. Return the staged result with CONCAT descriptor
-    return StagePlan.staged(shardFragment, CombineDescriptor.concat(), coordinatorTree, shardScan);
+    // 6. Return the staged result with CONCAT descriptor and the forcing operator name
+    return StagePlan.staged(
+        shardFragment, CombineDescriptor.concat(), coordinatorTree, shardScan, forcingOperator);
   }
 
   /** Package-private predicate: true iff the node is the shard-local OpenSearch scan. */
@@ -119,7 +125,7 @@ public final class StagePlanner {
     if (isShardScan(node)) {
       return true;
     }
-    if (node instanceof Project project) {
+    if (node instanceof Project) {
       List<RelNode> inputs = node.getInputs();
       if (inputs.size() != 1 || !Boolean.TRUE.equals(memo.get(inputs.get(0)))) {
         return false;
@@ -127,7 +133,7 @@ public final class StagePlanner {
       // Guard: a Project containing a RexOver (window function) is NOT distribution-preserving.
       // Per-shard window numbering restarts → silently wrong results. Partial windows are
       // US-015's RANK_LIMIT rule; the generic floor must classify these as NEEDS_GATHER.
-      return !RexOver.containsOver(project.getProjects(), null);
+      return !containsWindowFunction(node);
     }
     if (node instanceof Filter) {
       List<RelNode> inputs = node.getInputs();
@@ -135,13 +141,13 @@ public final class StagePlanner {
       // RexOver cannot appear in a filter condition on Calcite 1.42.0 (validator rejects it).
       return inputs.size() == 1 && Boolean.TRUE.equals(memo.get(inputs.get(0)));
     }
-    if (node instanceof Calc calc) {
+    if (node instanceof Calc) {
       List<RelNode> inputs = node.getInputs();
       if (inputs.size() != 1 || !Boolean.TRUE.equals(memo.get(inputs.get(0)))) {
         return false;
       }
       // Guard: a Calc whose RexProgram contains a RexOver is NOT distribution-preserving.
-      return !RexOver.containsOver(calc.getProgram());
+      return !containsWindowFunction(node);
     }
     // Everything else (Aggregate, Sort, Join, Window, Union, etc.): NEEDS_GATHER
     return false;
@@ -163,6 +169,51 @@ public final class StagePlanner {
       }
     }
     return null;
+  }
+
+  /**
+   * Finds the immediate parent of the target node in the tree and returns its relTypeName, with a
+   * {@code [window]} qualifier appended when the parent is a Project/Calc containing a window
+   * function. Returns null if the target is not found as a direct child of any node (should not
+   * happen for valid input since target is guaranteed to be reachable from root).
+   */
+  private static String findParentOf(RelNode node, RelNode target) {
+    for (RelNode input : node.getInputs()) {
+      if (input == target) {
+        return qualifiedOperatorName(node);
+      }
+      String found = findParentOf(input, target);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Returns the operator name with a {@code [window]} qualifier when the node is a Project or Calc
+   * containing a window function ({@link RexOver}). All other nodes return the bare relTypeName.
+   */
+  private static String qualifiedOperatorName(RelNode node) {
+    if (containsWindowFunction(node)) {
+      return node.getRelTypeName() + "[window]";
+    }
+    return node.getRelTypeName();
+  }
+
+  /**
+   * Returns true iff the node is a Project containing a {@link RexOver} or a Calc whose program
+   * contains a {@link RexOver}. Used by both the placement logic ({@link #isShardLocalNode}) and
+   * the operator-name qualifier ({@link #qualifiedOperatorName}) so the two can never disagree.
+   */
+  private static boolean containsWindowFunction(RelNode node) {
+    if (node instanceof Project project) {
+      return RexOver.containsOver(project.getProjects(), null);
+    }
+    if (node instanceof Calc calc) {
+      return RexOver.containsOver(calc.getProgram());
+    }
+    return false;
   }
 
   /** Collects all distinct AbstractCalciteIndexScan instances in the tree. */

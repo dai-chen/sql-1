@@ -556,6 +556,130 @@ public class StagePlannerTest {
     assertNotNull(result.shardScan());
   }
 
+  // --- forcingOperator tests (US-009) ---
+
+  @Test
+  void window_project_over_scan_records_window_as_forcing_operator() {
+    // Build a REAL window: Project(account_number, ROW_NUMBER() OVER(PARTITION BY account_number))
+    // over scan. The Project with RexOver is NEEDS_GATHER, so cut falls to scan, and the
+    // forcing operator is the Project with RexOver (its immediate parent of cut=scan).
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelDataType bigintType = TYPE_FAC.createSqlType(SqlTypeName.BIGINT);
+    RexNode rowNumber =
+        REX_BUILDER.makeOver(
+            bigintType,
+            SqlStdOperatorTable.ROW_NUMBER,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            ImmutableList.of(),
+            RexWindowBounds.UNBOUNDED_PRECEDING,
+            RexWindowBounds.CURRENT_ROW,
+            true,
+            true,
+            false,
+            false);
+    RelNode windowProject =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0),
+                rowNumber),
+            List.of("account_number", "rn"));
+
+    StagePlan result = StagePlanner.split(windowProject);
+
+    assertTrue(result.staged());
+    // Cut is scan; forcing operator is the parent of scan = the RexOver-bearing LogicalProject
+    assertEquals("LogicalProject[window]", result.forcingOperator());
+  }
+
+  @Test
+  void window_project_forcing_operator_name_includes_window_qualifier() {
+    // Explicit test: a window-bearing Project's forcingOperator name includes [window]
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelDataType bigintType = TYPE_FAC.createSqlType(SqlTypeName.BIGINT);
+    RexNode rowNumber =
+        REX_BUILDER.makeOver(
+            bigintType,
+            SqlStdOperatorTable.ROW_NUMBER,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            ImmutableList.of(),
+            RexWindowBounds.UNBOUNDED_PRECEDING,
+            RexWindowBounds.CURRENT_ROW,
+            true,
+            true,
+            false,
+            false);
+    RelNode windowProject =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0),
+                rowNumber),
+            List.of("account_number", "rn"));
+
+    StagePlan result = StagePlanner.split(windowProject);
+
+    assertTrue(result.staged());
+    assertEquals("LogicalProject[window]", result.forcingOperator());
+  }
+
+  @Test
+  void aggregate_over_scan_records_aggregate_as_forcing_operator() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode agg = LogicalAggregate.create(scan, List.of(), ImmutableBitSet.of(0), null, List.of());
+
+    StagePlan result = StagePlanner.split(agg);
+
+    assertTrue(result.staged());
+    // Cut is scan; forcing operator is the aggregate (immediate parent of scan)
+    assertEquals("LogicalAggregate", result.forcingOperator());
+  }
+
+  @Test
+  void fully_shard_local_plan_has_null_forcing_operator() {
+    // A plan that is fully shard-local: just a Project over scan — the cut IS the root
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+
+    StagePlan result = StagePlanner.split(project);
+
+    assertTrue(result.staged());
+    // Cut is the project which IS the root → forcingOperator is null
+    assertNull(result.forcingOperator());
+  }
+
+  @Test
+  void sort_above_project_scan_records_sort_as_forcing_operator() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+    RelNode sort =
+        LogicalSort.create(
+            project,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(10, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(sort);
+
+    assertTrue(result.staged());
+    // Cut is project (highest SHARD_LOCAL); parent of project is the sort
+    assertEquals("LogicalSort", result.forcingOperator());
+  }
+
   // --- Helper methods ---
 
   private AbstractCalciteIndexScan buildIndexScan() {

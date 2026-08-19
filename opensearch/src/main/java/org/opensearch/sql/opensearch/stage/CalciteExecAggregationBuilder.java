@@ -37,6 +37,7 @@ public class CalciteExecAggregationBuilder
   private List<FieldDescriptor> fields;
   private CombineDescriptor combine;
   private int rowBudget;
+  private String forcingOperator;
 
   /** A name+type pair describing a single output field. */
   public static class FieldDescriptor implements Writeable, ToXContentObject {
@@ -96,6 +97,7 @@ public class CalciteExecAggregationBuilder
     this.fields = List.of();
     this.combine = CombineDescriptor.concat();
     this.rowBudget = 200000;
+    this.forcingOperator = null;
   }
 
   public CalciteExecAggregationBuilder(StreamInput in) throws IOException {
@@ -104,6 +106,7 @@ public class CalciteExecAggregationBuilder
     this.fields = in.readList(FieldDescriptor::new);
     this.combine = new CombineDescriptor(in);
     this.rowBudget = in.readVInt();
+    this.forcingOperator = in.readOptionalString();
   }
 
   @Override
@@ -112,6 +115,7 @@ public class CalciteExecAggregationBuilder
     out.writeList(fields);
     combine.writeTo(out);
     out.writeVInt(rowBudget);
+    out.writeOptionalString(forcingOperator);
   }
 
   @Override
@@ -128,6 +132,9 @@ public class CalciteExecAggregationBuilder
     combine.toXContent(builder, params);
     // Design doc wire name is "row_budget" (snake_case).
     builder.field("row_budget", rowBudget);
+    if (forcingOperator != null) {
+      builder.field("forcing_operator", forcingOperator);
+    }
     builder.endObject();
     return builder;
   }
@@ -145,6 +152,7 @@ public class CalciteExecAggregationBuilder
     copy.fields = this.fields;
     copy.combine = this.combine;
     copy.rowBudget = this.rowBudget;
+    copy.forcingOperator = this.forcingOperator;
     copy.factoriesBuilder = factoriesBuilder;
     copy.metadata = metadata;
     return copy;
@@ -162,6 +170,7 @@ public class CalciteExecAggregationBuilder
         fields,
         combine,
         rowBudget,
+        forcingOperator,
         queryShardContext,
         parent,
         subfactoriesBuilder,
@@ -195,6 +204,11 @@ public class CalciteExecAggregationBuilder
     return this;
   }
 
+  public CalciteExecAggregationBuilder forcingOperator(String forcingOperator) {
+    this.forcingOperator = forcingOperator;
+    return this;
+  }
+
   // --- Getters ---
 
   public String getPlan() {
@@ -213,9 +227,13 @@ public class CalciteExecAggregationBuilder
     return rowBudget;
   }
 
+  public String getForcingOperator() {
+    return forcingOperator;
+  }
+
   @Override
   public int hashCode() {
-    return Objects.hash(super.hashCode(), plan, fields, combine, rowBudget);
+    return Objects.hash(super.hashCode(), plan, fields, combine, rowBudget, forcingOperator);
   }
 
   @Override
@@ -227,7 +245,8 @@ public class CalciteExecAggregationBuilder
     return Objects.equals(plan, other.plan)
         && Objects.equals(fields, other.fields)
         && Objects.equals(combine, other.combine)
-        && rowBudget == other.rowBudget;
+        && rowBudget == other.rowBudget
+        && Objects.equals(forcingOperator, other.forcingOperator);
   }
 
   /**
@@ -245,6 +264,8 @@ public class CalciteExecAggregationBuilder
       } else if (token == XContentParser.Token.VALUE_STRING) {
         if ("plan".equals(fieldName)) {
           builder.plan = parser.text();
+        } else if ("forcing_operator".equals(fieldName)) {
+          builder.forcingOperator = parser.text();
         }
       } else if (token == XContentParser.Token.VALUE_NUMBER) {
         if ("row_budget".equals(fieldName)) {

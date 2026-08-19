@@ -558,7 +558,8 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
         new CalciteExecAggregationBuilder("calcite_stage")
             .plan(serializedPlan)
             .fields(fieldDescriptors)
-            .combine(stagePlan.combine());
+            .combine(stagePlan.combine())
+            .forcingOperator(stagePlan.forcingOperator());
 
     // Build the SearchSourceBuilder: size=0, the query clause, and the aggregation
     SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();

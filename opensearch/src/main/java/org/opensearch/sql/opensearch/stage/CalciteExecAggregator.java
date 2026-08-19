@@ -56,6 +56,7 @@ public class CalciteExecAggregator extends MetricsAggregator {
   private final List<CalciteExecAggregationBuilder.FieldDescriptor> fields;
   private final CombineDescriptor combine;
   private final int rowBudget;
+  private final String forcingOperator;
   private final String indexName;
 
   /**
@@ -70,8 +71,17 @@ public class CalciteExecAggregator extends MetricsAggregator {
   /** Accumulated rows — one or more Object[] per matching document, in collect() order. */
   private final List<Object[]> rows = new ArrayList<>();
 
-  /** Count of rows collected (post-expansion for nested; US-009 will enforce rowBudget). */
+  /** Count of rows collected (post-expansion for nested; US-009 enforces rowBudget). */
   private long rowsCollected;
+
+  /**
+   * Circuit breaker: accumulated bytes not yet charged. Flushed to the request breaker every {@link
+   * #BREAKER_PROBE_CADENCE} rows, mirroring OpenSearch's MultiBucketConsumer pattern.
+   */
+  private long unchargedBytes;
+
+  /** How often to flush accumulated bytes to the circuit breaker (every N rows). */
+  private static final int BREAKER_PROBE_CADENCE = 1024;
 
   public CalciteExecAggregator(
       String name,
@@ -79,6 +89,7 @@ public class CalciteExecAggregator extends MetricsAggregator {
       List<CalciteExecAggregationBuilder.FieldDescriptor> fields,
       CombineDescriptor combine,
       int rowBudget,
+      String forcingOperator,
       SearchContext searchContext,
       Aggregator parent,
       Map<String, Object> metadata)
@@ -88,6 +99,7 @@ public class CalciteExecAggregator extends MetricsAggregator {
     this.fields = fields;
     this.combine = combine;
     this.rowBudget = rowBudget;
+    this.forcingOperator = forcingOperator;
     this.indexName = searchContext.indexShard().shardId().getIndexName();
     this.nestedPaths = resolveNestedPaths(fields, searchContext);
     this.hasNestedFields = nestedPaths.values().stream().anyMatch(java.util.Objects::nonNull);
@@ -147,18 +159,88 @@ public class CalciteExecAggregator extends MetricsAggregator {
           List<Object[]> expanded = rowReader.readRows(doc);
           rows.addAll(expanded);
           rowsCollected += expanded.size();
+          for (Object[] row : expanded) {
+            chargeRowBytes(row);
+          }
         } else {
           Object[] row = rowReader.readRow(doc);
           rows.add(row);
           rowsCollected++;
+          chargeRowBytes(row);
         }
-        // TODO US-009: enforce rowBudget
+        // US-009: enforce rowBudget as a HARD exception. Do NOT use
+        // CollectionTerminatedException here — that is per-leaf only, caught by
+        // ContextIndexSearcher#searchLeaf(), and would silently truncate rather than fail
+        // the query. CollectionTerminatedException is reserved for US-013's legitimately
+        // pushable limit (rule 4) which is a different semantic. ↓ This throw enforces it.
+        if (rowsCollected > rowBudget) {
+          // Flush any remaining uncharged bytes before throwing so the breaker state is accurate
+          flushBreakerBytes();
+          throw new RowBudgetExceededException(rowsCollected, rowBudget, forcingOperator);
+        }
       }
     };
   }
 
+  /**
+   * Accumulates the estimated byte cost of a buffered row and flushes to the circuit breaker every
+   * {@link #BREAKER_PROBE_CADENCE} rows.
+   */
+  private void chargeRowBytes(Object[] row) {
+    unchargedBytes += estimateRowBytes(row);
+    if (rowsCollected % BREAKER_PROBE_CADENCE == 0) {
+      flushBreakerBytes();
+    }
+  }
+
+  /** Flushes accumulated uncharged bytes to the request circuit breaker. */
+  private void flushBreakerBytes() {
+    if (unchargedBytes > 0) {
+      addRequestCircuitBreakerBytes(unchargedBytes);
+      unchargedBytes = 0;
+    }
+  }
+
+  /**
+   * Estimates the heap footprint of a single buffered row (Object[]). This is an ESTIMATE, not a
+   * precise measurement — it approximates Object overhead and String character storage. Used to
+   * charge the request circuit breaker so the cluster sees the query's memory footprint.
+   *
+   * <p>Sizing heuristic: array header (16 bytes) + per-element estimate based on type.
+   */
+  static long estimateRowBytes(Object[] row) {
+    // Object[] header: 16 bytes (mark word + klass pointer + length)
+    long bytes = 16L;
+    for (Object val : row) {
+      if (val == null) {
+        // null reference slot in the array
+        continue;
+      } else if (val instanceof String s) {
+        // String: object header (16) + char[] header (16) + 2 bytes per char + hash field (4)
+        // Approximation: 40 + 2 * length
+        bytes += 40L + 2L * s.length();
+      } else if (val instanceof Long || val instanceof Double) {
+        // Boxed 64-bit: object header (16)
+        bytes += 16L;
+      } else if (val instanceof Integer || val instanceof Float) {
+        // Boxed 32-bit: object header (16)
+        bytes += 16L;
+      } else if (val instanceof Boolean) {
+        // Boxed boolean: object header (16)
+        bytes += 16L;
+      } else {
+        // Unknown type: conservative estimate
+        bytes += 16L;
+      }
+    }
+    return bytes;
+  }
+
   @Override
   public InternalAggregation buildAggregation(long owningBucketOrd) {
+    // Flush any remaining uncharged bytes before executing the fragment
+    flushBreakerBytes();
+
     // Compile the fragment to a Bindable and execute it, wrapped in the Calcite classloader
     // helper to ensure Janino can resolve plugin classes (CALCITE-3745 workaround).
     List<List<Object>> outputRows =

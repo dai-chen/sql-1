@@ -38,6 +38,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
 import org.opensearch.client.Request;
+import org.opensearch.client.ResponseException;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
 import org.opensearch.sql.opensearch.stage.RelFragmentCodec;
 
@@ -398,6 +399,102 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
     // Ranks within "F" partition should be {1, 2, 3}
     List<Long> fRanks = fRows.stream().map(r -> r.getLong(2)).sorted().toList();
     assertEquals(List.of(1L, 2L, 3L), fRanks);
+  }
+
+  /**
+   * US-009: Verifies that a very small row_budget causes the request to fail with a descriptive
+   * error naming both the row count and the forcing operator. Uses
+   * allow_partial_search_results=false to ensure the shard-level exception propagates.
+   */
+  @Test
+  public void testRowBudgetBreachFailsFast() throws IOException {
+    String identityPlan =
+        buildIdentityPlan(
+            List.of("account_number", "gender"), List.of(SqlTypeName.BIGINT, SqlTypeName.VARCHAR));
+
+    String body =
+        """
+        {
+          "size": 0,
+          "aggs": {
+            "calcite_stage": {
+              "calcite_exec": {
+                "plan": "%s",
+                "fields": [
+                  {"name": "account_number", "type": "long"},
+                  {"name": "gender", "type": "keyword"}
+                ],
+                "combine": {"mode": "CONCAT"},
+                "row_budget": 2,
+                "forcing_operator": "LogicalWindow"
+              }
+            }
+          }
+        }
+        """
+            .formatted(identityPlan);
+
+    // With allow_partial_search_results=false, the shard failure propagates as a top-level error
+    Request request =
+        new Request("POST", "/" + TEST_INDEX_BANK + "/_search?allow_partial_search_results=false");
+    request.setJsonEntity(body);
+
+    ResponseException exception =
+        assertThrows(ResponseException.class, () -> executeRequest(request));
+
+    String errorMessage = exception.getMessage();
+    // The error must contain the exact formatted message produced by RowBudgetExceededException.
+    // BANK has 7 docs on a single shard; the 3rd collected row breaches budget=2.
+    assertTrue(
+        "Error should contain the exact budget breach message, got: " + errorMessage,
+        errorMessage.contains(
+            "LogicalWindow requires all rows on one node; gathered 3 rows, budget 2"));
+  }
+
+  /**
+   * US-009: Verifies that the existing tests with row_budget=200000 are unaffected — 7 docs in BANK
+   * index is well below the budget.
+   */
+  @Test
+  public void testDefaultRowBudgetDoesNotAffectSmallIndex() throws IOException {
+    // This is effectively a regression guard: the other tests in this class use row_budget=200000
+    // and collect 7 rows. If the budget logic is broken, they would all fail. This test makes
+    // the assertion explicit with a slightly different budget to confirm the path.
+    String identityPlan = buildIdentityPlan(List.of("account_number"), List.of(SqlTypeName.BIGINT));
+
+    String body =
+        """
+        {
+          "size": 0,
+          "aggs": {
+            "calcite_stage": {
+              "calcite_exec": {
+                "plan": "%s",
+                "fields": [
+                  {"name": "account_number", "type": "long"}
+                ],
+                "combine": {"mode": "CONCAT"},
+                "row_budget": 100
+              }
+            }
+          }
+        }
+        """
+            .formatted(identityPlan);
+
+    Request request = new Request("POST", "/" + TEST_INDEX_BANK + "/_search");
+    request.setJsonEntity(body);
+    String responseStr = executeRequest(request);
+    JSONObject response = new JSONObject(responseStr);
+
+    assertFalse("Response should not contain an error field", response.has("error"));
+    assertEquals(0, response.getJSONObject("_shards").getInt("failed"));
+    assertEquals(
+        7,
+        response
+            .getJSONObject("aggregations")
+            .getJSONObject("calcite_stage")
+            .getLong("rowsCollected"));
   }
 
   private void assertRow(

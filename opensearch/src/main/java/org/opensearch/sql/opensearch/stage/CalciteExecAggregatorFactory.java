@@ -17,7 +17,7 @@ import org.opensearch.search.internal.SearchContext;
 
 /**
  * Factory that instantiates a {@link CalciteExecAggregator} on each shard. Carries the plan,
- * fields, combine descriptor, and row budget through to the aggregator.
+ * fields, combine descriptor, row budget, and forcing operator through to the aggregator.
  */
 public class CalciteExecAggregatorFactory extends AggregatorFactory {
 
@@ -25,6 +25,7 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
   private final List<CalciteExecAggregationBuilder.FieldDescriptor> fields;
   private final CombineDescriptor combine;
   private final int rowBudget;
+  private final String forcingOperator;
 
   public CalciteExecAggregatorFactory(
       String name,
@@ -32,6 +33,7 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
       List<CalciteExecAggregationBuilder.FieldDescriptor> fields,
       CombineDescriptor combine,
       int rowBudget,
+      String forcingOperator,
       QueryShardContext queryShardContext,
       AggregatorFactory parent,
       AggregatorFactories.Builder subfactoriesBuilder,
@@ -42,6 +44,7 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
     this.fields = fields;
     this.combine = combine;
     this.rowBudget = rowBudget;
+    this.forcingOperator = forcingOperator;
   }
 
   @Override
@@ -52,6 +55,6 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
       Map<String, Object> metadata)
       throws IOException {
     return new CalciteExecAggregator(
-        name, plan, fields, combine, rowBudget, searchContext, parent, metadata);
+        name, plan, fields, combine, rowBudget, forcingOperator, searchContext, parent, metadata);
   }
 }
