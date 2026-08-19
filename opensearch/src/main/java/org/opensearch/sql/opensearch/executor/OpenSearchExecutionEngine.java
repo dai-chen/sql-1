@@ -476,25 +476,36 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       // 6. Convert output to QueryResponse
       RelDataType outputType = coordinatorTree.getRowType();
       Integer querySizeLimit = context.sysLimit.querySizeLimit();
+
+      // Pre-compute ExprType per output field ONCE outside the row loop — temporal types
+      // (TIMESTAMP, DATE, TIME) need the two-arg fromObjectValue to convert epoch-millis Longs
+      // into formatted ExprTimestamp/Date/TimeValues matching the JDBC contract.
+      List<RelDataTypeField> outputFields = outputType.getFieldList();
+      int fieldCount = outputFields.size();
+      ExprType[] exprTypes = new ExprType[fieldCount];
+      for (int i = 0; i < fieldCount; i++) {
+        exprTypes[i] =
+            OpenSearchTypeFactory.convertRelDataTypeToExprType(outputFields.get(i).getType());
+      }
+
       List<ExprValue> values = new ArrayList<>();
       for (Object[] row : outputRows) {
         if (querySizeLimit != null && values.size() >= querySizeLimit) {
           break;
         }
         Map<String, ExprValue> tuple = new LinkedHashMap<>();
-        for (int i = 0; i < outputType.getFieldCount(); i++) {
-          String fieldName = outputType.getFieldList().get(i).getName();
+        for (int i = 0; i < fieldCount; i++) {
+          String fieldName = outputFields.get(i).getName();
           Object value = i < row.length ? row[i] : null;
-          tuple.put(fieldName, ExprValueUtils.fromObjectValue(value));
+          tuple.put(fieldName, ExprValueUtils.fromObjectValue(value, exprTypes[i]));
         }
         values.add(ExprTupleValue.fromExprValueMap(tuple));
       }
 
-      // Build schema columns from outputType
+      // Build schema columns from outputType (reuses the pre-computed exprTypes)
       List<Column> columns = new ArrayList<>();
-      for (RelDataTypeField field : outputType.getFieldList()) {
-        ExprType exprType = OpenSearchTypeFactory.convertRelDataTypeToExprType(field.getType());
-        columns.add(new Column(field.getName(), null, exprType));
+      for (int i = 0; i < fieldCount; i++) {
+        columns.add(new Column(outputFields.get(i).getName(), null, exprTypes[i]));
       }
       Schema schema = new Schema(columns);
 

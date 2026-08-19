@@ -171,6 +171,9 @@ public class ExprValueUtils {
 
   /** Construct ExprValue from Object with ExprCoreType. */
   public static ExprValue fromObjectValue(Object o, ExprType type) {
+    if (null == o) {
+      return LITERAL_NULL;
+    }
     switch (type) {
       case TIMESTAMP:
         if (o instanceof Long) {

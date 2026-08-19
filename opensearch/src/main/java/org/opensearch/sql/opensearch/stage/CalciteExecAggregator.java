@@ -9,6 +9,7 @@ import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.DataContext;
@@ -57,10 +58,19 @@ public class CalciteExecAggregator extends MetricsAggregator {
   private final int rowBudget;
   private final String indexName;
 
-  /** Accumulated rows — one Object[] per matching document, in collect() order. */
+  /**
+   * Per-field nested path: field name → nested parent path, null for non-nested fields. Resolved
+   * once from the shard's mapping in the constructor and passed into ShardRowReader per leaf.
+   */
+  private final Map<String, String> nestedPaths;
+
+  /** True when at least one requested field lives under a nested path. */
+  private final boolean hasNestedFields;
+
+  /** Accumulated rows — one or more Object[] per matching document, in collect() order. */
   private final List<Object[]> rows = new ArrayList<>();
 
-  /** Count of rows collected (equals rows.size() — US-009 will enforce rowBudget). */
+  /** Count of rows collected (post-expansion for nested; US-009 will enforce rowBudget). */
   private long rowsCollected;
 
   public CalciteExecAggregator(
@@ -79,6 +89,46 @@ public class CalciteExecAggregator extends MetricsAggregator {
     this.combine = combine;
     this.rowBudget = rowBudget;
     this.indexName = searchContext.indexShard().shardId().getIndexName();
+    this.nestedPaths = resolveNestedPaths(fields, searchContext);
+    this.hasNestedFields = nestedPaths.values().stream().anyMatch(java.util.Objects::nonNull);
+  }
+
+  /**
+   * Resolves the nested parent path for each field by walking the field's dotted parent segments
+   * and checking the shard's mapping for a nested ObjectMapper.
+   */
+  private static Map<String, String> resolveNestedPaths(
+      List<CalciteExecAggregationBuilder.FieldDescriptor> fields, SearchContext searchContext) {
+    Map<String, String> paths = new LinkedHashMap<>();
+    for (CalciteExecAggregationBuilder.FieldDescriptor fd : fields) {
+      paths.put(fd.getName(), findNestedPath(fd.getName(), searchContext));
+    }
+    return paths;
+  }
+
+  /**
+   * Walks the dotted parent segments of a field name and returns the innermost nested path, or null
+   * if the field is not under any nested object.
+   */
+  private static String findNestedPath(String fieldName, SearchContext searchContext) {
+    // Walk from deepest parent to shallowest, return the innermost nested
+    String current = fieldName;
+    String nestedPath = null;
+    int lastDot = current.lastIndexOf('.');
+    while (lastDot > 0) {
+      String parent = current.substring(0, lastDot);
+      org.opensearch.index.mapper.ObjectMapper om =
+          searchContext.getQueryShardContext().getObjectMapper(parent);
+      if (om != null && om.nested().isNested()) {
+        nestedPath = parent;
+        // Walking from the leaf upward, the first nested ObjectMapper we hit IS the innermost
+        // (closest to the leaf) nested path — no need to continue.
+        break;
+      }
+      lastDot = parent.lastIndexOf('.');
+      current = parent;
+    }
+    return nestedPath;
   }
 
   @Override
@@ -86,16 +136,22 @@ public class CalciteExecAggregator extends MetricsAggregator {
       throws IOException {
     SourceLookup sourceLookup =
         context.getQueryShardContext().lookup().getLeafSearchLookup(ctx).source();
-    ShardRowReader rowReader = ShardRowReader.create(ctx, fields, sourceLookup);
+    ShardRowReader rowReader = ShardRowReader.create(ctx, fields, sourceLookup, nestedPaths);
 
     return new LeafBucketCollector() {
       @Override
       public void collect(int doc, long owningBucketOrd) throws IOException {
         // Position _source on the current document before reading
         sourceLookup.setSegmentAndDocument(ctx, doc);
-        Object[] row = rowReader.readRow(doc);
-        rows.add(row);
-        rowsCollected++;
+        if (hasNestedFields) {
+          List<Object[]> expanded = rowReader.readRows(doc);
+          rows.addAll(expanded);
+          rowsCollected += expanded.size();
+        } else {
+          Object[] row = rowReader.readRow(doc);
+          rows.add(row);
+          rowsCollected++;
+        }
         // TODO US-009: enforce rowBudget
       }
     };

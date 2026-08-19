@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SortedNumericDocValues;
@@ -392,5 +393,177 @@ public class ShardRowReaderTest {
     List<FieldDescriptor> fields = List.of(new FieldDescriptor("city", "keyword"));
 
     assertThrows(IOException.class, () -> ShardRowReader.create(ctx, fields, sourceLookup));
+  }
+
+  // ===================== NESTED FIELD EXPANSION TESTS =====================
+
+  @Test
+  void nested_sibling_alignment_two_fields_same_path() throws IOException {
+    // Two fields under the same nested path "address": address.city and address.state.
+    // A document with 3 sub-documents should produce 3 output rows, each pairing city+state
+    // from the SAME sub-document (sibling alignment, NOT cross-product).
+    LeafReaderContext ctx = mock(LeafReaderContext.class);
+    LeafReader leafReader = mock(LeafReader.class);
+    when(ctx.reader()).thenReturn(leafReader);
+    SourceLookup sourceLookup = mock(SourceLookup.class);
+
+    // _source for the parent document with 3 nested sub-docs under "address"
+    Map<String, Object> source =
+        Map.of(
+            "name",
+            "abbas",
+            "address",
+            List.of(
+                Map.of("city", "New york city", "state", "NY"),
+                Map.of("city", "bellevue", "state", "WA"),
+                Map.of("city", "seattle", "state", "WA")));
+    when(sourceLookup.source()).thenReturn(source);
+
+    // name is a non-nested field read via _source (text type)
+    when(sourceLookup.extractValue("name", null)).thenReturn("abbas");
+
+    List<FieldDescriptor> fields =
+        List.of(
+            new FieldDescriptor("name", "text"),
+            new FieldDescriptor("address.city", "text"),
+            new FieldDescriptor("address.state", "text"));
+
+    java.util.HashMap<String, String> paths = new java.util.HashMap<>();
+    paths.put("name", null);
+    paths.put("address.city", "address");
+    paths.put("address.state", "address");
+
+    ShardRowReader reader = ShardRowReader.create(ctx, fields, sourceLookup, paths);
+    List<Object[]> rows = reader.readRows(0);
+
+    // Should produce 3 rows with sibling alignment
+    assertEquals(3, rows.size());
+    // Row 0: name repeated, city/state from sub-doc 0
+    assertEquals("abbas", rows.get(0)[0]);
+    assertEquals("New york city", rows.get(0)[1]);
+    assertEquals("NY", rows.get(0)[2]);
+    // Row 1: name repeated, city/state from sub-doc 1
+    assertEquals("abbas", rows.get(1)[0]);
+    assertEquals("bellevue", rows.get(1)[1]);
+    assertEquals("WA", rows.get(1)[2]);
+    // Row 2: name repeated, city/state from sub-doc 2
+    assertEquals("abbas", rows.get(2)[0]);
+    assertEquals("seattle", rows.get(2)[1]);
+    assertEquals("WA", rows.get(2)[2]);
+  }
+
+  @Test
+  void non_nested_fields_only_produces_single_row() throws IOException {
+    // When no nested paths are present, readRows returns exactly one row per doc.
+    LeafReaderContext ctx = mock(LeafReaderContext.class);
+    LeafReader leafReader = mock(LeafReader.class);
+    when(ctx.reader()).thenReturn(leafReader);
+    SourceLookup sourceLookup = mock(SourceLookup.class);
+
+    SortedNumericDocValues dv = mock(SortedNumericDocValues.class);
+    when(leafReader.getSortedNumericDocValues("age")).thenReturn(dv);
+    when(dv.advanceExact(0)).thenReturn(true);
+    when(dv.nextValue()).thenReturn(25L);
+
+    when(sourceLookup.extractValue("name", null)).thenReturn("alice");
+
+    List<FieldDescriptor> fields =
+        List.of(new FieldDescriptor("name", "text"), new FieldDescriptor("age", "long"));
+
+    // All null nested paths
+    java.util.HashMap<String, String> paths = new java.util.HashMap<>();
+    paths.put("name", null);
+    paths.put("age", null);
+
+    ShardRowReader reader = ShardRowReader.create(ctx, fields, sourceLookup, paths);
+    List<Object[]> rows = reader.readRows(0);
+
+    assertEquals(1, rows.size());
+    assertEquals("alice", rows.get(0)[0]);
+    assertEquals(25L, rows.get(0)[1]);
+  }
+
+  @Test
+  void nested_single_sub_document_produces_single_row() throws IOException {
+    // A nested field with only one sub-document should produce exactly one row.
+    LeafReaderContext ctx = mock(LeafReaderContext.class);
+    LeafReader leafReader = mock(LeafReader.class);
+    when(ctx.reader()).thenReturn(leafReader);
+    SourceLookup sourceLookup = mock(SourceLookup.class);
+
+    Map<String, Object> source =
+        Map.of("address", List.of(Map.of("city", "houston", "state", "TX")));
+    when(sourceLookup.source()).thenReturn(source);
+
+    List<FieldDescriptor> fields = List.of(new FieldDescriptor("address.city", "text"));
+
+    java.util.HashMap<String, String> paths = new java.util.HashMap<>();
+    paths.put("address.city", "address");
+
+    ShardRowReader reader = ShardRowReader.create(ctx, fields, sourceLookup, paths);
+    List<Object[]> rows = reader.readRows(0);
+
+    assertEquals(1, rows.size());
+    assertEquals("houston", rows.get(0)[0]);
+  }
+
+  @Test
+  void nested_path_absent_from_source_produces_one_row_with_null_nested_values()
+      throws IOException {
+    // Case (a): nested array is genuinely absent from _source (sparse parent document).
+    // Should produce exactly one row with null for the nested fields.
+    LeafReaderContext ctx = mock(LeafReaderContext.class);
+    LeafReader leafReader = mock(LeafReader.class);
+    when(ctx.reader()).thenReturn(leafReader);
+    SourceLookup sourceLookup = mock(SourceLookup.class);
+
+    // _source has no "address" key at all
+    Map<String, Object> source = Map.of("name", "sparse_doc");
+    when(sourceLookup.source()).thenReturn(source);
+    when(sourceLookup.extractValue("name", null)).thenReturn("sparse_doc");
+
+    List<FieldDescriptor> fields =
+        List.of(new FieldDescriptor("name", "text"), new FieldDescriptor("address.city", "text"));
+
+    java.util.HashMap<String, String> paths = new java.util.HashMap<>();
+    paths.put("name", null);
+    paths.put("address.city", "address");
+
+    ShardRowReader reader = ShardRowReader.create(ctx, fields, sourceLookup, paths);
+    List<Object[]> rows = reader.readRows(0);
+
+    assertEquals(1, rows.size());
+    assertEquals("sparse_doc", rows.get(0)[0]);
+    assertNull(rows.get(0)[1]);
+  }
+
+  @Test
+  void nested_path_with_unexpected_shape_throws() throws IOException {
+    // Case (b): nested path value is present but has an unexpected shape (e.g. a String where
+    // a List or Map was expected). Must throw with a message naming the path and the type.
+    LeafReaderContext ctx = mock(LeafReaderContext.class);
+    LeafReader leafReader = mock(LeafReader.class);
+    when(ctx.reader()).thenReturn(leafReader);
+    SourceLookup sourceLookup = mock(SourceLookup.class);
+
+    // _source has "address" as a plain String instead of a List/Map of sub-documents
+    Map<String, Object> source = Map.of("address", "not_a_nested_structure");
+    when(sourceLookup.source()).thenReturn(source);
+
+    List<FieldDescriptor> fields = List.of(new FieldDescriptor("address.city", "text"));
+
+    java.util.HashMap<String, String> paths = new java.util.HashMap<>();
+    paths.put("address.city", "address");
+
+    ShardRowReader reader = ShardRowReader.create(ctx, fields, sourceLookup, paths);
+
+    IllegalArgumentException ex =
+        assertThrows(IllegalArgumentException.class, () -> reader.readRows(0));
+
+    // Message must contain the nested path, the field name, and the actual type
+    assertEquals(
+        "Nested path 'address' for field 'address.city' has unexpected _source shape:"
+            + " java.lang.String",
+        ex.getMessage());
   }
 }
