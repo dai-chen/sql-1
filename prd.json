@@ -221,8 +221,8 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Two coverage reductions were accepted as safe-direction consequences and are documented in progress.txt: (1) five search_with_* explain goldens lose their staged sections because the new relevance-function guard makes query_string plans coordinator-only (relevance functions have no row-level enumerable implementor and provably cannot compile shard-side); (2) chart_use_other moves from MERGE_AGG to CONCAT because the shared-subtree/join guard was extended to the promoted cut in trySplitAggregate as well as trySplitLimit. UNEXPLAINED: the HEAD explain goldens showed query_string inside shardFragment, yet the same query executed successfully at HEAD; the mechanism by which US-013 caused the relevance call to reach shard compilation was not determined and is recorded as unexplained rather than guessed."
     },
     {
       "id": "US-014",
