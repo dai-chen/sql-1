@@ -88,6 +88,27 @@ public class CalciteStageSplitExplainIT extends PPLIntegTestCase {
   }
 
   @Test
+  public void testStagedExplainRendersHeadLimitWithLimitCombine() throws IOException {
+    // Disable pushdown so the staged execution gate activates
+    updateClusterSettings(
+        new ClusterSetting(
+            "transient", Settings.Key.CALCITE_PUSHDOWN_ENABLED.getKeyValue(), "false"));
+    updateClusterSettings(
+        new ClusterSetting(
+            "transient", Settings.Key.CALCITE_FALLBACK_ALLOWED.getKeyValue(), "false"));
+
+    String query = "source=opensearch-sql_test_index_account | head 3";
+    String result = explainQueryYaml(query);
+
+    // The combine section must contain LIMIT, never bare CONCAT
+    Assert.assertTrue(
+        "combine: must contain LIMIT", result.contains("combine:") && result.contains("LIMIT"));
+
+    String expected = loadExpectedPlan("explain_staged_head_limit.yaml");
+    assertYamlEqualsIgnoreId(expected, result);
+  }
+
+  @Test
   public void testNonStagedExplainOmitsStageSections() throws IOException {
     // Pushdown is enabled by default — the plan is NOT staged
     String query =

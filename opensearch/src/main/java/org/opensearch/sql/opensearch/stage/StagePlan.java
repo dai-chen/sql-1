@@ -25,6 +25,7 @@ public final class StagePlan {
   private final RelNode coordinatorTree;
   private final @Nullable AbstractCalciteIndexScan shardScan;
   private final @Nullable String forcingOperator;
+  private final @Nullable Integer earlyTerminationLimit;
 
   private StagePlan(
       boolean staged,
@@ -32,13 +33,15 @@ public final class StagePlan {
       @Nullable CombineDescriptor combine,
       RelNode coordinatorTree,
       @Nullable AbstractCalciteIndexScan shardScan,
-      @Nullable String forcingOperator) {
+      @Nullable String forcingOperator,
+      @Nullable Integer earlyTerminationLimit) {
     this.staged = staged;
     this.shardFragment = shardFragment;
     this.combine = combine;
     this.coordinatorTree = coordinatorTree;
     this.shardScan = shardScan;
     this.forcingOperator = forcingOperator;
+    this.earlyTerminationLimit = earlyTerminationLimit;
   }
 
   /** Creates a fully staged result with a shard fragment, combine descriptor, and coordinator. */
@@ -48,7 +51,26 @@ public final class StagePlan {
       RelNode coordinatorTree,
       AbstractCalciteIndexScan shardScan,
       @Nullable String forcingOperator) {
-    return new StagePlan(true, shardFragment, combine, coordinatorTree, shardScan, forcingOperator);
+    return new StagePlan(
+        true, shardFragment, combine, coordinatorTree, shardScan, forcingOperator, null);
+  }
+
+  /** Creates a fully staged result with an early termination limit for the shard. */
+  static StagePlan staged(
+      RelNode shardFragment,
+      CombineDescriptor combine,
+      RelNode coordinatorTree,
+      AbstractCalciteIndexScan shardScan,
+      @Nullable String forcingOperator,
+      @Nullable Integer earlyTerminationLimit) {
+    return new StagePlan(
+        true,
+        shardFragment,
+        combine,
+        coordinatorTree,
+        shardScan,
+        forcingOperator,
+        earlyTerminationLimit);
   }
 
   /**
@@ -56,7 +78,7 @@ public final class StagePlan {
    * {@link AbstractCalciteIndexScan}, making a single shard-to-coordinator boundary impossible.
    */
   static StagePlan coordinatorOnly(RelNode root) {
-    return new StagePlan(false, null, null, root, null, null);
+    return new StagePlan(false, null, null, root, null, null, null);
   }
 
   /** Whether this plan was successfully split into shard + coordinator stages. */
@@ -100,5 +122,18 @@ public final class StagePlan {
   @Nullable
   public String forcingOperator() {
     return forcingOperator;
+  }
+
+  /**
+   * The early termination limit for shard-level collection. Non-null only when rule 4 (limit
+   * pushdown) fires AND the entire fragment between the promoted Sort and the scan is
+   * cardinality-preserving (no Filter, Aggregate, Window, Join, etc.). When non-null, the shard may
+   * stop collecting documents at this count via CollectionTerminatedException. When null, the shard
+   * must collect all matching documents even though a LIMIT combine may be in effect — because a
+   * shard-local Filter could reduce the output below N if collection is stopped early.
+   */
+  @Nullable
+  public Integer earlyTerminationLimit() {
+    return earlyTerminationLimit;
   }
 }

@@ -57,6 +57,11 @@ public class CombineDescriptor implements Writeable, ToXContentObject {
     return new CombineDescriptor(Mode.MERGE_AGG, groupKeys, aggs, 0);
   }
 
+  /** Factory for LIMIT: shard-local Fetch(n) + coordinator truncate-at-n. */
+  public static CombineDescriptor limit(int n) {
+    return new CombineDescriptor(Mode.LIMIT, List.of(), List.of(), n);
+  }
+
   public CombineDescriptor(StreamInput in) throws IOException {
     this.mode = in.readEnum(Mode.class);
     this.intListParam = in.readList(StreamInput::readVInt);

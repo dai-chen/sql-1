@@ -170,6 +170,71 @@ public class InternalCalciteExecReduceTest {
     assertEquals(2, result.getRows().size());
   }
 
+  @Test
+  void limit_truncates_to_n() {
+    CombineDescriptor combine = CombineDescriptor.limit(3);
+
+    InternalCalciteExec shard1 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            5L,
+            5L,
+            List.of(List.of("a", 1L), List.of("b", 2L), List.of("c", 3L)),
+            META);
+    InternalCalciteExec shard2 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            3L,
+            3L,
+            List.of(List.of("d", 4L), List.of("e", 5L), List.of("f", 6L)),
+            META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard1.reduce(List.of(shard1, shard2), null);
+
+    // Total rows available = 6, but limit is 3 → only first 3 kept
+    assertEquals(3, result.getRows().size());
+    assertEquals(List.of("a", 1L), result.getRows().get(0));
+    assertEquals(List.of("b", 2L), result.getRows().get(1));
+    assertEquals(List.of("c", 3L), result.getRows().get(2));
+  }
+
+  /**
+   * ASSOCIATIVITY PROOF for LIMIT: reduce() runs in batches of 512 and its own output is fed back
+   * in. The key associativity property is: reduce([reduce([s1,s2]), s3]) == reduce([s1, s2, s3])
+   * when the concatenation order is the same. For LIMIT, this means truncating at intermediate
+   * stages is safe because no new rows are created — only discarded.
+   */
+  @Test
+  void limit_is_associative_across_batch_groupings() {
+    CombineDescriptor combine = CombineDescriptor.limit(4);
+
+    InternalCalciteExec s1 =
+        new InternalCalciteExec(
+            NAME, combine, 2L, 2L, List.of(List.of("a", 1L), List.of("b", 2L)), META);
+    InternalCalciteExec s2 =
+        new InternalCalciteExec(
+            NAME, combine, 2L, 2L, List.of(List.of("c", 3L), List.of("d", 4L)), META);
+    InternalCalciteExec s3 =
+        new InternalCalciteExec(
+            NAME, combine, 2L, 2L, List.of(List.of("e", 5L), List.of("f", 6L)), META);
+
+    // Grouping A: reduce(s1, s2, s3) all at once
+    InternalCalciteExec resultAll = (InternalCalciteExec) s1.reduce(List.of(s1, s2, s3), null);
+
+    // Grouping B: reduce(s1, s2) then reduce(result, s3) — same order as A
+    InternalCalciteExec intermediate = (InternalCalciteExec) s1.reduce(List.of(s1, s2), null);
+    InternalCalciteExec resultBatched =
+        (InternalCalciteExec) intermediate.reduce(List.of(intermediate, s3), null);
+
+    // Both must produce 4 rows (the limit) and the same rows — because concatenation order is
+    // identical (s1 then s2 then s3) regardless of batching.
+    assertEquals(4, resultAll.getRows().size());
+    assertEquals(4, resultBatched.getRows().size());
+    assertEquals(resultAll.getRows(), resultBatched.getRows());
+  }
+
   // --- Wire round-trip tests (Critical B fix) ---
 
   @Test

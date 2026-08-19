@@ -14,6 +14,7 @@ import org.apache.calcite.config.CalciteConnectionConfigImpl;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.prepare.CalciteCatalogReader;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.Calc;
@@ -21,9 +22,11 @@ import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalJoin;
+import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexOver;
@@ -31,9 +34,11 @@ import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.impl.AbstractSchema;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.tools.Frameworks;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
+import org.opensearch.sql.expression.function.PPLBuiltinOperators;
 import org.opensearch.sql.opensearch.storage.scan.AbstractCalciteIndexScan;
 import org.opensearch.sql.opensearch.storage.serde.ExtendedRelJson;
 
@@ -95,7 +100,15 @@ public final class StagePlanner {
       return aggPlan;
     }
 
-    // 3b. Shared-subtree guard (CONCAT path only): if the cut node is reachable from more than
+    // 3b. Post-placement limit promotion (US-013): if the node directly above the cut is an
+    //     unordered Fetch (Sort with empty collation and non-null fetch), promote the cut to
+    //     include that Sort and emit LIMIT{n}. Fires only when the aggregate promotion did not.
+    StagePlan limitPlan = trySplitLimit(root, cutNode, shardScan);
+    if (limitPlan != null) {
+      return limitPlan;
+    }
+
+    // 3c. Shared-subtree guard (CONCAT path only): if the cut node is reachable from more than
     //     one parent in the DAG AND its direct parent is a join, the plan cannot be staged via
     //     CONCAT. In self-join DAGs produced by HEP interning, both join inputs reference the
     //     same subtree. Staging conflates independent data streams and some shapes throw
@@ -127,6 +140,15 @@ public final class StagePlanner {
     //     Fall back to coordinator-only. This catches the DAG-sharing hazard introduced by
     //     HepPlanner when structurally identical scans in different branches become one instance.
     if (containsIndexScan(coordinatorTree)) {
+      return StagePlan.coordinatorOnly(root);
+    }
+
+    // 5b. Relevance-function guard: if the coordinatorTree contains a call to a relevance
+    //     function (query_string, match, etc.), the coordinator-side compilation will fail with
+    //     UnsupportedOperationException — these functions have no enumerable implementor and only
+    //     execute via OpenSearch's native query DSL (the JDBC path). Return coordinatorOnly so
+    //     the execution engine falls through to the JDBC path per Design Invariant 1.
+    if (treeContainsRelevanceFunction(coordinatorTree)) {
       return StagePlan.coordinatorOnly(root);
     }
 
@@ -230,7 +252,13 @@ public final class StagePlanner {
       // percentile_approx's makeFlag) cannot survive the RelJson codec. Such nodes execute on
       // the coordinator per Design Invariant 1 — never reject, never silently fail. Same shape
       // as the RexOver guard; both use a shared predicate for placement and diagnostics.
-      return !containsNonRoundTrippableEnum(node);
+      if (containsNonRoundTrippableEnum(node)) {
+        return false;
+      }
+      // Guard: a Project containing a relevance-function call (query_string, match, etc.) has no
+      // row-level enumerable implementor — the shard compiler will throw. Classify as
+      // NEEDS_GATHER per Design Invariant 1.
+      return !containsRelevanceFunction(node);
     }
     if (node instanceof Filter) {
       List<RelNode> inputs = node.getInputs();
@@ -239,7 +267,12 @@ public final class StagePlanner {
       if (inputs.size() != 1 || !Boolean.TRUE.equals(memo.get(inputs.get(0)))) {
         return false;
       }
-      return !containsNonRoundTrippableEnum(node);
+      if (containsNonRoundTrippableEnum(node)) {
+        return false;
+      }
+      // Guard: a Filter whose condition calls a relevance function (query_string, match, etc.)
+      // cannot be compiled on the shard — no enumerable implementor exists.
+      return !containsRelevanceFunction(node);
     }
     if (node instanceof Calc) {
       List<RelNode> inputs = node.getInputs();
@@ -250,7 +283,11 @@ public final class StagePlanner {
       if (containsWindowFunction(node)) {
         return false;
       }
-      return !containsNonRoundTrippableEnum(node);
+      if (containsNonRoundTrippableEnum(node)) {
+        return false;
+      }
+      // Guard: a Calc containing a relevance-function call cannot be compiled on the shard.
+      return !containsRelevanceFunction(node);
     }
     // Everything else (Aggregate, Sort, Join, Window, Union, etc.): NEEDS_GATHER
     return false;
@@ -363,6 +400,82 @@ public final class StagePlanner {
     return found[0];
   }
 
+  /**
+   * Operators from the relevance-function family (query_string, match, match_phrase, etc.) that
+   * have no row-level enumerable implementor — their {@code implement()} unconditionally throws
+   * {@link UnsupportedOperationException}. They exist only to participate in plan construction;
+   * actual evaluation is delegated to OpenSearch's native query DSL at pushdown time. On a staged
+   * shard fragment that cannot push down, these operators are un-compilable and the fragment MUST
+   * NOT be shipped. Classifying nodes that contain them as NEEDS_GATHER is the correct refusal per
+   * Design Invariant 1: the plan still runs, entirely on the coordinator.
+   */
+  private static final Set<SqlOperator> RELEVANCE_OPERATORS =
+      Set.of(
+          PPLBuiltinOperators.MATCH,
+          PPLBuiltinOperators.MATCH_PHRASE,
+          PPLBuiltinOperators.MATCH_BOOL_PREFIX,
+          PPLBuiltinOperators.MATCH_PHRASE_PREFIX,
+          PPLBuiltinOperators.SIMPLE_QUERY_STRING,
+          PPLBuiltinOperators.QUERY_STRING,
+          PPLBuiltinOperators.MULTI_MATCH,
+          PPLBuiltinOperators.QUERY,
+          PPLBuiltinOperators.WILDCARD_QUERY);
+
+  /**
+   * Returns true iff the node's expressions contain a call to a relevance-function operator that
+   * cannot be compiled to an Enumerable on the shard. Same shape as {@link #containsWindowFunction}
+   * and {@link #containsNonRoundTrippableEnum}: placement and diagnostics share one predicate so
+   * they cannot drift.
+   */
+  static boolean containsRelevanceFunction(RelNode node) {
+    List<RexNode> expressions;
+    if (node instanceof Project project) {
+      expressions = project.getProjects();
+    } else if (node instanceof Filter filter) {
+      expressions = List.of(filter.getCondition());
+    } else if (node instanceof Calc calc) {
+      expressions = calc.getProgram().getExprList();
+    } else {
+      return false;
+    }
+    return expressions.stream().anyMatch(StagePlanner::exprContainsRelevanceFunction);
+  }
+
+  /** Walks a single RexNode tree looking for a RexCall whose operator is a relevance function. */
+  private static boolean exprContainsRelevanceFunction(RexNode expr) {
+    boolean[] found = {false};
+    expr.accept(
+        new RexVisitorImpl<Void>(true) {
+          @Override
+          public Void visitCall(RexCall call) {
+            if (RELEVANCE_OPERATORS.contains(call.getOperator())) {
+              found[0] = true;
+              return null; // short-circuit
+            }
+            return super.visitCall(call);
+          }
+        });
+    return found[0];
+  }
+
+  /**
+   * Walks the entire RelNode tree checking whether ANY node contains a relevance-function call.
+   * Used as a post-split validation on the coordinator tree: if the coordinator would need to
+   * compile a relevance function, it will fail (no enumerable implementor exists). In that case the
+   * plan must go coordinatorOnly so the JDBC path handles it natively.
+   */
+  private static boolean treeContainsRelevanceFunction(RelNode node) {
+    if (containsRelevanceFunction(node)) {
+      return true;
+    }
+    for (RelNode input : node.getInputs()) {
+      if (treeContainsRelevanceFunction(input)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** SqlKinds that can be split across shards: partial runs on shard, merge on coordinator. */
   private static final Set<SqlKind> SPLITTABLE_KINDS =
       Set.of(SqlKind.COUNT, SqlKind.SUM, SqlKind.SUM0, SqlKind.MIN, SqlKind.MAX);
@@ -403,6 +516,17 @@ public final class StagePlanner {
       return null;
     }
 
+    // Shared-subtree/join guard on the PROMOTED cut (agg): if the Aggregate is reachable from
+    // multiple parents (HEP interning of structurally identical aggregate subtrees feeding a
+    // LogicalJoin), staging would conflate independent streams. Evaluated BEFORE tree rebuilding
+    // so the refusal is cheap. Same pattern as trySplitLimit's guard on sortNode.
+    if (agg != root && isSharedNode(root, agg)) {
+      RelNode sharedParent = findDirectParent(root, agg);
+      if (sharedParent instanceof LogicalJoin) {
+        return null;
+      }
+    }
+
     // The Aggregate is splittable — promote the cut to include it.
     // shardFragment = the Aggregate and everything below
     String indexName = shardScan.getOsIndex().getIndexName().toString();
@@ -437,6 +561,13 @@ public final class StagePlanner {
       return null;
     }
 
+    // Mirrors step 5b in the CONCAT path: if the coordinatorTree contains a relevance-function
+    // call, return null (not coordinatorOnly) so the caller falls through to the CONCAT path
+    // which applies its own 5a/5b checks and returns coordinatorOnly from a single decision site.
+    if (treeContainsRelevanceFunction(coordinatorTree)) {
+      return null;
+    }
+
     // forcingOperator is null when the Aggregate IS the root; otherwise it's the parent of the agg
     String forcingOperator = (agg == root) ? null : findParentOf(root, agg);
 
@@ -461,6 +592,152 @@ public final class StagePlanner {
       }
     }
     return true;
+  }
+
+  /**
+   * Post-placement rewrite for rule 4 (limit pushdown): if the node directly above the cut is a
+   * Sort with empty collation and a non-null fetch literal (an unordered Fetch), promotes the cut
+   * to that Sort and emits a LIMIT{n} descriptor. The shard fragment receives a standard
+   * LogicalSort (not LogicalSystemLimit — Design Invariant 5 requires standard Calcite operators on
+   * the wire).
+   *
+   * <p>Early termination is NARROWER than the limit push: pushing Fetch(N) shard-local is correct
+   * even with a Filter below it (the fragment's Fetch truncates). Terminating Lucene DOC COLLECTION
+   * at N collected rows is NOT correct when a Filter sits between the fetch and the scan, because
+   * stopping at N buffered rows can yield fewer than N output rows while more matching docs
+   * existed.
+   *
+   * <p>Returns null when the rule does not fire (node above cut is not an eligible Fetch). In that
+   * case the caller falls through to the default CONCAT path.
+   */
+  private static StagePlan trySplitLimit(
+      RelNode root, RelNode cutNode, AbstractCalciteIndexScan shardScan) {
+    RelNode parent = findDirectParent(root, cutNode);
+    if (parent == null || !(parent instanceof org.apache.calcite.rel.core.Sort sortNode)) {
+      return null;
+    }
+    // Must be unordered: empty collation (ordered Sort+Fetch is US-014's TOP_N)
+    if (!sortNode.getCollation().getFieldCollations().isEmpty()) {
+      return null;
+    }
+    // Must have a non-null fetch that is a RexLiteral holding int >= 0
+    if (sortNode.fetch == null || !(sortNode.fetch instanceof RexLiteral fetchLiteral)) {
+      return null;
+    }
+    int n = fetchLiteral.getValueAs(Integer.class);
+    if (n < 0) {
+      return null;
+    }
+    // offset must be null or a RexLiteral equal to 0 — non-zero offset must NOT be promoted
+    if (sortNode.offset != null) {
+      if (!(sortNode.offset instanceof RexLiteral offsetLiteral)) {
+        return null;
+      }
+      int offsetVal = offsetLiteral.getValueAs(Integer.class);
+      if (offsetVal != 0) {
+        return null;
+      }
+    }
+    // The cut node must be the Sort's input
+    if (sortNode.getInput() != cutNode) {
+      return null;
+    }
+
+    // --- Shared-subtree/join guard on the PROMOTED cut (sortNode) ---
+    // Must be evaluated BEFORE any tree rebuilding so the refusal is cheap. If sortNode is
+    // reachable from multiple parents (HEP interning of structurally identical head-N subtrees
+    // feeding a LogicalJoin), staging would conflate independent streams. Guard on sortNode,
+    // NOT cutNode — sortNode is the node being replaced by gathered-rows.
+    if (sortNode != root && isSharedNode(root, sortNode)) {
+      RelNode sharedParent = findDirectParent(root, sortNode);
+      if (sharedParent instanceof LogicalJoin) {
+        return null;
+      }
+    }
+
+    // --- Promotion fires ---
+    String indexName = shardScan.getOsIndex().getIndexName().toString();
+
+    // Build the shard fragment: a STANDARD LogicalSort with empty collation and the same fetch
+    // over the serializable leaf. Do NOT ship LogicalSystemLimit — it is a custom RelNode class.
+    RelNode serializableLeaf = replaceLeafWithSerializable(cutNode, shardScan, indexName);
+    RelNode shardFragment =
+        LogicalSort.create(serializableLeaf, RelCollations.EMPTY, null, sortNode.fetch);
+
+    // Coordinator tree: replace the whole Sort (the promoted cut) with gathered-rows scan.
+    // A Sort's row type equals its input's row type, so the gathered-rows row type is unchanged.
+    // Real guard: if the invariant is violated, refuse to promote (always safe — falls through
+    // to CONCAT). A bare `assert` would be invisible at runtime since -ea is off by default.
+    if (!sortNode.getRowType().equals(sortNode.getInput().getRowType())) {
+      return null;
+    }
+    RelNode coordinatorTree = replaceSubtree(root, sortNode, buildGatheredRowsScan(sortNode));
+
+    // Post-split validation: if the coordinatorTree still contains a live index scan, the split
+    // was incomplete (DAG-sharing hazard).
+    if (containsIndexScan(coordinatorTree)) {
+      return null;
+    }
+
+    // Mirrors step 5b in the CONCAT path: if the coordinatorTree contains a relevance-function
+    // call, return null (not coordinatorOnly) so the caller falls through to the CONCAT path
+    // which applies its own 5a/5b checks and returns coordinatorOnly from a single decision site.
+    if (treeContainsRelevanceFunction(coordinatorTree)) {
+      return null;
+    }
+
+    CombineDescriptor combine = CombineDescriptor.limit(n);
+    String forcingOperator = (sortNode == root) ? null : findParentOf(root, sortNode);
+
+    // Compute early termination limit: non-null only when every node strictly between the
+    // promoted Sort and the shard scan is cardinality-preserving (Project with no RexOver,
+    // or Calc with no RexOver and no condition). Anything else leaves it null.
+    Integer earlyTerminationLimit = computeEarlyTerminationLimit(n, cutNode, shardScan);
+
+    return StagePlan.staged(
+        shardFragment, combine, coordinatorTree, shardScan, forcingOperator, earlyTerminationLimit);
+  }
+
+  /**
+   * Returns n if every node on the path from cutNode (inclusive) down to shardScan (exclusive) is
+   * cardinality-preserving. Returns null otherwise. Cardinality-preserving means a Project with no
+   * RexOver, or a Calc with no RexOver AND a null/always-true condition. Anything else (Filter,
+   * Aggregate, Window, Join, Union, a Calc with a condition, an unrecognized node) is blocking.
+   */
+  private static Integer computeEarlyTerminationLimit(
+      int n, RelNode cutNode, AbstractCalciteIndexScan shardScan) {
+    RelNode current = cutNode;
+    while (current != shardScan) {
+      if (current instanceof Project project) {
+        // A Project containing a RexOver is NOT cardinality-preserving
+        if (containsWindowFunction(current)) {
+          return null;
+        }
+      } else if (current instanceof Calc calc) {
+        // A Calc with a RexOver is not cardinality-preserving
+        if (containsWindowFunction(current)) {
+          return null;
+        }
+        // A Calc with a non-trivial condition (i.e. a Filter merged into Calc) is blocking
+        if (calc.getProgram().getCondition() != null) {
+          return null;
+        }
+      } else if (current instanceof AbstractCalciteIndexScan) {
+        // Reached the scan — stop
+        break;
+      } else {
+        // Any other node (Filter, Aggregate, Join, Window, Union, etc.) blocks early termination
+        return null;
+      }
+
+      // Walk down the single input
+      List<RelNode> inputs = current.getInputs();
+      if (inputs.size() != 1) {
+        return null;
+      }
+      current = inputs.get(0);
+    }
+    return n;
   }
 
   /**

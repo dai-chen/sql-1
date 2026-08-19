@@ -38,6 +38,7 @@ public class CalciteExecAggregationBuilder
   private CombineDescriptor combine;
   private int rowBudget;
   private String forcingOperator;
+  private Integer earlyTerminationLimit;
 
   /** A name+type pair describing a single output field. */
   public static class FieldDescriptor implements Writeable, ToXContentObject {
@@ -98,6 +99,7 @@ public class CalciteExecAggregationBuilder
     this.combine = CombineDescriptor.concat();
     this.rowBudget = 200000;
     this.forcingOperator = null;
+    this.earlyTerminationLimit = null;
   }
 
   public CalciteExecAggregationBuilder(StreamInput in) throws IOException {
@@ -107,6 +109,8 @@ public class CalciteExecAggregationBuilder
     this.combine = new CombineDescriptor(in);
     this.rowBudget = in.readVInt();
     this.forcingOperator = in.readOptionalString();
+    boolean hasEarlyTermination = in.readBoolean();
+    this.earlyTerminationLimit = hasEarlyTermination ? in.readVInt() : null;
   }
 
   @Override
@@ -116,6 +120,10 @@ public class CalciteExecAggregationBuilder
     combine.writeTo(out);
     out.writeVInt(rowBudget);
     out.writeOptionalString(forcingOperator);
+    out.writeBoolean(earlyTerminationLimit != null);
+    if (earlyTerminationLimit != null) {
+      out.writeVInt(earlyTerminationLimit);
+    }
   }
 
   @Override
@@ -135,6 +143,9 @@ public class CalciteExecAggregationBuilder
     if (forcingOperator != null) {
       builder.field("forcing_operator", forcingOperator);
     }
+    if (earlyTerminationLimit != null) {
+      builder.field("early_termination_limit", earlyTerminationLimit);
+    }
     builder.endObject();
     return builder;
   }
@@ -153,6 +164,7 @@ public class CalciteExecAggregationBuilder
     copy.combine = this.combine;
     copy.rowBudget = this.rowBudget;
     copy.forcingOperator = this.forcingOperator;
+    copy.earlyTerminationLimit = this.earlyTerminationLimit;
     copy.factoriesBuilder = factoriesBuilder;
     copy.metadata = metadata;
     return copy;
@@ -171,6 +183,7 @@ public class CalciteExecAggregationBuilder
         combine,
         rowBudget,
         forcingOperator,
+        earlyTerminationLimit,
         queryShardContext,
         parent,
         subfactoriesBuilder,
@@ -209,6 +222,11 @@ public class CalciteExecAggregationBuilder
     return this;
   }
 
+  public CalciteExecAggregationBuilder earlyTerminationLimit(Integer earlyTerminationLimit) {
+    this.earlyTerminationLimit = earlyTerminationLimit;
+    return this;
+  }
+
   // --- Getters ---
 
   public String getPlan() {
@@ -231,9 +249,14 @@ public class CalciteExecAggregationBuilder
     return forcingOperator;
   }
 
+  public Integer getEarlyTerminationLimit() {
+    return earlyTerminationLimit;
+  }
+
   @Override
   public int hashCode() {
-    return Objects.hash(super.hashCode(), plan, fields, combine, rowBudget, forcingOperator);
+    return Objects.hash(
+        super.hashCode(), plan, fields, combine, rowBudget, forcingOperator, earlyTerminationLimit);
   }
 
   @Override
@@ -246,7 +269,8 @@ public class CalciteExecAggregationBuilder
         && Objects.equals(fields, other.fields)
         && Objects.equals(combine, other.combine)
         && rowBudget == other.rowBudget
-        && Objects.equals(forcingOperator, other.forcingOperator);
+        && Objects.equals(forcingOperator, other.forcingOperator)
+        && Objects.equals(earlyTerminationLimit, other.earlyTerminationLimit);
   }
 
   /**
@@ -270,6 +294,8 @@ public class CalciteExecAggregationBuilder
       } else if (token == XContentParser.Token.VALUE_NUMBER) {
         if ("row_budget".equals(fieldName)) {
           builder.rowBudget = parser.intValue();
+        } else if ("early_termination_limit".equals(fieldName)) {
+          builder.earlyTerminationLimit = parser.intValue();
         }
       } else if (token == XContentParser.Token.START_ARRAY && "fields".equals(fieldName)) {
         List<FieldDescriptor> fds = new ArrayList<>();

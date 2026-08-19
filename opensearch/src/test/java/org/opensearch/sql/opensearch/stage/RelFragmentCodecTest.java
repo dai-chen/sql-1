@@ -192,6 +192,36 @@ public class RelFragmentCodecTest {
   }
 
   @Test
+  void roundTrip_logicalSort_with_fetch_and_empty_collation() {
+    // US-013: a fragment whose root is a plain LogicalSort(fetch, empty collation) must serialize
+    // and deserialize to an identical plan string, proving the shard-side limit can round-trip.
+    RelNode tableScan = buildTableScan();
+
+    org.apache.calcite.rex.RexBuilder rexBuilder = REX_BUILDER;
+    org.apache.calcite.rel.type.RelDataTypeFactory typeFac = TYPE_FAC;
+    RexNode fetchLiteral =
+        rexBuilder.makeLiteral(10, typeFac.createSqlType(SqlTypeName.INTEGER), false);
+    RelNode sort =
+        org.apache.calcite.rel.logical.LogicalSort.create(
+            tableScan, org.apache.calcite.rel.RelCollations.EMPTY, null, fetchLiteral);
+
+    String before = RelOptUtil.toString(sort);
+
+    String encoded = RelFragmentCodec.serialize(sort);
+    RelNode deserialized =
+        RelFragmentCodec.deserialize(
+            encoded,
+            INDEX_NAME,
+            List.of(
+                new FieldDescriptor("account_number", "long"),
+                new FieldDescriptor("age", "integer"),
+                new FieldDescriptor("gender", "keyword")));
+
+    String after = RelOptUtil.toString(deserialized);
+    assertEquals(before, after);
+  }
+
+  @Test
   void roundTrip_rexLiteral_sqlTypeName_flag_exercises_extended_relJson_write_and_read() {
     // Verifies that a Project containing RexBuilder.makeFlag(SqlTypeName.DOUBLE) — a RexLiteral
     // whose value is a SqlTypeName enum — serializes correctly through our ExtendedRelJson write

@@ -497,6 +497,66 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
             .getLong("rowsCollected"));
   }
 
+  /**
+   * US-013: Verifies that early_termination_limit bounds the number of rows collected on the shard.
+   * Uses TEST_INDEX_BANK (7 docs, single shard) with an early_termination_limit of 3, well below
+   * the doc count, proving that the shard-level collection terminates early.
+   */
+  @Test
+  public void testEarlyTerminationLimitBoundsRowsCollected() throws IOException {
+    String identityPlan =
+        buildIdentityPlan(
+            List.of("account_number", "gender"), List.of(SqlTypeName.BIGINT, SqlTypeName.VARCHAR));
+
+    // early_termination_limit = 3 means the shard must stop collecting at 3 rows
+    String body =
+        """
+        {
+          "size": 0,
+          "aggs": {
+            "calcite_stage": {
+              "calcite_exec": {
+                "plan": "%s",
+                "fields": [
+                  {"name": "account_number", "type": "long"},
+                  {"name": "gender", "type": "keyword"}
+                ],
+                "combine": {"mode": "LIMIT", "n": 3},
+                "row_budget": 200000,
+                "early_termination_limit": 3
+              }
+            }
+          }
+        }
+        """
+            .formatted(identityPlan);
+
+    // allow_partial_search_results=false ensures shard exceptions propagate (not hidden as 200)
+    Request request =
+        new Request("POST", "/" + TEST_INDEX_BANK + "/_search?allow_partial_search_results=false");
+    request.setJsonEntity(body);
+    String responseStr = executeRequest(request);
+    JSONObject response = new JSONObject(responseStr);
+
+    assertFalse("Response should not contain an error field", response.has("error"));
+    assertEquals(0, response.getJSONObject("_shards").getInt("failed"));
+
+    JSONObject calciteStage = response.getJSONObject("aggregations").getJSONObject("calcite_stage");
+
+    // rowsCollected must be bounded by the early_termination_limit (3) — NOT 7
+    long rowsCollected = calciteStage.getLong("rowsCollected");
+    assertTrue(
+        "rowsCollected (" + rowsCollected + ") must be <= early_termination_limit (3)",
+        rowsCollected <= 3);
+
+    // rows must be non-empty (at least some data was collected)
+    JSONArray rows = calciteStage.getJSONArray("rows");
+    assertTrue("rows must be non-empty", rows.length() > 0);
+
+    // rows.length() <= 3 (bounded by the limit)
+    assertTrue("rows.length (" + rows.length() + ") must be <= 3", rows.length() <= 3);
+  }
+
   private void assertRow(
       JSONArray row, String expectedCity, long expectedBalance, String expectedAddress) {
     assertEquals(expectedCity, row.getString(0));

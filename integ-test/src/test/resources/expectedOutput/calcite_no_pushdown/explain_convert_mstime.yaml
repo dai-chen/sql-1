@@ -8,9 +8,9 @@ calcite:
       EnumerableCalc(expr#0..18=[{inputs}], expr#19=['03:45.5':VARCHAR], expr#20=[MSTIME($t19)], t=[$t20])
         CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
   shardFragment: |
-    LogicalProject(t=[MSTIME('03:45.5':VARCHAR)])
-      CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
-  combine: CONCAT
+    LogicalSort(fetch=[10000])
+      LogicalProject(t=[MSTIME('03:45.5':VARCHAR)])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
+  combine: "LIMIT{n:10000}"
   coordinatorTree: |
-    LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
-      LogicalTableScan(table=[[OpenSearch, _gathered_rows]])
+    LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

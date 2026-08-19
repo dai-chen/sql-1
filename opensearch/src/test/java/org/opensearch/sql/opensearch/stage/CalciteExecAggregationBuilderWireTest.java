@@ -108,6 +108,88 @@ public class CalciteExecAggregationBuilderWireTest {
     assertEquals(original, parsed);
   }
 
+  @Test
+  void round_trip_through_stream_with_early_termination_limit() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalSort").earlyTerminationLimit(42);
+
+    BytesStreamOutput out = new BytesStreamOutput();
+    original.writeTo(out);
+
+    StreamInput in = out.bytes().streamInput();
+    CalciteExecAggregationBuilder deserialized = new CalciteExecAggregationBuilder(in);
+
+    assertEquals(original, deserialized);
+    assertEquals(42, deserialized.getEarlyTerminationLimit());
+  }
+
+  @Test
+  void round_trip_through_stream_with_null_early_termination_limit() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalSort").earlyTerminationLimit(null);
+
+    BytesStreamOutput out = new BytesStreamOutput();
+    original.writeTo(out);
+
+    StreamInput in = out.bytes().streamInput();
+    CalciteExecAggregationBuilder deserialized = new CalciteExecAggregationBuilder(in);
+
+    assertEquals(original, deserialized);
+    assertEquals(null, deserialized.getEarlyTerminationLimit());
+  }
+
+  @Test
+  void round_trip_through_xcontent_with_early_termination_limit() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalSort").earlyTerminationLimit(100);
+
+    XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
+    xContentBuilder.startObject();
+    original.toXContent(xContentBuilder, null);
+    xContentBuilder.endObject();
+    xContentBuilder.flush();
+    String json = xContentBuilder.getOutputStream().toString();
+
+    XContentParser parser = XContentType.JSON.xContent().createParser(null, null, json);
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+
+    CalciteExecAggregationBuilder parsed =
+        CalciteExecAggregationBuilder.parse(parser, original.getName());
+
+    assertEquals(original, parsed);
+    assertEquals(100, parsed.getEarlyTerminationLimit());
+  }
+
+  @Test
+  void round_trip_through_xcontent_with_null_early_termination_limit() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalSort").earlyTerminationLimit(null);
+
+    XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
+    xContentBuilder.startObject();
+    original.toXContent(xContentBuilder, null);
+    xContentBuilder.endObject();
+    xContentBuilder.flush();
+    String json = xContentBuilder.getOutputStream().toString();
+
+    XContentParser parser = XContentType.JSON.xContent().createParser(null, null, json);
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+
+    CalciteExecAggregationBuilder parsed =
+        CalciteExecAggregationBuilder.parse(parser, original.getName());
+
+    assertEquals(original, parsed);
+    assertEquals(null, parsed.getEarlyTerminationLimit());
+  }
+
   private CalciteExecAggregationBuilder buildFullBuilder(String forcingOperator) {
     return new CalciteExecAggregationBuilder("calcite_stage")
         .plan("dGVzdA==")

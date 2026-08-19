@@ -105,6 +105,42 @@ public class FragmentExecutionTest {
   }
 
   @Test
+  void execute_fetch_fragment_truncates_rows() {
+    // US-013: a fragment containing a LogicalSort(fetch=3, empty collation) over the table scan
+    // must truncate the output to 3 rows even though more input rows exist.
+    RelNode tableScan = buildTableScan();
+
+    org.apache.calcite.rex.RexBuilder rexBuilder = REX_BUILDER;
+    org.apache.calcite.rel.type.RelDataTypeFactory typeFac = TYPE_FAC;
+    RexNode fetchLiteral =
+        rexBuilder.makeLiteral(3, typeFac.createSqlType(SqlTypeName.INTEGER), false);
+    RelNode sort =
+        org.apache.calcite.rel.logical.LogicalSort.create(
+            tableScan, org.apache.calcite.rel.RelCollations.EMPTY, null, fetchLiteral);
+
+    String base64Plan = RelFragmentCodec.serialize(sort);
+
+    // 5 input rows — more than the fetch limit of 3
+    List<Object[]> inputRows =
+        List.of(
+            new Object[] {1L, 25, "M"},
+            new Object[] {2L, 35, "F"},
+            new Object[] {3L, 40, "M"},
+            new Object[] {4L, 28, "F"},
+            new Object[] {5L, 50, "M"});
+
+    List<List<Object>> result =
+        CalciteClassLoaderHelper.withCalciteClassLoader(
+            () ->
+                CalciteExecAggregator.executeFragment(
+                    base64Plan, FIELD_DESCRIPTORS, inputRows, INDEX_NAME),
+            FragmentExecutionTest.class);
+
+    // Output must be truncated to 3 rows
+    assertEquals(3, result.size());
+  }
+
+  @Test
   void execute_window_rowNumber_fragment() {
     // Build ROW_NUMBER() OVER (PARTITION BY gender) plus all columns
     RelNode tableScan = buildTableScan();
@@ -171,6 +207,92 @@ public class FragmentExecutionTest {
             .sorted()
             .toList();
     assertEquals(List.of(1L, 2L), mRanks);
+  }
+
+  /**
+   * Regression test for US-013: a fragment shaped Sort(fetch) → Calc(query_string) → scan triggers
+   * IllegalStateException because relevance functions have no enumerable implementor. The fix
+   * classifies nodes containing relevance functions as NEEDS_GATHER in placement, which prevents
+   * this fragment shape from being produced. This test directly verifies the compilation failure to
+   * guard against regression if the placement guard is ever removed.
+   */
+  @Test
+  void execute_limit_over_calc_with_relevance_function_fails_with_suppressed_cause() {
+    // Build the table scan
+    RelNode tableScan = buildTableScan();
+
+    // Build a Filter containing query_string (simulated via the actual PPLBuiltinOperators UDF)
+    org.apache.calcite.sql.SqlOperator queryStringOp =
+        org.opensearch.sql.expression.function.PPLBuiltinOperators.QUERY_STRING;
+
+    // query_string takes a MAP argument. Build MAP('query', 'firstname:Amber').
+    RexNode queryKey =
+        REX_BUILDER.makeLiteral("query", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode queryValue =
+        REX_BUILDER.makeLiteral(
+            "firstname:Amber", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode mapExpr =
+        REX_BUILDER.makeCall(
+            TYPE_FAC.createMapType(
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR),
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR)),
+            SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR,
+            List.of(queryKey, queryValue));
+
+    // Build query_string(MAP('query','firstname:Amber')) → BOOLEAN
+    RexNode queryStringCall = REX_BUILDER.makeCall(queryStringOp, mapExpr);
+
+    // Wrap in a LogicalFilter
+    RelNode filter = LogicalFilter.create(tableScan, queryStringCall);
+
+    // Project all fields (simulating proj#0..2)
+    RelNode project =
+        LogicalProject.create(
+            filter,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(filter.getRowType().getFieldList().get(0).getType(), 0),
+                REX_BUILDER.makeInputRef(filter.getRowType().getFieldList().get(1).getType(), 1),
+                REX_BUILDER.makeInputRef(filter.getRowType().getFieldList().get(2).getType(), 2)),
+            List.of("account_number", "age", "gender"));
+
+    // Add LogicalSort with fetch=3 and empty collation (the limit promotion shape)
+    RexNode fetchLiteral =
+        REX_BUILDER.makeLiteral(3, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false);
+    RelNode sort =
+        org.apache.calcite.rel.logical.LogicalSort.create(
+            project, org.apache.calcite.rel.RelCollations.EMPTY, null, fetchLiteral);
+
+    // Serialize and attempt to execute — this MUST fail with the known root cause
+    String base64Plan = RelFragmentCodec.serialize(sort);
+
+    List<Object[]> inputRows =
+        List.of(
+            new Object[] {1L, 25, "M"},
+            new Object[] {2L, 35, "F"},
+            new Object[] {3L, 40, "M"},
+            new Object[] {4L, 28, "F"},
+            new Object[] {5L, 50, "M"});
+
+    IllegalStateException thrown =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalStateException.class,
+            () ->
+                CalciteClassLoaderHelper.withCalciteClassLoader(
+                    () ->
+                        CalciteExecAggregator.executeFragment(
+                            base64Plan, FIELD_DESCRIPTORS, inputRows, INDEX_NAME),
+                    FragmentExecutionTest.class));
+
+    // Verify the suppressed root cause is the relevance function's UnsupportedOperationException
+    Throwable[] suppressed = thrown.getSuppressed();
+    assertEquals(1, suppressed.length, "Expected exactly one suppressed exception");
+    org.junit.jupiter.api.Assertions.assertInstanceOf(
+        UnsupportedOperationException.class, suppressed[0]);
+    org.junit.jupiter.api.Assertions.assertTrue(
+        suppressed[0].getMessage().contains("Relevance search query functions"),
+        "Suppressed message should reference relevance functions, got: "
+            + suppressed[0].getMessage());
   }
 
   private RelNode buildTableScan() {

@@ -29,6 +29,7 @@ import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.JoinRelType;
@@ -226,6 +227,35 @@ public class StagePlannerTest {
     assertEquals(scan.getRowType(), result.shardFragment().getRowType());
   }
 
+  /**
+   * Proves the generic placement floor still classifies a Sort as NEEDS_GATHER independently of the
+   * LIMIT promotion path. This shape cannot be promoted to LIMIT because it has a non-empty
+   * collation (an ordered sort). Without this test, nothing standalone guards the invariant that
+   * Sort → NEEDS_GATHER in the generic floor — the repurposed tests above only exercise the LIMIT
+   * promotion shortcut. If this test is ever "repurposed", the placement floor is unproven.
+   */
+  @Test
+  void ordered_sort_above_project_scan_is_needs_gather_with_concat() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+    // Non-empty collation: ORDER BY account_number — this cannot be promoted to LIMIT
+    RelFieldCollation fieldCollation = new RelFieldCollation(0);
+    RelNode sort = LogicalSort.create(project, RelCollations.of(fieldCollation), null, null);
+
+    StagePlan result = StagePlanner.split(sort);
+
+    assertTrue(result.staged());
+    // The Sort is NEEDS_GATHER → cut falls to project (the highest SHARD_LOCAL)
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+    // The shardFragment's row type is the project's (below the Sort)
+    assertEquals(project.getRowType(), result.shardFragment().getRowType());
+  }
+
   @Test
   void join_defaults_to_needs_gather() {
     AbstractCalciteIndexScan scan1 = buildIndexScan();
@@ -248,7 +278,7 @@ public class StagePlannerTest {
   }
 
   @Test
-  void sort_defaults_to_needs_gather() {
+  void unordered_fetch_above_project_is_promoted_to_limit() {
     AbstractCalciteIndexScan scan = buildIndexScan();
     RelNode project =
         LogicalProject.create(
@@ -266,7 +296,9 @@ public class StagePlannerTest {
     StagePlan result = StagePlanner.split(sort);
 
     assertTrue(result.staged());
-    // Cut is the project (highest SHARD_LOCAL); sort stays on coordinator
+    // US-013: unordered Sort with fetch directly above a shard-local node → LIMIT promotion
+    assertEquals(CombineDescriptor.Mode.LIMIT, result.combine().getMode());
+    // Cut is the project (highest SHARD_LOCAL); sort's row type == project's row type
     assertEquals(project.getRowType(), result.shardFragment().getRowType());
   }
 
@@ -297,10 +329,12 @@ public class StagePlannerTest {
     StagePlan result = StagePlanner.split(limit);
 
     assertTrue(result.staged());
-    // Cut at project (highest SHARD_LOCAL); LogicalSystemLimit on coordinator
-    assertEquals(project.getRowType(), result.shardFragment().getRowType());
-    // Coordinator tree's root is a Sort (LogicalSystemLimit)
-    assertTrue(result.coordinatorTree() instanceof Sort);
+    // US-013: LogicalSystemLimit is a Sort with empty collation and fetch, directly above cut
+    // (project). Limit promotion fires → LIMIT mode, coordinator tree is just gathered-rows scan.
+    assertEquals(CombineDescriptor.Mode.LIMIT, result.combine().getMode());
+    assertEquals(10000, result.combine().getIntParam());
+    // Coordinator tree is the gathered-rows LogicalTableScan (no Sort wrapper)
+    assertTrue(result.coordinatorTree() instanceof LogicalTableScan);
   }
 
   // --- CONCAT descriptor ---
@@ -556,6 +590,57 @@ public class StagePlannerTest {
     assertEquals(join, result.coordinatorTree());
   }
 
+  @Test
+  void shared_unordered_fetch_under_join_dag_is_not_staged_as_limit() {
+    // Regression test for defect 1a (US-013 DAG shared-subtree gap): when HEP interning makes
+    // two structurally identical "head N" subtrees share ONE LogicalSort instance that feeds
+    // BOTH inputs of a LogicalJoin, the limit promotion must NOT fire. Before the fix, the guard
+    // checked cutNode (which has exactly one parent — the sortNode), missed that sortNode itself
+    // was shared, and replaceSubtree collapsed both join inputs into one gathered-rows scan.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+    // ONE Sort instance — this is what HEP interning produces
+    RelNode sortNode =
+        LogicalSort.create(
+            project,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+    // Pass the SAME sortNode as BOTH inputs of a join → DAG (shared subtree)
+    RelNode join =
+        LogicalJoin.create(
+            sortNode,
+            sortNode,
+            List.of(),
+            REX_BUILDER.makeCall(
+                SqlStdOperatorTable.EQUALS,
+                REX_BUILDER.makeInputRef(sortNode.getRowType().getFieldList().get(0).getType(), 0),
+                REX_BUILDER.makeInputRef(
+                    sortNode.getRowType().getFieldList().get(0).getType(),
+                    sortNode.getRowType().getFieldCount())),
+            java.util.Set.of(),
+            JoinRelType.INNER);
+
+    StagePlan result = StagePlanner.split(join);
+
+    // The plan must NOT be staged with LIMIT. Either it's coordinator-only or it's CONCAT
+    // at the scan level — never LIMIT with the shared Sort promoted.
+    if (result.staged()) {
+      assertFalse(
+          result.combine().getMode() == CombineDescriptor.Mode.LIMIT,
+          "A shared Sort (unordered fetch) under a join must NOT produce LIMIT combine — "
+              + "staging conflates independent join inputs");
+    } else {
+      // If not staged at all, coordinator-only is also acceptable
+      assertEquals(join, result.coordinatorTree());
+    }
+  }
+
   // --- Totality test ---
 
   @Test
@@ -787,7 +872,7 @@ public class StagePlannerTest {
   }
 
   @Test
-  void sort_above_project_scan_records_sort_as_forcing_operator() {
+  void unordered_fetch_at_root_has_null_forcing_operator() {
     AbstractCalciteIndexScan scan = buildIndexScan();
     RelNode project =
         LogicalProject.create(
@@ -805,8 +890,10 @@ public class StagePlannerTest {
     StagePlan result = StagePlanner.split(sort);
 
     assertTrue(result.staged());
-    // Cut is project (highest SHARD_LOCAL); parent of project is the sort
-    assertEquals("LogicalSort", result.forcingOperator());
+    // US-013: unordered fetch directly above shard-local Project → LIMIT promotion fires.
+    // The Sort IS the promoted cut and is the root → forcingOperator is null.
+    assertEquals(CombineDescriptor.Mode.LIMIT, result.combine().getMode());
+    assertNull(result.forcingOperator());
   }
 
   // --- MERGE_AGG split rule tests (US-012) ---
@@ -1010,6 +1097,242 @@ public class StagePlannerTest {
         "coordinatorTree must contain the division (/) produced by AGGREGATE_REDUCE_FUNCTIONS");
   }
 
+  // --- LIMIT split rule tests (US-013) ---
+
+  @Test
+  void unordered_fetch_over_project_over_scan_is_promoted_to_limit() {
+    // head N → LogicalSort(fetch=N, collation=EMPTY) over Project over scan
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+    RelNode fetch =
+        LogicalSort.create(
+            project,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(fetch);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.LIMIT, result.combine().getMode());
+    assertEquals(5, result.combine().getIntParam());
+    // shardFragment root is a Sort with that fetch and empty collation
+    assertTrue(result.shardFragment() instanceof Sort);
+    Sort shardSort = (Sort) result.shardFragment();
+    assertTrue(shardSort.getCollation().getFieldCollations().isEmpty());
+    assertNotNull(shardSort.fetch);
+    // coordinatorTree contains no Sort over the gathered-rows scan
+    assertFalse(result.coordinatorTree() instanceof Sort);
+  }
+
+  @Test
+  void ordered_sort_fetch_is_not_promoted_to_limit() {
+    // sort X | head N → Sort with non-empty collation → stays CONCAT (US-014's TOP_N)
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+    RelFieldCollation fieldCollation = new RelFieldCollation(0);
+    RelNode sortFetch =
+        LogicalSort.create(
+            project,
+            RelCollations.of(fieldCollation),
+            null,
+            REX_BUILDER.makeLiteral(10, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(sortFetch);
+
+    assertTrue(result.staged());
+    // Must NOT be LIMIT — stays CONCAT because ordered Sort+Fetch is US-014
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void non_zero_offset_is_not_promoted_to_limit() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+    RelNode fetch =
+        LogicalSort.create(
+            project,
+            RelCollations.EMPTY,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false),
+            REX_BUILDER.makeLiteral(10, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(fetch);
+
+    assertTrue(result.staged());
+    // Non-zero offset → must NOT be promoted
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void fetch_directly_above_aggregate_is_not_promoted_to_limit() {
+    // When the node above the cut is an Aggregate, aggregate promotion wins — LIMIT must not fire
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode agg =
+        LogicalAggregate.create(
+            scan,
+            List.of(),
+            ImmutableBitSet.of(0),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "cnt")));
+    RelNode fetch =
+        LogicalSort.create(
+            agg,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(fetch);
+
+    assertTrue(result.staged());
+    // Aggregate promotion must win — MERGE_AGG
+    assertEquals(CombineDescriptor.Mode.MERGE_AGG, result.combine().getMode());
+  }
+
+  @Test
+  void fetch_above_project_with_rexOver_is_not_promoted_to_limit() {
+    // A RexOver-bearing Project is NEEDS_GATHER → cut falls to scan. The fetch is
+    // NOT directly above the cut, so LIMIT does not fire.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelDataType bigintType = TYPE_FAC.createSqlType(SqlTypeName.BIGINT);
+    RexNode rowNumber =
+        REX_BUILDER.makeOver(
+            bigintType,
+            SqlStdOperatorTable.ROW_NUMBER,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            ImmutableList.of(),
+            RexWindowBounds.UNBOUNDED_PRECEDING,
+            RexWindowBounds.CURRENT_ROW,
+            true,
+            true,
+            false,
+            false);
+    RelNode windowProject =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0),
+                rowNumber),
+            List.of("account_number", "rn"));
+    RelNode fetch =
+        LogicalSort.create(
+            windowProject,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(fetch);
+
+    assertTrue(result.staged());
+    // RexOver-bearing Project is NEEDS_GATHER → cut falls to scan, and the fetch is NOT
+    // directly above the scan — the window project is between them. So LIMIT does not fire.
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void fetch_above_join_is_not_promoted_to_limit() {
+    // Join is NEEDS_GATHER. If the cut is below the join, the fetch can't be directly above cut.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode plainScan = buildTableScan();
+    RelNode join =
+        LogicalJoin.create(
+            scan,
+            plainScan,
+            List.of(),
+            REX_BUILDER.makeLiteral(true),
+            java.util.Set.of(),
+            JoinRelType.INNER);
+    RelNode fetch =
+        LogicalSort.create(
+            join,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(fetch);
+
+    assertTrue(result.staged());
+    // Join makes the cut fall to scan; fetch is not directly above cut → CONCAT
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void earlyTerminationLimit_is_non_null_for_fetch_over_project_over_scan() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+    RelNode fetch =
+        LogicalSort.create(
+            project,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(7, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(fetch);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.LIMIT, result.combine().getMode());
+    // Project (no window) over scan is cardinality-preserving → earlyTerminationLimit is set
+    assertNotNull(result.earlyTerminationLimit());
+    assertEquals(7, result.earlyTerminationLimit());
+  }
+
+  @Test
+  void earlyTerminationLimit_is_null_when_filter_sits_between_fetch_and_scan() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RexNode condition =
+        REX_BUILDER.makeCall(
+            SqlStdOperatorTable.GREATER_THAN,
+            REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(1).getType(), 1),
+            REX_BUILDER.makeLiteral(30, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+    RelNode filter = LogicalFilter.create(scan, condition);
+    RelNode fetch =
+        LogicalSort.create(
+            filter,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(fetch);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.LIMIT, result.combine().getMode());
+    // Filter is NOT cardinality-preserving → earlyTerminationLimit is null
+    assertNull(result.earlyTerminationLimit());
+  }
+
   // --- Non-round-trippable enum literal placement (Critical A fix) ---
 
   @Test
@@ -1178,5 +1501,130 @@ public class StagePlannerTest {
       return node;
     }
     return findLeaf(node.getInputs().get(0));
+  }
+
+  @Test
+  void filter_with_relevance_function_is_needs_gather() {
+    // A Filter whose condition calls a relevance function (query_string, match, etc.) has no
+    // enumerable implementor on the shard — compilation throws UnsupportedOperationException.
+    // Such nodes must be classified NEEDS_GATHER per Design Invariant 1: the plan falls through
+    // to the JDBC path (coordinatorOnly) which handles relevance functions natively via
+    // OpenSearch's query DSL.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+
+    // Build query_string(MAP('query','firstname:Amber')) → BOOLEAN condition
+    org.apache.calcite.sql.SqlOperator queryStringOp =
+        org.opensearch.sql.expression.function.PPLBuiltinOperators.QUERY_STRING;
+    RexNode queryKey =
+        REX_BUILDER.makeLiteral("query", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode queryValue =
+        REX_BUILDER.makeLiteral(
+            "firstname:Amber", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode mapExpr =
+        REX_BUILDER.makeCall(
+            TYPE_FAC.createMapType(
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR),
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR)),
+            SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR,
+            List.of(queryKey, queryValue));
+    RexNode queryStringCall = REX_BUILDER.makeCall(queryStringOp, mapExpr);
+
+    RelNode filter = LogicalFilter.create(scan, queryStringCall);
+
+    StagePlan result = StagePlanner.split(filter);
+
+    // The coordinator tree would contain the relevance function → coordinatorOnly.
+    // Design Invariant 1: never reject, the JDBC path handles it.
+    assertFalse(
+        result.staged(), "Plan must be coordinatorOnly — relevance functions need JDBC path");
+  }
+
+  @Test
+  void relevance_filter_above_unordered_fetch_is_not_staged() {
+    // Regression: trySplitLimit must not return a staged plan when the coordinatorTree retains
+    // a relevance-function call (query_string). Shape: Filter(query_string) → Sort(fetch=N,
+    // empty collation) → Project → IndexScan. The Sort is directly above the cut (Project),
+    // so LIMIT promotion fires. The coordinatorTree = Filter(query_string) → gathered_rows.
+    // Without the relevance-function guard in trySplitLimit, CoordinatorTreeExecutor would fail
+    // with UnsupportedOperationException from RelevanceQueryImplementor.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0)),
+            List.of("account_number"));
+
+    // Unordered fetch (Sort with empty collation and fetch literal)
+    RelNode sort =
+        LogicalSort.create(
+            project,
+            RelCollations.EMPTY,
+            null,
+            REX_BUILDER.makeLiteral(10, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    // Relevance filter ABOVE the fetch
+    org.apache.calcite.sql.SqlOperator queryStringOp =
+        org.opensearch.sql.expression.function.PPLBuiltinOperators.QUERY_STRING;
+    RexNode queryKey =
+        REX_BUILDER.makeLiteral("query", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode queryValue =
+        REX_BUILDER.makeLiteral(
+            "firstname:Amber", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode mapExpr =
+        REX_BUILDER.makeCall(
+            TYPE_FAC.createMapType(
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR),
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR)),
+            SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR,
+            List.of(queryKey, queryValue));
+    RexNode queryStringCall = REX_BUILDER.makeCall(queryStringOp, mapExpr);
+    RelNode filter = LogicalFilter.create(sort, queryStringCall);
+
+    StagePlan result = StagePlanner.split(filter);
+
+    // Must NOT be staged — relevance function in coordinatorTree has no enumerable implementor
+    assertFalse(
+        result.staged(),
+        "Plan must be coordinatorOnly — relevance function above promoted limit needs JDBC path");
+  }
+
+  @Test
+  void sort_above_filter_with_relevance_function_does_not_promote_limit() {
+    // When a Filter below a Sort (limit) contains a relevance function, the Filter is NOT
+    // shard-local. The coordinatorTree would contain the relevance function, so the plan
+    // must be coordinatorOnly — limit promotion must NOT fire.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+
+    org.apache.calcite.sql.SqlOperator queryStringOp =
+        org.opensearch.sql.expression.function.PPLBuiltinOperators.QUERY_STRING;
+    RexNode queryKey =
+        REX_BUILDER.makeLiteral("query", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode queryValue =
+        REX_BUILDER.makeLiteral(
+            "firstname:Amber", TYPE_FAC.createSqlType(SqlTypeName.VARCHAR), true);
+    RexNode mapExpr =
+        REX_BUILDER.makeCall(
+            TYPE_FAC.createMapType(
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR),
+                TYPE_FAC.createSqlType(SqlTypeName.VARCHAR)),
+            SqlStdOperatorTable.MAP_VALUE_CONSTRUCTOR,
+            List.of(queryKey, queryValue));
+    RexNode queryStringCall = REX_BUILDER.makeCall(queryStringOp, mapExpr);
+    RelNode filter = LogicalFilter.create(scan, queryStringCall);
+
+    // Sort(fetch=10000, empty collation) above the filter — the US-013 regression shape
+    RexNode fetchLiteral =
+        REX_BUILDER.makeLiteral(10000, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false);
+    RelNode sort =
+        org.apache.calcite.rel.logical.LogicalSort.create(
+            filter, org.apache.calcite.rel.RelCollations.EMPTY, null, fetchLiteral);
+
+    StagePlan result = StagePlanner.split(sort);
+
+    // The plan MUST be coordinatorOnly — the coordinator tree would need to compile
+    // query_string which has no enumerable implementor.
+    assertFalse(
+        result.staged(), "Plan must be coordinatorOnly — relevance functions need JDBC path");
   }
 }

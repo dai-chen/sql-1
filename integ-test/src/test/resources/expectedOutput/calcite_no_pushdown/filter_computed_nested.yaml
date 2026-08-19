@@ -9,10 +9,10 @@ calcite:
       EnumerableCalc(expr#0..15=[{inputs}], expr#16=[CHAR_LENGTH($t3)], expr#17=[29], expr#18=[>($t16, $t17)], projects.name=[$t3], proj_name_len=[$t16], $condition=[$t18])
         CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_deep_nested]])
   shardFragment: |
-    LogicalFilter(condition=[>($1, 29)])
-      LogicalProject(projects.name=[$3], proj_name_len=[CHAR_LENGTH($3)])
-        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_deep_nested]])
-  combine: CONCAT
+    LogicalSort(fetch=[10000])
+      LogicalFilter(condition=[>($1, 29)])
+        LogicalProject(projects.name=[$3], proj_name_len=[CHAR_LENGTH($3)])
+          CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_deep_nested]])
+  combine: "LIMIT{n:10000}"
   coordinatorTree: |
-    LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
-      LogicalTableScan(table=[[OpenSearch, _gathered_rows]])
+    LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

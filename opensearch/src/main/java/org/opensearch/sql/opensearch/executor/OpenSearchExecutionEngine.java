@@ -646,7 +646,8 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
             .plan(serializedPlan)
             .fields(fieldDescriptors)
             .combine(stagePlan.combine())
-            .forcingOperator(stagePlan.forcingOperator());
+            .forcingOperator(stagePlan.forcingOperator())
+            .earlyTerminationLimit(stagePlan.earlyTerminationLimit());
 
     // Build the SearchSourceBuilder: size=0, the query clause, and the aggregation
     SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();

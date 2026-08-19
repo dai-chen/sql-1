@@ -26,6 +26,7 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
   private final CombineDescriptor combine;
   private final int rowBudget;
   private final String forcingOperator;
+  private final Integer earlyTerminationLimit;
 
   public CalciteExecAggregatorFactory(
       String name,
@@ -34,6 +35,7 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
       CombineDescriptor combine,
       int rowBudget,
       String forcingOperator,
+      Integer earlyTerminationLimit,
       QueryShardContext queryShardContext,
       AggregatorFactory parent,
       AggregatorFactories.Builder subfactoriesBuilder,
@@ -45,6 +47,7 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
     this.combine = combine;
     this.rowBudget = rowBudget;
     this.forcingOperator = forcingOperator;
+    this.earlyTerminationLimit = earlyTerminationLimit;
   }
 
   @Override
@@ -55,6 +58,15 @@ public class CalciteExecAggregatorFactory extends AggregatorFactory {
       Map<String, Object> metadata)
       throws IOException {
     return new CalciteExecAggregator(
-        name, plan, fields, combine, rowBudget, forcingOperator, searchContext, parent, metadata);
+        name,
+        plan,
+        fields,
+        combine,
+        rowBudget,
+        forcingOperator,
+        earlyTerminationLimit,
+        searchContext,
+        parent,
+        metadata);
   }
 }

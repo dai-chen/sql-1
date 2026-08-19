@@ -36,6 +36,7 @@ import org.apache.calcite.schema.impl.AbstractSchema;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.search.CollectionTerminatedException;
 import org.opensearch.search.aggregations.Aggregator;
 import org.opensearch.search.aggregations.InternalAggregation;
 import org.opensearch.search.aggregations.LeafBucketCollector;
@@ -58,6 +59,16 @@ public class CalciteExecAggregator extends MetricsAggregator {
   private final int rowBudget;
   private final String forcingOperator;
   private final String indexName;
+
+  /**
+   * US-013: optional early termination limit. Non-null only when limit pushdown (rule 4) fires AND
+   * the fragment is cardinality-preserving. When set, the shard may stop collecting documents at
+   * this count — safe because no Filter/Aggregate/Window can reduce output below N.
+   */
+  private final Integer earlyTerminationLimit;
+
+  /** US-013: true once earlyTerminationLimit has been reached and collection should stop. */
+  private boolean terminated;
 
   /**
    * Per-field nested path: field name → nested parent path, null for non-nested fields. Resolved
@@ -90,6 +101,7 @@ public class CalciteExecAggregator extends MetricsAggregator {
       CombineDescriptor combine,
       int rowBudget,
       String forcingOperator,
+      Integer earlyTerminationLimit,
       SearchContext searchContext,
       Aggregator parent,
       Map<String, Object> metadata)
@@ -100,6 +112,8 @@ public class CalciteExecAggregator extends MetricsAggregator {
     this.combine = combine;
     this.rowBudget = rowBudget;
     this.forcingOperator = forcingOperator;
+    this.earlyTerminationLimit = earlyTerminationLimit;
+    this.terminated = false;
     this.indexName = searchContext.indexShard().shardId().getIndexName();
     this.nestedPaths = resolveNestedPaths(fields, searchContext);
     this.hasNestedFields = nestedPaths.values().stream().anyMatch(java.util.Objects::nonNull);
@@ -146,6 +160,14 @@ public class CalciteExecAggregator extends MetricsAggregator {
   @Override
   protected LeafBucketCollector getLeafCollector(LeafReaderContext ctx, LeafBucketCollector sub)
       throws IOException {
+    // US-013: if we already terminated, throw immediately before building any ShardRowReader.
+    // This second guard is load-bearing: CollectionTerminatedException is caught per-leaf by
+    // ContextIndexSearcher#searchLeaf() and the leaf loop otherwise continues, so the exception
+    // ALONE does not stop a shard — this guard prevents subsequent leaves from being opened.
+    if (terminated) {
+      throw new CollectionTerminatedException();
+    }
+
     SourceLookup sourceLookup =
         context.getQueryShardContext().lookup().getLeafSearchLookup(ctx).source();
     ShardRowReader rowReader = ShardRowReader.create(ctx, fields, sourceLookup, nestedPaths);
@@ -167,6 +189,13 @@ public class CalciteExecAggregator extends MetricsAggregator {
           rows.add(row);
           rowsCollected++;
           chargeRowBytes(row);
+        }
+        // US-013: check early termination BEFORE the rowBudget check. A legitimately bounded
+        // query must never fail the safety budget — checking early termination first is deliberate.
+        if (earlyTerminationLimit != null && rowsCollected >= earlyTerminationLimit) {
+          flushBreakerBytes();
+          terminated = true;
+          throw new CollectionTerminatedException();
         }
         // US-009: enforce rowBudget as a HARD exception. Do NOT use
         // CollectionTerminatedException here — that is per-leaf only, caught by

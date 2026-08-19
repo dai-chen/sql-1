@@ -142,7 +142,22 @@ public class InternalCalciteExec extends InternalAggregation {
       case MERGE_AGG:
         return reduceMergeAgg(aggregations);
       case LIMIT:
-        throw new UnsupportedOperationException("LIMIT reduce is implemented in US-013");
+        // Concatenate rows from all inputs and truncate at n. Must be associative: reduce()
+        // runs in batches of 512 and its output is fed back in.
+        int limitN = combine.getIntParam();
+        long limitCollected = 0;
+        List<List<Object>> limitRows = new ArrayList<>();
+        for (InternalAggregation agg : aggregations) {
+          InternalCalciteExec other = (InternalCalciteExec) agg;
+          limitCollected += other.rowsCollected;
+          limitRows.addAll(other.rows);
+        }
+        // Truncate to n — copy so the truncated list does not pin the full backing ArrayList
+        if (limitRows.size() > limitN) {
+          limitRows = new ArrayList<>(limitRows.subList(0, limitN));
+        }
+        return new InternalCalciteExec(
+            getName(), combine, limitCollected, (long) limitRows.size(), limitRows, getMetadata());
       case TOP_N:
         throw new UnsupportedOperationException("TOP_N reduce is implemented in US-014");
       case RANK_LIMIT:
