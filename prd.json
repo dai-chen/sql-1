@@ -153,8 +153,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Forcing-operator name is the RelNode relTypeName (e.g. LogicalProject[window]), not a PPL command name like 'eventstats'. Mapping RelNode classes back to PPL commands is not soundly derivable and a plausible-but-wrong name is worse than a precise one; the design doc's 'eventstats' example is illustrative of the message shape. A [window] qualifier is appended for Project/Calc nodes holding a RexOver so the message does not misleadingly blame a normally-shard-local Project. The design doc's second throw site (CollectionTerminatedException + getLeafCollector guard for an exactly-pushable limit) is deliberately NOT implemented here: it belongs to US-013 rule 4, and using it for a budget breach would silently truncate, violating Design Invariant 3."
     },
     {
       "id": "US-010",
