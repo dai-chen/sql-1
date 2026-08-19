@@ -28,6 +28,7 @@ import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.externalize.RelJsonWriter;
+import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexCall;
@@ -296,6 +297,9 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
                 // Parse sourceBuilder JSON if present in physical plan
                 parseSourceBuilderInPhysicalTree(physicalTree);
 
+                // Staged sections (shardFragment/combine/coordinatorTree) are intentionally omitted
+                // here — they use plan TEXT via RelOptUtil, not the structured JSON from
+                // RelJsonWriter.
                 ExplainResponseNodeV2 response =
                     new ExplainResponseNodeV2(logicalJson, physicalJson.get(), null);
                 response.setLogicalTree(logicalTree);
@@ -313,8 +317,9 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
               // Original string format for json/yaml
               if (mode == ExplainMode.SIMPLE) {
                 String logical = RelOptUtil.toString(rel, SqlExplainLevel.NO_ATTRIBUTES);
-                listener.onResponse(
-                    new ExplainResponse(new ExplainResponseNodeV2(logical, null, null)));
+                ExplainResponseNodeV2 response = new ExplainResponseNodeV2(logical, null, null);
+                populateStagedExplain(response, rel, SqlExplainLevel.NO_ATTRIBUTES);
+                listener.onResponse(new ExplainResponse(response));
               } else {
                 SqlExplainLevel level =
                     mode == ExplainMode.COST
@@ -331,9 +336,10 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
                   // triggers the hook
                   OpenSearchRelRunners.run(context, CalciteToolsHelper.optimize(rel, context));
                 }
-                listener.onResponse(
-                    new ExplainResponse(
-                        new ExplainResponseNodeV2(logical, physical.get(), javaCode.get())));
+                ExplainResponseNodeV2 response =
+                    new ExplainResponseNodeV2(logical, physical.get(), javaCode.get());
+                populateStagedExplain(response, rel, level);
+                listener.onResponse(new ExplainResponse(response));
               }
             }
           } catch (Exception e) {
@@ -352,8 +358,8 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
           try {
             // Staged execution gate: activate when the plan is stageable AND pushdown is disabled.
             // This is a configuration flip — the PoC posture is pushdown.enabled=false.
-            StagePlan stagePlan = StagePlanner.split(rel);
-            if (stagePlan.staged() && isPushdownDisabled(stagePlan)) {
+            StagePlan stagePlan = splitIfStaged(rel);
+            if (stagePlan != null) {
               executeStagedPlan(stagePlan, context, listener);
               return;
             }
@@ -422,6 +428,75 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
     AbstractCalciteIndexScan scan = stagePlan.shardScan();
     Settings settings = scan.getOsIndex().getSettings();
     return !((Boolean) settings.getSettingValue(Settings.Key.CALCITE_PUSHDOWN_ENABLED));
+  }
+
+  /**
+   * Shared helper for the staged-execution gate used by BOTH execute() and explain(). Returns the
+   * StagePlan when the plan is stageable AND pushdown is disabled, null otherwise. This ensures
+   * explain describes exactly the same split that execute runs — the two can never drift because
+   * they both call this method on the same pre-optimization RelNode parameter.
+   */
+  private static StagePlan splitIfStaged(RelNode rel) {
+    StagePlan stagePlan = StagePlanner.split(rel);
+    if (stagePlan.staged() && isPushdownDisabled(stagePlan)) {
+      return stagePlan;
+    }
+    return null;
+  }
+
+  /**
+   * Populates the staged explain sections (shardFragment, combine, coordinatorTree) on the response
+   * node when the plan is staged. Does nothing when the plan is not staged (fields remain null and
+   * are omitted from output by NON_NULL serialization).
+   *
+   * @param response the response node to populate
+   * @param rel the same RelNode that execute() would split
+   * @param level the SqlExplainLevel for rendering plan text
+   */
+  private static void populateStagedExplain(
+      ExplainResponseNodeV2 response, RelNode rel, SqlExplainLevel level) {
+    StagePlan stagePlan = splitIfStaged(rel);
+    if (stagePlan == null) {
+      return;
+    }
+    // D4: Splice the original AbstractCalciteIndexScan back into the fragment's leaf so that
+    // explainTerms contributes PushDownContext/sourceBuilder terms (empty under the PoC posture
+    // where pushdown.enabled=false — that is correct and honest, not a bug).
+    RelNode fragmentWithRealScan =
+        replaceSerializableLeafWithRealScan(stagePlan.shardFragment(), stagePlan.shardScan());
+    response.setShardFragment(RelOptUtil.toString(fragmentWithRealScan, level));
+    response.setCombine(stagePlan.combine().describe());
+    response.setCoordinatorTree(RelOptUtil.toString(stagePlan.coordinatorTree(), level));
+  }
+
+  /**
+   * Replaces the serializable LogicalTableScan leaf in the shard fragment with the original
+   * AbstractCalciteIndexScan, so explain output shows the real scan's explainTerms. Walks the tree
+   * looking for a LogicalTableScan whose table path contains {@link RelFragmentCodec#SCHEMA_NAME},
+   * and substitutes it with the provided real scan.
+   */
+  // Package-private for unit testing (StagedExplainTest in this package)
+  static RelNode replaceSerializableLeafWithRealScan(
+      RelNode node, AbstractCalciteIndexScan realScan) {
+    if (node instanceof LogicalTableScan tableScan) {
+      List<String> qualifiedName = tableScan.getTable().getQualifiedName();
+      if (qualifiedName.contains(RelFragmentCodec.SCHEMA_NAME)) {
+        return realScan;
+      }
+    }
+    List<RelNode> newInputs = new ArrayList<>();
+    boolean changed = false;
+    for (RelNode input : node.getInputs()) {
+      RelNode replaced = replaceSerializableLeafWithRealScan(input, realScan);
+      newInputs.add(replaced);
+      if (replaced != input) {
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return node;
+    }
+    return node.copy(node.getTraitSet(), newInputs);
   }
 
   /**

@@ -11,3 +11,12 @@ calcite:
         EnumerableAggregate(group=[{}], agg#0=[$SUM0($0)], agg#1=[COUNT($0)])
           EnumerableCalc(expr#0..8=[{inputs}], expr#9=[10], expr#10=[>($t0, $t9)], proj#0..8=[{exprs}], $condition=[$t10])
             CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_alias]])
+  shardFragment: |
+    LogicalFilter(condition=[>($0, 10)])
+      LogicalProject(alias_col=[$0])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_alias]])
+  combine: CONCAT
+  coordinatorTree: |
+    LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+      LogicalAggregate(group=[{}], avg(alias_col)=[AVG($0)])
+        LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

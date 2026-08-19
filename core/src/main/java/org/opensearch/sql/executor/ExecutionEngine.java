@@ -144,11 +144,15 @@ public interface ExecutionEngine {
     public static ExplainResponse normalizeLf(ExplainResponse response) {
       ExecutionEngine.ExplainResponseNodeV2 calcite = response.getCalcite();
       if (calcite != null) {
-        return new ExplainResponse(
+        ExecutionEngine.ExplainResponseNodeV2 normalized =
             new ExecutionEngine.ExplainResponseNodeV2(
                 normalizeLf(calcite.getLogical()),
                 normalizeLf(calcite.getPhysical()),
-                normalizeLf(calcite.getExtended())));
+                normalizeLf(calcite.getExtended()));
+        normalized.setShardFragment(normalizeLf(calcite.getShardFragment()));
+        normalized.setCombine(normalizeLf(calcite.getCombine()));
+        normalized.setCoordinatorTree(normalizeLf(calcite.getCoordinatorTree()));
+        return new ExplainResponse(normalized);
       }
       return response;
     }
@@ -177,5 +181,9 @@ public interface ExecutionEngine {
     // For json_tree format: parsed JSON objects instead of strings
     private Object logicalTree;
     private Object physicalTree;
+    // Staged execution sections (null when the plan is not staged; omitted from output by NON_NULL)
+    private String shardFragment;
+    private String combine;
+    private String coordinatorTree;
   }
 }

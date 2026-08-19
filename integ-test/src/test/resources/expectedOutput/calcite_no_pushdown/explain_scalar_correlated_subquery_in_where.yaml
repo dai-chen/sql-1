@@ -19,3 +19,16 @@ calcite:
             EnumerableAggregate(group=[{1}], max(uid)=[MAX($1)])
               EnumerableCalc(expr#0..9=[{inputs}], expr#10=[IS NOT NULL($t1)], proj#0..9=[{exprs}], $condition=[$t10])
                 CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_work_information]])
+  shardFragment: |
+    LogicalProject(id=[$2], name=[$0])
+      LogicalFilter(condition=[=($2, $SCALAR_QUERY({
+    LogicalAggregate(group=[{}], max(uid)=[MAX($0)])
+      LogicalProject(uid=[$1])
+        LogicalFilter(condition=[=($cor0.id, $1)])
+          CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_work_information]])
+    }))], variablesSet=[[$cor0]])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_worker]])
+  combine: CONCAT
+  coordinatorTree: |
+    LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+      LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

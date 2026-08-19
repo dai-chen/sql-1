@@ -198,4 +198,68 @@ public class CombineDescriptor implements Writeable, ToXContentObject {
   public String toString() {
     return "CombineDescriptor{mode=" + mode + "}";
   }
+
+  /**
+   * Human-readable single-line rendering matching the design doc's shape: {@code CONCAT} for the
+   * parameterless mode, and {@code MODE{k:v, ...}} for parameterized ones.
+   */
+  public String describe() {
+    if (mode == Mode.CONCAT) {
+      return "CONCAT";
+    }
+    StringBuilder sb = new StringBuilder(mode.name());
+    sb.append('{');
+    boolean first = true;
+    switch (mode) {
+      case MERGE_AGG:
+        if (!intListParam.isEmpty()) {
+          sb.append("groupKeys:").append(intListParam);
+          first = false;
+        }
+        if (!stringListParam.isEmpty()) {
+          if (!first) sb.append(", ");
+          sb.append("aggs:").append(stringListParam);
+        }
+        break;
+      case TOP_N:
+        if (!stringListParam.isEmpty()) {
+          sb.append("keys:").append(stringListParam);
+          first = false;
+        }
+        if (!intListParam.isEmpty()) {
+          if (!first) sb.append(", ");
+          sb.append("dirs:").append(intListParam);
+          first = false;
+        }
+        if (intParam > 0) {
+          if (!first) sb.append(", ");
+          sb.append("n:").append(intParam);
+        }
+        break;
+      case RANK_LIMIT:
+        if (!intListParam.isEmpty()) {
+          sb.append("partitionKeys:").append(intListParam);
+          first = false;
+        }
+        if (!stringListParam.isEmpty()) {
+          if (!first) sb.append(", ");
+          sb.append("orderKeys:").append(stringListParam);
+          first = false;
+        }
+        if (intParam > 0) {
+          if (!first) sb.append(", ");
+          sb.append("k:").append(intParam);
+        }
+        break;
+      case LIMIT:
+        if (intParam > 0) {
+          sb.append("n:").append(intParam);
+        }
+        break;
+      default:
+        break;
+    }
+    sb.append('}');
+    return sb.toString();
+  }
 }
