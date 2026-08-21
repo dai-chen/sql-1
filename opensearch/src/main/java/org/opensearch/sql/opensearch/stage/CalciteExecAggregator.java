@@ -295,32 +295,8 @@ public class CalciteExecAggregator extends MetricsAggregator {
     // 1. Deserialize the logical RelNode from the base64 plan
     RelNode logicalRel = RelFragmentCodec.deserialize(base64Plan, indexName, fields);
 
-    // 2. Phase 1: HEP pass to expand windows (ProjectToWindowRule converts RexOver in a
-    //    LogicalProject into a LogicalWindow node that the Volcano phase can handle) and
-    //    merge Filter/Project into Calc (EnumerableCalc supports ARRAY mode; separate
-    //    EnumerableProject/EnumerableFilter do not).
-    HepProgramBuilder hepBuilder = new HepProgramBuilder();
-    hepBuilder.addRuleInstance(CoreRules.PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW);
-    hepBuilder.addRuleInstance(CoreRules.FILTER_TO_CALC);
-    hepBuilder.addRuleInstance(CoreRules.PROJECT_TO_CALC);
-    hepBuilder.addRuleInstance(CoreRules.CALC_MERGE);
-    HepPlanner hepPlanner = new HepPlanner(hepBuilder.build());
-    hepPlanner.setRoot(logicalRel);
-    RelNode expandedRel = hepPlanner.findBestExp();
-
-    // 3. Phase 2: VolcanoPlanner converts the expanded logical plan to EnumerableConvention.
-    //    ConventionTraitDef and RelCollationTraitDef are already registered by
-    //    RelFragmentCodec.deserialize(). Add the standard enumerable implementation rules.
-    RelOptCluster cluster = expandedRel.getCluster();
-    RelOptPlanner planner = cluster.getPlanner();
-    for (var rule : EnumerableRules.rules()) {
-      planner.addRule(rule);
-    }
-
-    // Request conversion to EnumerableConvention
-    RelTraitSet desiredTraits = expandedRel.getTraitSet().replace(EnumerableConvention.INSTANCE);
-    planner.setRoot(planner.changeTraits(expandedRel, desiredTraits));
-    RelNode bestPlan = planner.findBestExp();
+    // 2-3. Optimize to EnumerableConvention (HEP rewrite, then Volcano)
+    RelNode bestPlan = optimizeFragment(logicalRel);
 
     // 4. Compile the EnumerableRel to a Bindable using Janino.
     //    SparkHandler is null — that is precisely the code path that triggers Janino compilation
@@ -400,6 +376,46 @@ public class CalciteExecAggregator extends MetricsAggregator {
       }
     }
     return result;
+  }
+
+  /**
+   * Converts a deserialized logical fragment to EnumerableConvention in two phases. Package-private
+   * so tests can assert the physical shape (e.g. that an ordered Sort with a fetch becomes an
+   * {@code EnumerableLimitSort} rather than a full sort followed by a separate limit).
+   *
+   * <p>Phase 1 is a HEP pass that expands windows (ProjectToWindowRule converts a RexOver inside a
+   * LogicalProject into a LogicalWindow the Volcano phase can handle) and merges Filter/Project
+   * into Calc (EnumerableCalc supports ARRAY mode; separate EnumerableProject/EnumerableFilter do
+   * not).
+   *
+   * <p>Phase 2 runs the VolcanoPlanner with the standard enumerable rules. ConventionTraitDef and
+   * RelCollationTraitDef are already registered by {@link RelFragmentCodec#deserialize}.
+   */
+  static RelNode optimizeFragment(RelNode logicalRel) {
+    HepProgramBuilder hepBuilder = new HepProgramBuilder();
+    hepBuilder.addRuleInstance(CoreRules.PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW);
+    hepBuilder.addRuleInstance(CoreRules.FILTER_TO_CALC);
+    hepBuilder.addRuleInstance(CoreRules.PROJECT_TO_CALC);
+    hepBuilder.addRuleInstance(CoreRules.CALC_MERGE);
+    HepPlanner hepPlanner = new HepPlanner(hepBuilder.build());
+    hepPlanner.setRoot(logicalRel);
+    RelNode expandedRel = hepPlanner.findBestExp();
+
+    RelOptCluster cluster = expandedRel.getCluster();
+    RelOptPlanner planner = cluster.getPlanner();
+    for (var rule : EnumerableRules.rules()) {
+      planner.addRule(rule);
+    }
+    // US-014: fuse an ordered Sort carrying a fetch into a single EnumerableLimitSort instead of
+    // an EnumerableLimit stacked on a full EnumerableSort. NOT part of EnumerableRules.rules() in
+    // Calcite 1.42.0 — registered explicitly, and asserted by FragmentExecutionTest. Note this is
+    // a plan-shape improvement only: linq4j 1.42.0 contains no PriorityQueue anywhere, so
+    // EnumerableLimitSort still sorts its whole input and then takes n.
+    planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
+
+    RelTraitSet desiredTraits = expandedRel.getTraitSet().replace(EnumerableConvention.INSTANCE);
+    planner.setRoot(planner.changeTraits(expandedRel, desiredTraits));
+    return planner.findBestExp();
   }
 
   @Override

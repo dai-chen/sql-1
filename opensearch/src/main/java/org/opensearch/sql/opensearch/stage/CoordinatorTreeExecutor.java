@@ -68,11 +68,22 @@ public final class CoordinatorTreeExecutor {
 
   private static List<Object[]> executeInternal(
       RelNode coordinatorTree, List<Object[]> gatheredRows, RelDataType rowType) {
-    // 1. HEP pass: merge Project/Filter into Calc so that the Enumerable convention can handle
-    //    them. EnumerableProject.implement() throws under Prefer.ARRAY, so standalone Projects
-    //    must become Calcs. This is safe even on post-optimize trees where nodes are already
-    //    EnumerableCalc — HEP rules only fire on matching Logical nodes and skip Enumerable ones.
+    // 1. HEP pass: extract windows, then merge Project/Filter into Calc so that the Enumerable
+    //    convention can handle them. EnumerableProject.implement() throws under Prefer.ARRAY, so
+    //    standalone Projects must become Calcs. This is safe even on post-optimize trees where
+    //    nodes are already EnumerableCalc — HEP rules only fire on matching Logical nodes and skip
+    //    Enumerable ones.
+    //
+    //    PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW MUST COME FIRST. The placement floor classifies a
+    //    Project holding a RexOver as NEEDS_GATHER, so window functions land here — `top N f`
+    //    arrives as Project(ROW_NUMBER) + Filter(rn <= k) + Project. Without this rule the Calc
+    //    rules below merge those into ONE LogicalCalc carrying the RexOver, and no rule can convert
+    //    such a Calc to EnumerableConvention: Volcano then fails with CannotPlanException("Missing
+    //    conversion is LogicalCalc[convention: NONE -> ENUMERABLE]"). Same ordering requirement as
+    //    the shard path in CalciteExecAggregator.optimizeFragment; regression test is
+    //    CoordinatorTreeExecutorTest.execute_window_rank_filter_keeps_only_the_top_ranked_row.
     HepProgramBuilder hepBuilder = new HepProgramBuilder();
+    hepBuilder.addRuleInstance(CoreRules.PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW);
     hepBuilder.addRuleInstance(CoreRules.FILTER_TO_CALC);
     hepBuilder.addRuleInstance(CoreRules.PROJECT_TO_CALC);
     hepBuilder.addRuleInstance(CoreRules.CALC_MERGE);

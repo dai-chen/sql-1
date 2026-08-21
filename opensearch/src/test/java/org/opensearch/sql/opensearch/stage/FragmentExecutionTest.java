@@ -6,6 +6,7 @@
 package org.opensearch.sql.opensearch.stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.TYPE_FACTORY;
 
 import com.google.common.collect.ImmutableList;
@@ -15,11 +16,16 @@ import org.apache.calcite.config.CalciteConnectionConfigImpl;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
+import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
+import org.apache.calcite.rel.RelCollation;
+import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
+import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -138,6 +144,59 @@ public class FragmentExecutionTest {
 
     // Output must be truncated to 3 rows
     assertEquals(3, result.size());
+  }
+
+  @Test
+  void execute_ordered_sort_with_fetch_returns_shard_local_top_n() {
+    // US-014: a fragment containing LogicalSort(age DESC, fetch=2) must return the 2 highest-age
+    // rows, in order, and must compile to a single EnumerableLimitSort (bounded top-N) rather
+    // than a full sort followed by a separate limit.
+    RelNode tableScan = buildTableScan();
+
+    RelCollation collation =
+        RelCollations.of(
+            new RelFieldCollation(
+                1, RelFieldCollation.Direction.DESCENDING, RelFieldCollation.NullDirection.LAST));
+    RexNode fetchLiteral =
+        REX_BUILDER.makeLiteral(2, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false);
+    RelNode sort = LogicalSort.create(tableScan, collation, null, fetchLiteral);
+
+    String base64Plan = RelFragmentCodec.serialize(sort);
+
+    List<Object[]> inputRows =
+        List.of(
+            new Object[] {1L, 25, "M"},
+            new Object[] {2L, 35, "F"},
+            new Object[] {3L, 40, "M"},
+            new Object[] {4L, 28, "F"});
+
+    List<List<Object>> result =
+        CalciteClassLoaderHelper.withCalciteClassLoader(
+            () ->
+                CalciteExecAggregator.executeFragment(
+                    base64Plan, FIELD_DESCRIPTORS, inputRows, INDEX_NAME),
+            FragmentExecutionTest.class);
+
+    assertEquals(2, result.size());
+    assertEquals(List.of(3L, 40, "M"), result.get(0));
+    assertEquals(List.of(2L, 35, "F"), result.get(1));
+
+    // The physical shape is the fused top-N: EnumerableLimitSort rather than an EnumerableLimit
+    // stacked on a full EnumerableSort. Memory is NOT bounded to n by this — linq4j 1.42.0 has no
+    // PriorityQueue, so the operator sorts its whole input and takes n. The shard's peak memory is
+    // already O(matching docs) because CalciteExecAggregator.collect() buffers every row before
+    // the fragment runs, so a bounded queue inside the fragment would save nothing. What the fused
+    // shape does guarantee is that at most n rows are SHIPPED per shard.
+    RelNode physical =
+        CalciteClassLoaderHelper.withCalciteClassLoader(
+            () ->
+                CalciteExecAggregator.optimizeFragment(
+                    RelFragmentCodec.deserialize(base64Plan, INDEX_NAME, FIELD_DESCRIPTORS)),
+            FragmentExecutionTest.class);
+    String physicalText = RelOptUtil.toString(physical);
+    assertTrue(
+        physicalText.contains("EnumerableLimitSort"),
+        "Expected EnumerableLimitSort in the physical fragment, got:\n" + physicalText);
   }
 
   @Test

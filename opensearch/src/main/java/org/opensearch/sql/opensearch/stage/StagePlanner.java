@@ -15,11 +15,13 @@ import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.Calc;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.Project;
+import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalSort;
@@ -100,7 +102,14 @@ public final class StagePlanner {
       return aggPlan;
     }
 
-    // 3b. Post-placement limit promotion (US-013): if the node directly above the cut is an
+    // 3b. Post-placement top-N promotion (US-014, rule 2): if the node directly above the cut is
+    //     an ORDERED Sort with a fetch, ship a shard-local top-N and emit TOP_N{keys, dirs, n}.
+    StagePlan topNPlan = trySplitTopN(root, cutNode, shardScan);
+    if (topNPlan != null) {
+      return topNPlan;
+    }
+
+    // 3c. Post-placement limit promotion (US-013): if the node directly above the cut is an
     //     unordered Fetch (Sort with empty collation and non-null fetch), promote the cut to
     //     include that Sort and emit LIMIT{n}. Fires only when the aggregate promotion did not.
     StagePlan limitPlan = trySplitLimit(root, cutNode, shardScan);
@@ -108,7 +117,7 @@ public final class StagePlanner {
       return limitPlan;
     }
 
-    // 3c. Shared-subtree guard (CONCAT path only): if the cut node is reachable from more than
+    // 3d. Shared-subtree guard (CONCAT path only): if the cut node is reachable from more than
     //     one parent in the DAG AND its direct parent is a join, the plan cannot be staged via
     //     CONCAT. In self-join DAGs produced by HEP interning, both join inputs reference the
     //     same subtree. Staging conflates independent data streams and some shapes throw
@@ -595,6 +604,114 @@ public final class StagePlanner {
   }
 
   /**
+   * Post-placement rewrite for rule 2 (Sort+Fetch top-N): if the node directly above the cut is an
+   * ORDERED Sort carrying a fetch, the shard fragment receives a standard {@link LogicalSort} with
+   * the same collation and fetch, so each shard ships at most n rows in sorted order, and the
+   * combine becomes {@code TOP_N{keys, dirs, n}} which merges those sorted runs on the coordinator.
+   *
+   * <p>Unlike the aggregate and limit promotions, the coordinator tree keeps the original Sort: it
+   * is the authoritative final merge. That is the classic partial/final top-N shape (Spark's {@code
+   * TakeOrderedAndProjectExec}, Trino's {@code TopNNode.Step}) and it means tier 1 is a pure volume
+   * reduction — global top-n over the union of per-shard top-n is exactly global top-n, so a
+   * shard-local top-N can never discard a row the coordinator needed.
+   *
+   * <p>NO early termination is set here, deliberately. Unless the index sort matches the requested
+   * order, every matching document must be examined before the n-th smallest key is known; stopping
+   * at n collected documents would silently truncate (Design Invariant 3). That is the whole
+   * difference between this rule and US-013's rule 4.
+   *
+   * <p>Returns null when the rule does not fire (no fetch, empty collation, non-zero offset). In
+   * that case the caller falls through to the default CONCAT path.
+   */
+  private static StagePlan trySplitTopN(
+      RelNode root, RelNode cutNode, AbstractCalciteIndexScan shardScan) {
+    RelNode parent = findDirectParent(root, cutNode);
+    if (!(parent instanceof Sort sortNode)) {
+      return null;
+    }
+    List<RelFieldCollation> fieldCollations = sortNode.getCollation().getFieldCollations();
+    // Must be ORDERED: an empty collation is an unordered Fetch and belongs to US-013's rule 4.
+    if (fieldCollations.isEmpty()) {
+      return null;
+    }
+    // Must have a fetch. A bare Sort with no fetch is not decomposable: a shard-local sort of all
+    // matching rows reduces nothing and the coordinator must sort the union anyway.
+    if (!(sortNode.fetch instanceof RexLiteral fetchLiteral)) {
+      return null;
+    }
+    int n = fetchLiteral.getValueAs(Integer.class);
+    if (n < 0) {
+      return null;
+    }
+    // A non-zero offset is refused: shipping a shard-local Fetch(n) while the coordinator applies
+    // OFFSET m would drop rows that belong in the global window. Refusing costs only the
+    // optimization — the plan still stages via CONCAT.
+    if (sortNode.offset != null) {
+      if (!(sortNode.offset instanceof RexLiteral offsetLiteral)
+          || offsetLiteral.getValueAs(Integer.class) != 0) {
+        return null;
+      }
+    }
+    if (sortNode.getInput() != cutNode) {
+      return null;
+    }
+
+    // Shared-subtree/join guard on the node that replaceSubtree is about to replace — here the
+    // cut itself, since the coordinator keeps the Sort. Same rule as the CONCAT path.
+    if (isSharedNode(root, cutNode)) {
+      RelNode sharedParent = findDirectParent(root, cutNode);
+      if (sharedParent instanceof LogicalJoin) {
+        return null;
+      }
+    }
+
+    String indexName = shardScan.getOsIndex().getIndexName().toString();
+    RelNode serializableLeaf = replaceLeafWithSerializable(cutNode, shardScan, indexName);
+    // Ship a STANDARD LogicalSort (Design Invariant 5), never the Sort subclass from the plan.
+    // Offset is dropped: it is null-or-zero here, and the coordinator's Sort owns it either way.
+    RelNode shardFragment =
+        LogicalSort.create(serializableLeaf, sortNode.getCollation(), null, sortNode.fetch);
+
+    // The coordinator tree is the same as the CONCAT path's: only the cut is replaced, so the
+    // original Sort survives above the gathered rows and performs the final ordered merge.
+    RelNode coordinatorTree = replaceSubtree(root, cutNode, buildGatheredRowsScan(cutNode));
+
+    // Same post-split validations the CONCAT path applies (step 5a/5b). Returning null rather
+    // than coordinatorOnly keeps a single coordinatorOnly decision site in split().
+    if (containsIndexScan(coordinatorTree) || treeContainsRelevanceFunction(coordinatorTree)) {
+      return null;
+    }
+
+    List<Integer> keys = new ArrayList<>(fieldCollations.size());
+    List<String> dirs = new ArrayList<>(fieldCollations.size());
+    for (RelFieldCollation fc : fieldCollations) {
+      keys.add(fc.getFieldIndex());
+      dirs.add(directionSpec(fc));
+    }
+
+    return StagePlan.staged(
+        shardFragment,
+        CombineDescriptor.topN(keys, dirs, n),
+        coordinatorTree,
+        shardScan,
+        findParentOf(root, cutNode));
+  }
+
+  /**
+   * Renders a field collation as the wire direction spec {@code <Direction>:<NullDirection>}. An
+   * UNSPECIFIED null direction is resolved to the direction's default HERE, on the coordinator,
+   * where Calcite's own {@code defaultNullDirection()} is available — the reduce side must never
+   * have to guess.
+   */
+  private static String directionSpec(RelFieldCollation fc) {
+    RelFieldCollation.NullDirection nullDirection = fc.nullDirection;
+    if (nullDirection == RelFieldCollation.NullDirection.UNSPECIFIED) {
+      nullDirection = fc.getDirection().defaultNullDirection();
+    }
+    return fc.getDirection().name() + ":" + nullDirection.name();
+  }
+
+  /**
    * Post-placement rewrite for rule 4 (limit pushdown): if the node directly above the cut is a
    * Sort with empty collation and a non-null fetch literal (an unordered Fetch), promotes the cut
    * to that Sort and emits a LIMIT{n} descriptor. The shard fragment receives a standard
@@ -613,7 +730,7 @@ public final class StagePlanner {
   private static StagePlan trySplitLimit(
       RelNode root, RelNode cutNode, AbstractCalciteIndexScan shardScan) {
     RelNode parent = findDirectParent(root, cutNode);
-    if (parent == null || !(parent instanceof org.apache.calcite.rel.core.Sort sortNode)) {
+    if (parent == null || !(parent instanceof Sort sortNode)) {
       return null;
     }
     // Must be unordered: empty collation (ordered Sort+Fetch is US-014's TOP_N)

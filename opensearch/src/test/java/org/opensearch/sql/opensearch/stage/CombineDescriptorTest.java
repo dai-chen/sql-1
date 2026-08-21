@@ -31,10 +31,11 @@ public class CombineDescriptorTest {
 
   @Test
   void top_n_describes_with_keys_dirs_n() {
+    // keys are positional column indices (int list); dirs are direction specs (string list).
     CombineDescriptor topN =
-        new CombineDescriptor(
-            CombineDescriptor.Mode.TOP_N, List.of(1, 0), List.of("age", "name"), 10);
-    assertEquals("TOP_N{keys:[age, name], dirs:[1, 0], n:10}", topN.describe());
+        CombineDescriptor.topN(List.of(1, 0), List.of("DESCENDING:LAST", "ASCENDING:FIRST"), 10);
+    assertEquals(
+        "TOP_N{keys:[1, 0], dirs:[DESCENDING:LAST, ASCENDING:FIRST], n:10}", topN.describe());
   }
 
   @Test

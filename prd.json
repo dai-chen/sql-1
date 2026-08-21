@@ -238,8 +238,8 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "DEVIATION on acceptance criterion 2 ('bounds memory with a priority queue of size N'): not implementable with standard Calcite operators, and it would buy nothing here. calcite-linq4j 1.42.0 ships NO queue class at all (verified by listing the jar), so EnumerableLimitSort sorts its whole input and then takes n. More fundamentally, CalciteExecAggregator.collect() buffers every matching row BEFORE the fragment runs, so shard peak memory is already O(matching docs) whatever the fragment does; a bounded queue inside the fragment could not lower it. Building one would need a custom physical operator, violating Design Invariant 5. What the criterion is actually protecting is honoured: NO early termination is set (earlyTerminationLimit stays null, so nothing is silently truncated) and at most n rows are SHIPPED per shard, which is the volume reduction the rule exists for. Also fixed here, and required for CalciteTopCommandIT: CoordinatorTreeExecutor's HEP program was missing PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW, so a coordinator-side rank-filter window was merged into a LogicalCalc holding a RexOver that no rule can convert to ENUMERABLE (CannotPlanException). That was the sole cause of all 9 StagedCalciteTopCommandIT failures."
     },
     {
       "id": "US-015",

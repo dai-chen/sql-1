@@ -190,6 +190,58 @@ public class CalciteExecAggregationBuilderWireTest {
     assertEquals(null, parsed.getEarlyTerminationLimit());
   }
 
+  @Test
+  void round_trip_through_stream_with_top_n_combine() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalSort")
+            .combine(
+                CombineDescriptor.topN(
+                    List.of(1, 0), List.of("DESCENDING:LAST", "ASCENDING:FIRST"), 5));
+
+    BytesStreamOutput out = new BytesStreamOutput();
+    original.writeTo(out);
+
+    StreamInput in = out.bytes().streamInput();
+    CalciteExecAggregationBuilder deserialized = new CalciteExecAggregationBuilder(in);
+
+    assertEquals(original, deserialized);
+  }
+
+  @Test
+  void round_trip_through_xcontent_with_top_n_combine() throws IOException {
+    // TOP_N is the first mode carrying BOTH an int list (keys) and a string list (dirs), so the
+    // XContent parser's field-name-driven array typing is exercised here for real: "keys" must
+    // parse as integers and "dirs" as strings, or the descriptor silently changes meaning.
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalSort")
+            .combine(
+                CombineDescriptor.topN(
+                    List.of(1, 0), List.of("DESCENDING:LAST", "ASCENDING:FIRST"), 5));
+
+    XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
+    xContentBuilder.startObject();
+    original.toXContent(xContentBuilder, null);
+    xContentBuilder.endObject();
+    xContentBuilder.flush();
+    String json = xContentBuilder.getOutputStream().toString();
+
+    XContentParser parser = XContentType.JSON.xContent().createParser(null, null, json);
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+
+    CalciteExecAggregationBuilder parsed =
+        CalciteExecAggregationBuilder.parse(parser, original.getName());
+
+    assertEquals(original, parsed);
+    assertEquals(List.of(1, 0), parsed.getCombine().getIntListParam());
+    assertEquals(
+        List.of("DESCENDING:LAST", "ASCENDING:FIRST"), parsed.getCombine().getStringListParam());
+    assertEquals(5, parsed.getCombine().getIntParam());
+  }
+
   private CalciteExecAggregationBuilder buildFullBuilder(String forcingOperator) {
     return new CalciteExecAggregationBuilder("calcite_stage")
         .plan("dGVzdA==")

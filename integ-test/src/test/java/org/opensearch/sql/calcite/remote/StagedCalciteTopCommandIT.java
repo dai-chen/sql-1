@@ -6,7 +6,6 @@
 package org.opensearch.sql.calcite.remote;
 
 import org.junit.After;
-import org.junit.Ignore;
 import org.opensearch.sql.common.setting.Settings;
 
 /**
@@ -14,10 +13,6 @@ import org.opensearch.sql.common.setting.Settings;
  * disallowing fallback. This exercises the end-to-end staged path (US-008): StagePlanner → staged
  * SearchRequest → InternalCalciteExec.reduce → CoordinatorTreeExecutor.
  */
-@Ignore(
-    "US-010 baseline: 9/9 fail under the staged posture (CannotPlanException x6, shard"
-        + " NullPointerException x3). Unblocked by US-012 (Aggregate partial/final) and US-014"
-        + " (Sort+Fetch top-N).")
 public class StagedCalciteTopCommandIT extends CalciteTopCommandIT {
 
   @Override

@@ -235,6 +235,137 @@ public class InternalCalciteExecReduceTest {
     assertEquals(resultAll.getRows(), resultBatched.getRows());
   }
 
+  // --- TOP_N reduce tests (US-014, rule 2) ---
+
+  @Test
+  void top_n_merges_sorted_runs_and_keeps_the_global_top_n() {
+    // Two shards each shipped their own ordered top-3 run on column 1 ascending. The global top-3
+    // interleaves the two runs — which is the whole point of merging rather than concatenating.
+    CombineDescriptor combine = CombineDescriptor.topN(List.of(1), List.of("ASCENDING:LAST"), 3);
+
+    InternalCalciteExec shard1 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            100L,
+            3L,
+            List.of(List.of("a", 10L), List.of("c", 30L), List.of("e", 50L)),
+            META);
+    InternalCalciteExec shard2 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            80L,
+            3L,
+            List.of(List.of("b", 20L), List.of("d", 40L), List.of("f", 60L)),
+            META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard1.reduce(List.of(shard1, shard2), null);
+
+    assertEquals(
+        List.of(List.of("a", 10L), List.of("b", 20L), List.of("c", 30L)), result.getRows());
+    assertEquals(180L, result.getRowsCollected());
+    assertEquals(3L, result.getRowsEmitted());
+  }
+
+  @Test
+  void top_n_honours_descending_direction_and_null_placement() {
+    // dirs is DESCENDING:LAST, so the largest value wins and nulls go last regardless of direction.
+    CombineDescriptor combine = CombineDescriptor.topN(List.of(0), List.of("DESCENDING:LAST"), 3);
+
+    InternalCalciteExec shard1 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            3L,
+            3L,
+            List.of(List.of(30L), List.of(10L), Arrays.asList((Object) null)),
+            META);
+    InternalCalciteExec shard2 =
+        new InternalCalciteExec(NAME, combine, 2L, 2L, List.of(List.of(40L), List.of(20L)), META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard1.reduce(List.of(shard1, shard2), null);
+
+    assertEquals(List.of(List.of(40L), List.of(30L), List.of(20L)), result.getRows());
+  }
+
+  @Test
+  void top_n_orders_by_the_second_key_when_the_first_ties() {
+    CombineDescriptor combine =
+        CombineDescriptor.topN(List.of(0, 1), List.of("ASCENDING:LAST", "DESCENDING:LAST"), 3);
+
+    InternalCalciteExec shard =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            4L,
+            4L,
+            List.of(List.of("x", 1L), List.of("x", 3L), List.of("x", 2L), List.of("y", 9L)),
+            META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard.reduce(List.of(shard), null);
+
+    assertEquals(List.of(List.of("x", 3L), List.of("x", 2L), List.of("x", 1L)), result.getRows());
+  }
+
+  /**
+   * ASSOCIATIVITY PROOF for TOP_N. reduce() runs in batches of 512 and its own output is fed back
+   * in, so the property that matters is that reducing the same input in two DIFFERENT batch
+   * groupings yields identical output. It holds because the global top-n over the union of per-run
+   * top-n is exactly the global top-n: an intermediate truncation can only discard rows that were
+   * already beaten by n others.
+   */
+  @Test
+  void top_n_is_associative_across_batch_groupings() {
+    CombineDescriptor combine = CombineDescriptor.topN(List.of(1), List.of("ASCENDING:LAST"), 4);
+
+    InternalCalciteExec s1 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            9L,
+            3L,
+            List.of(List.of("a", 5L), List.of("b", 50L), List.of("c", 90L)),
+            META);
+    InternalCalciteExec s2 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            9L,
+            3L,
+            List.of(List.of("d", 10L), List.of("e", 60L), List.of("f", 95L)),
+            META);
+    InternalCalciteExec s3 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            9L,
+            3L,
+            List.of(List.of("g", 1L), List.of("h", 70L), List.of("i", 99L)),
+            META);
+
+    InternalCalciteExec resultAll = (InternalCalciteExec) s1.reduce(List.of(s1, s2, s3), null);
+
+    InternalCalciteExec intermediate = (InternalCalciteExec) s1.reduce(List.of(s1, s2), null);
+    InternalCalciteExec resultBatched =
+        (InternalCalciteExec) intermediate.reduce(List.of(intermediate, s3), null);
+
+    // A third grouping, batching the LAST two first, to prove grouping-independence rather than
+    // just left-associativity.
+    InternalCalciteExec intermediate2 = (InternalCalciteExec) s2.reduce(List.of(s2, s3), null);
+    InternalCalciteExec resultBatched2 =
+        (InternalCalciteExec) s1.reduce(List.of(s1, intermediate2), null);
+
+    assertEquals(
+        List.of(List.of("g", 1L), List.of("a", 5L), List.of("d", 10L), List.of("b", 50L)),
+        resultAll.getRows());
+    assertEquals(resultAll.getRows(), resultBatched.getRows());
+    assertEquals(resultAll.getRows(), resultBatched2.getRows());
+    assertEquals(27L, resultAll.getRowsCollected());
+    assertEquals(27L, resultBatched.getRowsCollected());
+    assertEquals(27L, resultBatched2.getRowsCollected());
+  }
+
   // --- Wire round-trip tests (Critical B fix) ---
 
   @Test

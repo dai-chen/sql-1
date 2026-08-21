@@ -1097,6 +1097,166 @@ public class StagePlannerTest {
         "coordinatorTree must contain the division (/) produced by AGGREGATE_REDUCE_FUNCTIONS");
   }
 
+  // --- TOP_N split rule tests (US-014, rule 2) ---
+
+  @Test
+  void ordered_sort_with_fetch_ships_shard_local_top_n_and_keeps_coordinator_sort() {
+    // sort - age | head 5 shape: LogicalSort(age DESC-nulls-last, fetch=5) over Project over scan.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode project =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(0).getType(), 0),
+                REX_BUILDER.makeInputRef(scan.getRowType().getFieldList().get(1).getType(), 1)),
+            List.of("account_number", "age"));
+    RelFieldCollation ageDesc =
+        new RelFieldCollation(
+            1, RelFieldCollation.Direction.DESCENDING, RelFieldCollation.NullDirection.LAST);
+    RelNode sortFetch =
+        LogicalSort.create(
+            project,
+            RelCollations.of(ageDesc),
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(sortFetch);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.TOP_N, result.combine().getMode());
+    assertEquals("TOP_N{keys:[1], dirs:[DESCENDING:LAST], n:5}", result.combine().describe());
+
+    // The shard fragment root is a standard LogicalSort carrying the SAME collation and fetch, so
+    // each shard ships at most 5 rows already in order.
+    assertEquals(LogicalSort.class, result.shardFragment().getClass());
+    Sort shardSort = (Sort) result.shardFragment();
+    assertEquals(List.of(ageDesc), shardSort.getCollation().getFieldCollations());
+    assertNotNull(shardSort.fetch);
+    assertNull(shardSort.offset);
+
+    // Unlike LIMIT and MERGE_AGG, the coordinator KEEPS the original Sort — it is the
+    // authoritative final merge over the gathered per-shard runs.
+    assertTrue(result.coordinatorTree() instanceof Sort);
+    assertEquals(
+        List.of(ageDesc), ((Sort) result.coordinatorTree()).getCollation().getFieldCollations());
+    assertTrue(
+        RelOptUtil.toString(result.coordinatorTree()).contains("_gathered_rows"),
+        "coordinatorTree leaf must be the gathered-rows scan");
+  }
+
+  @Test
+  void top_n_resolves_unspecified_null_direction_from_the_direction_default() {
+    // A collation built without an explicit null direction carries UNSPECIFIED. The wire spec must
+    // never contain UNSPECIFIED — the reduce side has no way to resolve it.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelFieldCollation ascUnspecified =
+        new RelFieldCollation(
+            0, RelFieldCollation.Direction.ASCENDING, RelFieldCollation.NullDirection.UNSPECIFIED);
+    RelNode sortFetch =
+        LogicalSort.create(
+            scan,
+            RelCollations.of(ascUnspecified),
+            null,
+            REX_BUILDER.makeLiteral(3, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(sortFetch);
+
+    assertEquals(CombineDescriptor.Mode.TOP_N, result.combine().getMode());
+    assertEquals(
+        List.of(RelFieldCollation.Direction.ASCENDING.defaultNullDirection().name()),
+        result.combine().getStringListParam().stream().map(s -> s.split(":")[1]).toList());
+  }
+
+  @Test
+  void ordered_sort_without_fetch_is_not_promoted_to_top_n() {
+    // A bare sort reduces nothing per shard — the coordinator must sort the whole union anyway.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode sort = LogicalSort.create(scan, RelCollations.of(new RelFieldCollation(0)), null, null);
+
+    StagePlan result = StagePlanner.split(sort);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void ordered_sort_with_non_zero_offset_is_not_promoted_to_top_n() {
+    // Shipping a shard-local Fetch(n) while the coordinator applies OFFSET m would drop rows that
+    // belong in the global window.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode sortFetch =
+        LogicalSort.create(
+            scan,
+            RelCollations.of(new RelFieldCollation(0)),
+            REX_BUILDER.makeLiteral(2, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false),
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(sortFetch);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void top_n_is_not_promoted_below_an_aggregate() {
+    // The Sort sits above an Aggregate, so the Aggregate — not the Sort — is directly above the
+    // cut. MERGE_AGG must win and the Sort must stay on the coordinator.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    AggregateCall countCall =
+        AggregateCall.create(
+            SqlStdOperatorTable.COUNT,
+            false,
+            false,
+            false,
+            List.of(),
+            List.of(),
+            -1,
+            null,
+            RelCollations.EMPTY,
+            TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+            "cnt");
+    RelNode agg =
+        LogicalAggregate.create(
+            scan, List.of(), ImmutableBitSet.of(2), null, ImmutableList.of(countCall));
+    RelNode sortFetch =
+        LogicalSort.create(
+            agg,
+            RelCollations.of(new RelFieldCollation(1, RelFieldCollation.Direction.DESCENDING)),
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(sortFetch);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.MERGE_AGG, result.combine().getMode());
+  }
+
+  @Test
+  void shared_ordered_sort_fetch_under_join_dag_is_not_staged_as_top_n() {
+    // A self-join over one HEP-interned subtree: the cut is reachable from both join inputs, so
+    // replacing it with a single gathered-rows table would conflate two independent streams.
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode join =
+        LogicalJoin.create(
+            scan,
+            scan,
+            List.of(),
+            REX_BUILDER.makeLiteral(true),
+            java.util.Set.of(),
+            JoinRelType.INNER);
+    RelNode sortFetch =
+        LogicalSort.create(
+            join,
+            RelCollations.of(new RelFieldCollation(0)),
+            null,
+            REX_BUILDER.makeLiteral(5, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false));
+
+    StagePlan result = StagePlanner.split(sortFetch);
+
+    assertFalse(result.staged());
+  }
+
   // --- LIMIT split rule tests (US-013) ---
 
   @Test
@@ -1131,8 +1291,9 @@ public class StagePlannerTest {
   }
 
   @Test
-  void ordered_sort_fetch_is_not_promoted_to_limit() {
-    // sort X | head N → Sort with non-empty collation → stays CONCAT (US-014's TOP_N)
+  void ordered_sort_fetch_is_promoted_to_top_n_not_limit() {
+    // sort X | head N → Sort with non-empty collation → US-014's TOP_N, never LIMIT. The empty-vs-
+    // non-empty collation test is the whole boundary between rule 4 and rule 2.
     AbstractCalciteIndexScan scan = buildIndexScan();
     RelNode project =
         LogicalProject.create(
@@ -1151,8 +1312,11 @@ public class StagePlannerTest {
     StagePlan result = StagePlanner.split(sortFetch);
 
     assertTrue(result.staged());
-    // Must NOT be LIMIT — stays CONCAT because ordered Sort+Fetch is US-014
-    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+    assertEquals(CombineDescriptor.Mode.TOP_N, result.combine().getMode());
+    assertEquals(10, result.combine().getIntParam());
+    // Rule 2 never sets an early termination limit: the n-th smallest key is unknown until every
+    // matching document has been examined, so stopping early would silently truncate.
+    assertNull(result.earlyTerminationLimit());
   }
 
   @Test

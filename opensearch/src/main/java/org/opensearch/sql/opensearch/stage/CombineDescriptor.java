@@ -62,6 +62,19 @@ public class CombineDescriptor implements Writeable, ToXContentObject {
     return new CombineDescriptor(Mode.LIMIT, List.of(), List.of(), n);
   }
 
+  /**
+   * Factory for TOP_N (US-014): shard-local Sort+Fetch(n) + coordinator merge of the sorted runs.
+   *
+   * @param keys column indices of the sort keys, in collation order
+   * @param dirs one direction spec per key, spelled {@code <Direction>:<NullDirection>} (e.g.
+   *     {@code ASCENDING:LAST}); the null direction is always resolved to FIRST or LAST by the
+   *     coordinator before it reaches the wire, never left UNSPECIFIED
+   * @param n the fetch count
+   */
+  public static CombineDescriptor topN(List<Integer> keys, List<String> dirs, int n) {
+    return new CombineDescriptor(Mode.TOP_N, keys, dirs, n);
+  }
+
   public CombineDescriptor(StreamInput in) throws IOException {
     this.mode = in.readEnum(Mode.class);
     this.intListParam = in.readList(StreamInput::readVInt);
@@ -92,11 +105,11 @@ public class CombineDescriptor implements Writeable, ToXContentObject {
         }
         break;
       case TOP_N:
-        if (!stringListParam.isEmpty()) {
-          builder.field("keys", stringListParam);
-        }
         if (!intListParam.isEmpty()) {
-          builder.field("dirs", intListParam);
+          builder.field("keys", intListParam);
+        }
+        if (!stringListParam.isEmpty()) {
+          builder.field("dirs", stringListParam);
         }
         if (intParam > 0) {
           builder.field("n", intParam);
@@ -148,10 +161,11 @@ public class CombineDescriptor implements Writeable, ToXContentObject {
           intVal = parser.intValue();
         }
       } else if (token == XContentParser.Token.START_ARRAY) {
-        // Determine array type from field name
+        // Determine array type from field name. Integer-valued arrays are the positional column
+        // indices (groupKeys, partitionKeys, keys); everything else is a string array.
         if ("groupKeys".equals(fieldName)
             || "partitionKeys".equals(fieldName)
-            || "dirs".equals(fieldName)) {
+            || "keys".equals(fieldName)) {
           java.util.ArrayList<Integer> ints = new java.util.ArrayList<>();
           while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
             ints.add(parser.intValue());
@@ -232,13 +246,13 @@ public class CombineDescriptor implements Writeable, ToXContentObject {
         }
         break;
       case TOP_N:
-        if (!stringListParam.isEmpty()) {
-          sb.append("keys:").append(stringListParam);
+        if (!intListParam.isEmpty()) {
+          sb.append("keys:").append(intListParam);
           first = false;
         }
-        if (!intListParam.isEmpty()) {
+        if (!stringListParam.isEmpty()) {
           if (!first) sb.append(", ");
-          sb.append("dirs:").append(intListParam);
+          sb.append("dirs:").append(stringListParam);
           first = false;
         }
         if (intParam > 0) {

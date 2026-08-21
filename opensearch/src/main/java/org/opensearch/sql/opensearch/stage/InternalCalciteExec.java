@@ -8,6 +8,7 @@ package org.opensearch.sql.opensearch.stage;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -159,12 +160,108 @@ public class InternalCalciteExec extends InternalAggregation {
         return new InternalCalciteExec(
             getName(), combine, limitCollected, (long) limitRows.size(), limitRows, getMetadata());
       case TOP_N:
-        throw new UnsupportedOperationException("TOP_N reduce is implemented in US-014");
+        return reduceTopN(aggregations);
       case RANK_LIMIT:
         throw new UnsupportedOperationException("RANK_LIMIT reduce is implemented in US-015");
       default:
         throw new IllegalStateException("Unknown combine mode: " + combine.getMode());
     }
+  }
+
+  /**
+   * TOP_N reduce (US-014): merges the sorted runs shipped by each shard into one sorted run of at
+   * most n rows.
+   *
+   * <p>Associative: the union of per-run top-n contains the global top-n, so truncating an
+   * intermediate result can never discard a row the next reduce needed. reduce() runs in batches of
+   * 512 and feeds its own output back in, and the output here is another sorted run of the same
+   * wire type. Ties between rows with equal sort keys may be resolved differently across batch
+   * groupings — that is inherent to a non-stable global order and does not change the row SET,
+   * which the coordinator's own Sort then re-orders authoritatively.
+   */
+  private InternalCalciteExec reduceTopN(List<InternalAggregation> aggregations) {
+    int n = combine.getIntParam();
+    Comparator<List<Object>> comparator =
+        buildTopNComparator(combine.getIntListParam(), combine.getStringListParam());
+
+    long totalCollected = 0;
+    List<List<Object>> merged = new ArrayList<>();
+    for (InternalAggregation agg : aggregations) {
+      InternalCalciteExec other = (InternalCalciteExec) agg;
+      totalCollected += other.rowsCollected;
+      merged.addAll(other.rows);
+    }
+    merged.sort(comparator);
+    if (merged.size() > n) {
+      // Copy so the truncated list does not pin the full backing ArrayList
+      merged = new ArrayList<>(merged.subList(0, n));
+    }
+    return new InternalCalciteExec(
+        getName(), combine, totalCollected, (long) merged.size(), merged, getMetadata());
+  }
+
+  /**
+   * Builds the row comparator for TOP_N from the descriptor's key indices and direction specs. Each
+   * spec is {@code <Direction>:<NullDirection>} as written by StagePlanner; the null direction is
+   * always explicit (never UNSPECIFIED) so no default has to be re-derived here.
+   */
+  private static Comparator<List<Object>> buildTopNComparator(
+      List<Integer> keys, List<String> dirs) {
+    if (keys.size() != dirs.size()) {
+      throw new IllegalStateException(
+          "TOP_N descriptor has " + keys.size() + " keys but " + dirs.size() + " direction specs");
+    }
+    Comparator<List<Object>> result = null;
+    for (int i = 0; i < keys.size(); i++) {
+      int colIdx = keys.get(i);
+      String spec = dirs.get(i);
+      int colon = spec.indexOf(':');
+      if (colon < 0) {
+        throw new IllegalStateException("Malformed TOP_N direction spec: " + spec);
+      }
+      boolean descending = spec.substring(0, colon).contains("DESCENDING");
+      boolean nullsFirst = "FIRST".equals(spec.substring(colon + 1));
+      Comparator<List<Object>> keyComparator =
+          (a, b) -> compareCells(a.get(colIdx), b.get(colIdx), descending, nullsFirst);
+      result = result == null ? keyComparator : result.thenComparing(keyComparator);
+    }
+    // An empty key list cannot reach here (StagePlanner refuses an empty collation), but a
+    // no-op comparator is the safe reading of "no ordering" rather than an exception.
+    return result == null ? (a, b) -> 0 : result;
+  }
+
+  /** Compares two cells honouring the key's direction and null placement. */
+  private static int compareCells(Object a, Object b, boolean descending, boolean nullsFirst) {
+    if (a == null || b == null) {
+      if (a == null && b == null) {
+        return 0;
+      }
+      // Null placement is absolute: it is NOT flipped by the descending direction, because
+      // StagePlanner already resolved the collation's own nullDirection for that direction.
+      return (a == null) == nullsFirst ? -1 : 1;
+    }
+    int cmp = compareValues(a, b);
+    return descending ? -cmp : cmp;
+  }
+
+  /**
+   * Compares two non-null cell values. Numbers compare numerically across boxed types; otherwise
+   * both values must be mutually comparable instances of the same class. Anything else throws
+   * rather than degrading to an arbitrary order — a wrong order is a wrong answer.
+   */
+  @SuppressWarnings("unchecked")
+  private static int compareValues(Object a, Object b) {
+    if (a instanceof Number na && b instanceof Number nb) {
+      return compareNumbers(na, nb);
+    }
+    if (a.getClass() == b.getClass() && a instanceof Comparable<?>) {
+      return ((Comparable<Object>) a).compareTo(b);
+    }
+    throw new IllegalStateException(
+        "TOP_N cannot compare values of types "
+            + a.getClass().getName()
+            + " and "
+            + b.getClass().getName());
   }
 
   /**
@@ -261,13 +358,15 @@ public class InternalCalciteExec extends InternalAggregation {
               : java.math.BigDecimal.valueOf(b.doubleValue());
       return bdA.add(bdB);
     }
-    if (a instanceof Double || b instanceof Double) {
+    if (a instanceof Double || b instanceof Double || a instanceof Float || b instanceof Float) {
       return a.doubleValue() + b.doubleValue();
     }
     return a.longValue() + b.longValue();
   }
 
-  /** Comparison preserving BigDecimal exactness, promotes to Double when either is Double. */
+  /**
+   * Comparison preserving BigDecimal exactness, promotes to Double for any floating-point input.
+   */
   private static int compareNumbers(Number a, Number b) {
     if (a instanceof java.math.BigDecimal || b instanceof java.math.BigDecimal) {
       java.math.BigDecimal bdA =
@@ -280,7 +379,7 @@ public class InternalCalciteExec extends InternalAggregation {
               : java.math.BigDecimal.valueOf(b.doubleValue());
       return bdA.compareTo(bdB);
     }
-    if (a instanceof Double || b instanceof Double) {
+    if (a instanceof Double || b instanceof Double || a instanceof Float || b instanceof Float) {
       return Double.compare(a.doubleValue(), b.doubleValue());
     }
     return Long.compare(a.longValue(), b.longValue());
@@ -374,5 +473,15 @@ public class InternalCalciteExec extends InternalAggregation {
   /** Returns the gathered rows from shard execution. */
   public List<List<Object>> getRows() {
     return rows;
+  }
+
+  /** Rows buffered by the shard before the fragment ran, summed across reduced aggregations. */
+  public long getRowsCollected() {
+    return rowsCollected;
+  }
+
+  /** Rows this aggregation carries, i.e. the fragment/combine output size. */
+  public long getRowsEmitted() {
+    return rowsEmitted;
   }
 }
