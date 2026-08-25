@@ -55,6 +55,7 @@ import org.opensearch.search.aggregations.InternalAggregation;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
+import org.opensearch.sql.calcite.plan.rule.PPLDedupConvertRule;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper.OpenSearchRelRunners;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
@@ -440,10 +441,21 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
    * they both call this method on the same pre-optimization RelNode parameter.
    */
   private static StagePlan splitIfStaged(RelNode rel) {
-    // Phase 0: decompose AVG/STDDEV/VAR into SUM/COUNT so their components are independently
-    // splittable. The transformed rel is used ONLY for the staged split; when staged()==false the
-    // original rel flows to the JDBC path unchanged (caller discards the StagePlan).
+    // Phase 0: normalize the plan into the shapes the split rules match, BEFORE splitting. The
+    // transformed rel is used ONLY for the staged split; when staged()==false the original rel
+    // flows to the JDBC path unchanged (caller discards the StagePlan).
+    //
+    //  - DEDUP_CONVERT_RULE lowers the custom LogicalDedup into the standard window + rank-filter
+    //    shape that rule 3 matches. This is REQUIRED, not an optimization: on the EXECUTE path the
+    //    rel still carries LogicalDedup here (it is otherwise lowered later, inside the JDBC
+    //    runner's own planning), so without this rule the rank chain does not exist yet, the
+    //    generic floor classifies LogicalDedup as NEEDS_GATHER, and every dedup query gathers all
+    //    matching documents. It also makes explain and execute agree — the two entry points do NOT
+    //    receive equally optimized rels, so a rule that fires for one may not fire for the other.
+    //  - AGGREGATE_REDUCE_FUNCTIONS decomposes AVG/STDDEV/VAR into SUM/COUNT so their components
+    //    are independently splittable.
     HepProgramBuilder hepBuilder = new HepProgramBuilder();
+    hepBuilder.addRuleInstance(PPLDedupConvertRule.DEDUP_CONVERT_RULE);
     hepBuilder.addRuleInstance(CoreRules.AGGREGATE_REDUCE_FUNCTIONS);
     HepPlanner hepPlanner = new HepPlanner(hepBuilder.build());
     hepPlanner.setRoot(rel);

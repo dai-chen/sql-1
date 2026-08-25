@@ -46,12 +46,14 @@ import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexFieldCollation;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexProgramBuilder;
 import org.apache.calcite.rex.RexWindowBounds;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.impl.AbstractSchema;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.tools.Frameworks;
@@ -1790,5 +1792,291 @@ public class StagePlannerTest {
     // query_string which has no enumerable implementor.
     assertFalse(
         result.staged(), "Plan must be coordinatorOnly — relevance functions need JDBC path");
+  }
+
+  // --- Rule 3: window rank-filter partial (US-015) ---
+
+  /**
+   * The PPL {@code dedup} shape: Project(rank=ROW_NUMBER OVER (PARTITION BY gender)) + Filter(rank
+   * <= 1) + Project(drops rank), with a {@code fields}-style Project on top. The whole rank chain
+   * must move into the shard fragment so each shard ships at most one row per gender.
+   */
+  @Test
+  void dedup_shape_promotes_to_rank_limit() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode root = buildRankChain(scan, SqlStdOperatorTable.ROW_NUMBER, 1, false, true, true);
+
+    StagePlan result = StagePlanner.split(root);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.RANK_LIMIT, result.combine().getMode());
+    // gender is input index 2 and survives both projections at position 2.
+    assertEquals(List.of(2), result.combine().getIntListParam());
+    assertEquals(1, result.combine().getIntParam());
+    assertEquals("ROW_NUMBER", result.combine().getRankFunction());
+    assertEquals(List.of(), result.combine().getStringListParam());
+    // ROW_NUMBER is the default function, so explain renders the design doc's shape verbatim.
+    assertEquals("RANK_LIMIT{partitionKeys:[2], k:1}", result.combine().describe());
+  }
+
+  /**
+   * The window and its filter must be INSIDE the fragment, and the shipped row must not carry the
+   * rank column — a shard-local rank is meaningless to a coordinator that re-ranks over the union.
+   */
+  @Test
+  void rank_limit_ships_the_window_and_drops_the_rank_column() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode root = buildRankChain(scan, SqlStdOperatorTable.ROW_NUMBER, 1, false, true, true);
+
+    StagePlan result = StagePlanner.split(root);
+
+    String fragment = RelOptUtil.toString(result.shardFragment());
+    assertTrue(fragment.contains("ROW_NUMBER()"), fragment);
+    assertTrue(fragment.contains("LogicalFilter(condition=[<=($3, 1)])"), fragment);
+    assertEquals(
+        List.of("account_number", "age", "gender"),
+        result.shardFragment().getRowType().getFieldNames());
+    // The coordinator keeps only what sat above the rank chain, over gathered rows.
+    String coordinator = RelOptUtil.toString(result.coordinatorTree());
+    assertTrue(coordinator.contains("_gathered_rows"), coordinator);
+    assertFalse(coordinator.contains("ROW_NUMBER()"), coordinator);
+    // A window needs every matching document, so doc collection must NOT stop early.
+    assertNull(result.earlyTerminationLimit());
+  }
+
+  /**
+   * When the rank column is still projected, the shard would ship a meaningless local rank. Refuse
+   * and fall through to CONCAT rather than shipping it.
+   */
+  @Test
+  void rank_limit_refuses_when_the_rank_column_is_still_shipped() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode root = buildRankChain(scan, SqlStdOperatorTable.ROW_NUMBER, 1, false, false, true);
+
+    StagePlan result = StagePlanner.split(root);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  /**
+   * {@code rank = 1} is equivalent to {@code rank <= 1} and fires; {@code rank = 2} does not,
+   * because a row whose GLOBAL rank is 2 can have local rank 1 and would be dropped by the shard.
+   */
+  @Test
+  void rank_limit_accepts_equals_one_but_refuses_equals_two() {
+    AbstractCalciteIndexScan scanOne = buildIndexScan();
+    StagePlan one =
+        StagePlanner.split(
+            buildRankChainWithOp(
+                scanOne, SqlStdOperatorTable.ROW_NUMBER, SqlStdOperatorTable.EQUALS, 1, false));
+    assertEquals(CombineDescriptor.Mode.RANK_LIMIT, one.combine().getMode());
+    assertEquals(1, one.combine().getIntParam());
+
+    AbstractCalciteIndexScan scanTwo = buildIndexScan();
+    StagePlan two =
+        StagePlanner.split(
+            buildRankChainWithOp(
+                scanTwo, SqlStdOperatorTable.ROW_NUMBER, SqlStdOperatorTable.EQUALS, 2, false));
+    assertEquals(CombineDescriptor.Mode.CONCAT, two.combine().getMode());
+  }
+
+  /** {@code rank < 3} is normalized to the inclusive bound 2. */
+  @Test
+  void rank_limit_normalizes_strict_less_than_to_an_inclusive_bound() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    StagePlan result =
+        StagePlanner.split(
+            buildRankChainWithOp(
+                scan, SqlStdOperatorTable.ROW_NUMBER, SqlStdOperatorTable.LESS_THAN, 3, false));
+
+    assertEquals(CombineDescriptor.Mode.RANK_LIMIT, result.combine().getMode());
+    assertEquals(2, result.combine().getIntParam());
+  }
+
+  /**
+   * Order keys are re-expressed in the SHIPPED row's index space, with an explicit null direction.
+   */
+  @Test
+  void rank_limit_maps_order_keys_into_the_shipped_row() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode root = buildRankChain(scan, SqlStdOperatorTable.RANK, 2, true, true, true);
+
+    StagePlan result = StagePlanner.split(root);
+
+    assertEquals(CombineDescriptor.Mode.RANK_LIMIT, result.combine().getMode());
+    // age is input index 1 and survives both projections at position 1.
+    assertEquals(List.of("1:ASCENDING:LAST"), result.combine().getStringListParam());
+    assertEquals("RANK", result.combine().getRankFunction());
+    // A non-default ranking function IS rendered, so it can never hide in explain output.
+    assertEquals(
+        "RANK_LIMIT{partitionKeys:[2], orderKeys:[1:ASCENDING:LAST], k:2, rankFunction:RANK}",
+        result.combine().describe());
+  }
+
+  /**
+   * An unordered RANK window ties every row at rank 1, so neither correctness argument applies and
+   * the rule must not fire.
+   */
+  @Test
+  void rank_limit_refuses_an_unordered_rank_window() {
+    AbstractCalciteIndexScan scan = buildIndexScan();
+    RelNode root = buildRankChain(scan, SqlStdOperatorTable.RANK, 1, false, true, true);
+
+    StagePlan result = StagePlanner.split(root);
+
+    assertTrue(result.staged());
+    assertEquals(CombineDescriptor.Mode.CONCAT, result.combine().getMode());
+  }
+
+  @Test
+  void rank_limit_justification_is_nondeterminism_only_for_an_unordered_row_number() {
+    assertEquals(
+        StagePlanner.RankLimitJustification.NONDETERMINISM,
+        StagePlanner.rankLimitJustification(SqlKind.ROW_NUMBER, false));
+    assertNull(StagePlanner.rankLimitJustification(SqlKind.RANK, false));
+    assertNull(StagePlanner.rankLimitJustification(SqlKind.DENSE_RANK, false));
+  }
+
+  @Test
+  void rank_limit_justification_is_monotonicity_for_any_ordered_ranking_function() {
+    assertEquals(
+        StagePlanner.RankLimitJustification.RANK_MONOTONICITY,
+        StagePlanner.rankLimitJustification(SqlKind.ROW_NUMBER, true));
+    assertEquals(
+        StagePlanner.RankLimitJustification.RANK_MONOTONICITY,
+        StagePlanner.rankLimitJustification(SqlKind.RANK, true));
+    assertEquals(
+        StagePlanner.RankLimitJustification.RANK_MONOTONICITY,
+        StagePlanner.rankLimitJustification(SqlKind.DENSE_RANK, true));
+    // Not a ranking function at all — no justification exists.
+    assertNull(StagePlanner.rankLimitJustification(SqlKind.SUM, true));
+  }
+
+  @Test
+  void normalize_rank_bound_rejects_predicates_that_are_not_upper_bounds() {
+    RelDataType bigint = TYPE_FAC.createSqlType(SqlTypeName.BIGINT);
+    RexNode rankRef = REX_BUILDER.makeInputRef(bigint, 3);
+    RexNode two = REX_BUILDER.makeLiteral(2, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false);
+
+    assertEquals(
+        2,
+        StagePlanner.normalizeRankBound(
+            REX_BUILDER.makeCall(SqlStdOperatorTable.LESS_THAN_OR_EQUAL, rankRef, two), 3));
+    // A lower bound gives the shard no licence to drop anything.
+    assertNull(
+        StagePlanner.normalizeRankBound(
+            REX_BUILDER.makeCall(SqlStdOperatorTable.GREATER_THAN, rankRef, two), 3));
+    // A bound on a DIFFERENT column is not a rank bound.
+    assertNull(
+        StagePlanner.normalizeRankBound(
+            REX_BUILDER.makeCall(SqlStdOperatorTable.LESS_THAN_OR_EQUAL, rankRef, two), 1));
+    // rank < 1 selects nothing; refuse rather than ship an empty-by-construction fragment.
+    RexNode one = REX_BUILDER.makeLiteral(1, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false);
+    assertNull(
+        StagePlanner.normalizeRankBound(
+            REX_BUILDER.makeCall(SqlStdOperatorTable.LESS_THAN, rankRef, one), 3));
+  }
+
+  /**
+   * Builds the dedup-shaped rank chain over a scan whose row type is (account_number, age, gender).
+   *
+   * @param rankOp the ranking function
+   * @param k the literal in the rank filter, compared with {@code <=}
+   * @param ordered whether the window carries {@code ORDER BY age}
+   * @param dropRank whether the Project above the filter drops the rank column
+   * @param withOuterProject whether a {@code fields}-style Project sits on top
+   */
+  private RelNode buildRankChain(
+      AbstractCalciteIndexScan scan,
+      org.apache.calcite.sql.SqlAggFunction rankOp,
+      int k,
+      boolean ordered,
+      boolean dropRank,
+      boolean withOuterProject) {
+    return buildRankChain(
+        scan,
+        rankOp,
+        SqlStdOperatorTable.LESS_THAN_OR_EQUAL,
+        k,
+        ordered,
+        dropRank,
+        withOuterProject);
+  }
+
+  private RelNode buildRankChainWithOp(
+      AbstractCalciteIndexScan scan,
+      org.apache.calcite.sql.SqlAggFunction rankOp,
+      org.apache.calcite.sql.SqlOperator filterOp,
+      int k,
+      boolean ordered) {
+    return buildRankChain(scan, rankOp, filterOp, k, ordered, true, true);
+  }
+
+  private RelNode buildRankChain(
+      AbstractCalciteIndexScan scan,
+      org.apache.calcite.sql.SqlAggFunction rankOp,
+      org.apache.calcite.sql.SqlOperator filterOp,
+      int k,
+      boolean ordered,
+      boolean dropRank,
+      boolean withOuterProject) {
+    List<org.apache.calcite.rel.type.RelDataTypeField> fields = scan.getRowType().getFieldList();
+    RexNode accountRef = REX_BUILDER.makeInputRef(fields.get(0).getType(), 0);
+    RexNode ageRef = REX_BUILDER.makeInputRef(fields.get(1).getType(), 1);
+    RexNode genderRef = REX_BUILDER.makeInputRef(fields.get(2).getType(), 2);
+
+    RexNode rank =
+        REX_BUILDER.makeOver(
+            TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+            rankOp,
+            List.of(),
+            List.of(genderRef),
+            ordered
+                ? ImmutableList.of(new RexFieldCollation(ageRef, java.util.Set.of()))
+                : ImmutableList.of(),
+            RexWindowBounds.UNBOUNDED_PRECEDING,
+            RexWindowBounds.CURRENT_ROW,
+            true,
+            true,
+            false,
+            false);
+    RelNode windowProject =
+        LogicalProject.create(
+            scan,
+            List.of(),
+            List.of(accountRef, ageRef, genderRef, rank),
+            List.of("account_number", "age", "gender", "_row_number_dedup_"));
+
+    RelDataType rankType = windowProject.getRowType().getFieldList().get(3).getType();
+    RelNode rankFilter =
+        LogicalFilter.create(
+            windowProject,
+            REX_BUILDER.makeCall(
+                filterOp,
+                REX_BUILDER.makeInputRef(rankType, 3),
+                REX_BUILDER.makeLiteral(k, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false)));
+
+    List<RexNode> dropped =
+        new java.util.ArrayList<>(
+            List.of(
+                REX_BUILDER.makeInputRef(fields.get(0).getType(), 0),
+                REX_BUILDER.makeInputRef(fields.get(1).getType(), 1),
+                REX_BUILDER.makeInputRef(fields.get(2).getType(), 2)));
+    List<String> droppedNames =
+        new java.util.ArrayList<>(List.of("account_number", "age", "gender"));
+    if (!dropRank) {
+      dropped.add(REX_BUILDER.makeInputRef(rankType, 3));
+      droppedNames.add("_row_number_dedup_");
+    }
+    RelNode dropProject = LogicalProject.create(rankFilter, List.of(), dropped, droppedNames);
+    if (!withOuterProject) {
+      return dropProject;
+    }
+    return LogicalProject.create(
+        dropProject,
+        List.of(),
+        List.of(REX_BUILDER.makeInputRef(fields.get(2).getType(), 2)),
+        List.of("gender"));
   }
 }

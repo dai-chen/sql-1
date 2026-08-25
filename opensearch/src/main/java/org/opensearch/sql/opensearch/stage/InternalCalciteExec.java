@@ -162,7 +162,7 @@ public class InternalCalciteExec extends InternalAggregation {
       case TOP_N:
         return reduceTopN(aggregations);
       case RANK_LIMIT:
-        throw new UnsupportedOperationException("RANK_LIMIT reduce is implemented in US-015");
+        return reduceRankLimit(aggregations);
       default:
         throw new IllegalStateException("Unknown combine mode: " + combine.getMode());
     }
@@ -262,6 +262,127 @@ public class InternalCalciteExec extends InternalAggregation {
             + a.getClass().getName()
             + " and "
             + b.getClass().getName());
+  }
+
+  /**
+   * RANK_LIMIT reduce (US-015, rule 3): recomputes rank over the union of shard outputs and
+   * re-applies the inclusive bound k. Nothing here reads a shipped rank column — the shard dropped
+   * it because a shard-local rank is meaningless once rows from several shards are combined — so
+   * the rank is derived afresh from the partition and order key values.
+   *
+   * <p>Associative. Every row this method discards had a rank above k within a SUBSET of the
+   * partition, and rank is monotone in the row set, so it could not have qualified over the full
+   * set either; feeding the output back in therefore cannot change the answer. Ranks are
+   * non-decreasing along the sorted run, which is why the scan can stop at the first row past k.
+   *
+   * <p>For the unordered ROW_NUMBER case the answer is not unique — that is the nondeterminism the
+   * split rule relies on — but this implementation is still deterministic across batch groupings,
+   * because each reduce keeps a PREFIX of the concatenation and a prefix of a prefix is the same
+   * prefix.
+   */
+  private InternalCalciteExec reduceRankLimit(List<InternalAggregation> aggregations) {
+    int k = combine.getIntParam();
+    List<Integer> partitionKeys = combine.getIntListParam();
+    List<OrderKeySpec> orderKeys = OrderKeySpec.parseAll(combine.getStringListParam());
+    RankFunction rankFunction = RankFunction.valueOf(combine.getRankFunction());
+
+    long totalCollected = 0;
+    Map<GroupKey, List<List<Object>>> partitions = new LinkedHashMap<>();
+    for (InternalAggregation agg : aggregations) {
+      InternalCalciteExec other = (InternalCalciteExec) agg;
+      totalCollected += other.rowsCollected;
+      for (List<Object> row : other.rows) {
+        Object[] keyArr = new Object[partitionKeys.size()];
+        for (int i = 0; i < partitionKeys.size(); i++) {
+          keyArr[i] = row.get(partitionKeys.get(i));
+        }
+        partitions.computeIfAbsent(new GroupKey(keyArr), key -> new ArrayList<>()).add(row);
+      }
+    }
+
+    Comparator<List<Object>> order = buildOrderComparator(orderKeys);
+    List<List<Object>> result = new ArrayList<>();
+    for (List<List<Object>> rows : partitions.values()) {
+      if (order != null) {
+        // List.sort is stable, so rows with equal order keys keep their encounter order.
+        rows.sort(order);
+      }
+      retainByRank(rows, k, rankFunction, order, result);
+    }
+    return new InternalCalciteExec(
+        getName(), combine, totalCollected, (long) result.size(), result, getMetadata());
+  }
+
+  /**
+   * Appends the rows of one already-sorted partition whose recomputed rank is at most k. The three
+   * ranking functions differ only in how a tie advances the rank: ROW_NUMBER never ties, RANK jumps
+   * to the row's ordinal, DENSE_RANK advances by one per distinct order key.
+   */
+  private static void retainByRank(
+      List<List<Object>> sorted,
+      int k,
+      RankFunction rankFunction,
+      Comparator<List<Object>> order,
+      List<List<Object>> out) {
+    int rank = 0;
+    for (int i = 0; i < sorted.size(); i++) {
+      List<Object> row = sorted.get(i);
+      boolean tie = i > 0 && order != null && order.compare(sorted.get(i - 1), row) == 0;
+      rank =
+          switch (rankFunction) {
+            case ROW_NUMBER -> i + 1;
+            case RANK -> tie ? rank : i + 1;
+            case DENSE_RANK -> tie ? rank : rank + 1;
+          };
+      if (rank > k) {
+        // Ranks never decrease along a sorted run, so no later row can qualify.
+        return;
+      }
+      out.add(row);
+    }
+  }
+
+  /** The ranking functions rule 3 can decompose. */
+  private enum RankFunction {
+    ROW_NUMBER,
+    RANK,
+    DENSE_RANK
+  }
+
+  /**
+   * One parsed RANK_LIMIT order key: {@code <colIdx>:<Direction>:<NullDirection>} as written by
+   * StagePlanner. The null direction is always explicit on the wire, so no default is re-derived
+   * here.
+   */
+  private record OrderKeySpec(int colIdx, boolean descending, boolean nullsFirst) {
+    static List<OrderKeySpec> parseAll(List<String> specs) {
+      List<OrderKeySpec> parsed = new ArrayList<>(specs.size());
+      for (String spec : specs) {
+        String[] parts = spec.split(":", -1);
+        if (parts.length != 3) {
+          throw new IllegalStateException("Malformed RANK_LIMIT order key spec: " + spec);
+        }
+        parsed.add(
+            new OrderKeySpec(
+                Integer.parseInt(parts[0]),
+                parts[1].contains("DESCENDING"),
+                "FIRST".equals(parts[2])));
+      }
+      return parsed;
+    }
+  }
+
+  /** Builds the intra-partition order comparator, or null for an unordered window. */
+  private static Comparator<List<Object>> buildOrderComparator(List<OrderKeySpec> orderKeys) {
+    Comparator<List<Object>> result = null;
+    for (OrderKeySpec key : orderKeys) {
+      Comparator<List<Object>> keyComparator =
+          (a, b) ->
+              compareCells(
+                  a.get(key.colIdx()), b.get(key.colIdx()), key.descending(), key.nullsFirst());
+      result = result == null ? keyComparator : result.thenComparing(keyComparator);
+    }
+    return result;
   }
 
   /**

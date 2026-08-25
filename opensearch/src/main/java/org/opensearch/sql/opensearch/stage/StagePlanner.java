@@ -29,6 +29,8 @@ import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexFieldCollation;
+import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexOver;
@@ -115,6 +117,17 @@ public final class StagePlanner {
     StagePlan limitPlan = trySplitLimit(root, cutNode, shardScan);
     if (limitPlan != null) {
       return limitPlan;
+    }
+
+    // 3c-bis. Post-placement window rank-limit promotion (US-015, rule 3): if the chain directly
+    //     above the cut is Project(rank=ROW_NUMBER/RANK/DENSE_RANK OVER ...) + Filter(rank <= k) +
+    //     Project(drops rank), promote the cut to that whole chain and emit RANK_LIMIT. The
+    //     promotion order relative to 3a/3b/3c is free rather than load-bearing: each promotion
+    //     tests a DIFFERENT shape for the node directly above the cut (Aggregate, ordered Sort,
+    //     unordered Sort, window Project respectively), so at most one can match.
+    StagePlan rankLimitPlan = trySplitRankLimit(root, cutNode, shardScan);
+    if (rankLimitPlan != null) {
+      return rankLimitPlan;
     }
 
     // 3d. Shared-subtree guard (CONCAT path only): if the cut node is reachable from more than
@@ -855,6 +868,256 @@ public final class StagePlanner {
       current = inputs.get(0);
     }
     return n;
+  }
+
+  /** Ranking SqlKinds whose shard-local rank filter rule 3 can decompose. */
+  private static final Set<SqlKind> RANK_KINDS =
+      Set.of(SqlKind.ROW_NUMBER, SqlKind.RANK, SqlKind.DENSE_RANK);
+
+  /**
+   * The two correctness arguments that make a shard-local rank filter legal. Exactly one must hold
+   * for rule 3 to fire; the rule does not fire when neither does.
+   */
+  enum RankLimitJustification {
+    /**
+     * The window has no ORDER BY, so which row receives which ROW_NUMBER is unconstrained: any one
+     * row per partition is a valid answer, and composing a per-shard choice with a coordinator
+     * choice yields another valid answer.
+     */
+    NONDETERMINISM,
+    /**
+     * The window has an ORDER BY, so rank is monotone in the row set: adding rows to a partition
+     * can only push a row's rank higher. A row disqualified by the shard-local filter is therefore
+     * disqualified globally, and the union of per-shard survivors contains the global answer.
+     */
+    RANK_MONOTONICITY
+  }
+
+  /**
+   * Returns the correctness justification for a shard-local rank filter, or null when rule 3 must
+   * not fire. Package-private so a unit test can assert WHICH argument applies, rather than
+   * inferring it from whether the split happened.
+   *
+   * <p>An unordered RANK or DENSE_RANK window is deliberately refused: every row ties at rank 1, so
+   * neither argument applies — nondeterminism is a ROW_NUMBER-only property, and there is no order
+   * for monotonicity to be monotone in.
+   */
+  static RankLimitJustification rankLimitJustification(SqlKind rankKind, boolean hasOrderBy) {
+    if (hasOrderBy) {
+      return RANK_KINDS.contains(rankKind) ? RankLimitJustification.RANK_MONOTONICITY : null;
+    }
+    return rankKind == SqlKind.ROW_NUMBER ? RankLimitJustification.NONDETERMINISM : null;
+  }
+
+  /**
+   * Normalizes a rank predicate on column {@code rankIdx} to an INCLUSIVE upper bound, or returns
+   * null when the predicate is not a decomposable rank limit.
+   *
+   * <p>{@code rank = k} is decomposable only for k == 1. For k &gt; 1 a row whose GLOBAL rank is k
+   * can have a local rank below k, so the shard-local filter would drop a row the coordinator
+   * needed: monotonicity bounds a global rank from below, which rescues an upper-bounded predicate
+   * only. {@code rank = 1} is exempt because it is equivalent to {@code rank <= 1}.
+   */
+  static Integer normalizeRankBound(RexNode condition, int rankIdx) {
+    if (!(condition instanceof RexCall call)) {
+      return null;
+    }
+    List<RexNode> operands = call.getOperands();
+    if (operands.size() != 2) {
+      return null;
+    }
+    if (!(operands.get(0) instanceof RexInputRef ref) || ref.getIndex() != rankIdx) {
+      return null;
+    }
+    if (!(operands.get(1) instanceof RexLiteral literal)) {
+      return null;
+    }
+    Integer k = literal.getValueAs(Integer.class);
+    if (k == null) {
+      return null;
+    }
+    int bound =
+        switch (call.getKind()) {
+          case LESS_THAN_OR_EQUAL -> k;
+          case LESS_THAN -> k - 1;
+          case EQUALS -> (k == 1) ? 1 : -1;
+          default -> -1;
+        };
+    return bound >= 1 ? bound : null;
+  }
+
+  /**
+   * Post-placement rewrite for rule 3 (window rank-filter partial). Matches the chain that PPL
+   * {@code dedup} lowers to, directly above the cut:
+   *
+   * <pre>
+   *   Project      (drops the rank column)
+   *     Filter     (rank &lt;= k)
+   *       Project  (rank = ROW_NUMBER/RANK/DENSE_RANK OVER (PARTITION BY ... [ORDER BY ...]))
+   *         cut
+   * </pre>
+   *
+   * <p>The whole chain is promoted into the shard fragment, so each shard evaluates the window and
+   * its filter locally and ships at most k rows per partition instead of every matching document.
+   * The coordinator gets {@code RANK_LIMIT{partitionKeys, orderKeys, k}} and RECOMPUTES rank over
+   * the union: shard-local rank values are meaningless to it, which is exactly why the shipped row
+   * must not carry the rank column.
+   *
+   * <p>Returns null when the rule does not fire, in which case the caller falls through to the
+   * CONCAT path — the plan still runs, with the window on the coordinator (Design Invariant 1).
+   */
+  private static StagePlan trySplitRankLimit(
+      RelNode root, RelNode cutNode, AbstractCalciteIndexScan shardScan) {
+    // --- Project holding exactly one bare window function, directly above the cut ---
+    if (!(findDirectParent(root, cutNode) instanceof Project windowProject)
+        || windowProject.getInput() != cutNode) {
+      return null;
+    }
+    int rankIdx = -1;
+    RexOver over = null;
+    List<RexNode> windowExprs = windowProject.getProjects();
+    for (int i = 0; i < windowExprs.size(); i++) {
+      RexNode expr = windowExprs.get(i);
+      if (expr instanceof RexOver candidate) {
+        if (over != null) {
+          return null; // more than one window function: no single rank column to bound
+        }
+        over = candidate;
+        rankIdx = i;
+      } else if (RexOver.containsOver(List.of(expr), null)) {
+        return null; // a window function nested inside a larger expression
+      }
+    }
+    if (over == null || over.isDistinct()) {
+      return null;
+    }
+    SqlKind rankKind = over.getAggOperator().getKind();
+    if (!RANK_KINDS.contains(rankKind)) {
+      return null;
+    }
+
+    // --- Filter bounding that rank column, directly above the window Project ---
+    if (!(findDirectParent(root, windowProject) instanceof Filter rankFilter)
+        || rankFilter.getInput() != windowProject) {
+      return null;
+    }
+    Integer k = normalizeRankBound(rankFilter.getCondition(), rankIdx);
+    if (k == null) {
+      return null;
+    }
+
+    // --- Project dropping the rank column, directly above the Filter ---
+    // PPLDedupConvertRule always emits this projectExcept, so requiring it costs nothing for dedup
+    // and guarantees the shipped row carries no meaningless shard-local rank.
+    if (!(findDirectParent(root, rankFilter) instanceof Project dropProject)
+        || dropProject.getInput() != rankFilter) {
+      return null;
+    }
+    for (RexNode expr : dropProject.getProjects()) {
+      if (!(expr instanceof RexInputRef ref) || ref.getIndex() == rankIdx) {
+        return null;
+      }
+    }
+
+    // --- Partition and order keys must be plain refs that SURVIVE into the shipped row ---
+    // The coordinator re-groups and re-ranks from the shipped values, so a key it cannot see makes
+    // the recomputation impossible.
+    List<Integer> partitionKeys = new ArrayList<>();
+    for (RexNode key : over.getWindow().partitionKeys) {
+      if (!(key instanceof RexInputRef ref)) {
+        return null;
+      }
+      int shipped = shippedPosition(windowProject, dropProject, ref.getIndex());
+      if (shipped < 0) {
+        return null;
+      }
+      partitionKeys.add(shipped);
+    }
+    if (partitionKeys.isEmpty()) {
+      return null; // a single global partition is a plain limit, not this rule's shape
+    }
+    List<String> orderKeys = new ArrayList<>();
+    for (RexFieldCollation fc : over.getWindow().orderKeys) {
+      if (!(fc.left instanceof RexInputRef ref)) {
+        return null;
+      }
+      int shipped = shippedPosition(windowProject, dropProject, ref.getIndex());
+      if (shipped < 0) {
+        return null;
+      }
+      RelFieldCollation.Direction direction = fc.getDirection();
+      RelFieldCollation.NullDirection nullDirection = fc.getNullDirection();
+      if (nullDirection == RelFieldCollation.NullDirection.UNSPECIFIED) {
+        nullDirection = direction.defaultNullDirection();
+      }
+      orderKeys.add(shipped + ":" + direction.name() + ":" + nullDirection.name());
+    }
+
+    // --- Assert the correctness justification; refuse when neither argument holds ---
+    if (rankLimitJustification(rankKind, !orderKeys.isEmpty()) == null) {
+      return null;
+    }
+
+    // --- Re-apply every per-node guard the placement floor applies ---
+    // A promotion moves nodes INTO the fragment that the floor had classified as NEEDS_GATHER, so
+    // it must re-check them itself. The window guard is deliberately NOT re-applied — shipping the
+    // window is this rule's whole purpose — but a relevance call has no shard-side enumerable
+    // implementor and a non-round-trippable enum literal cannot survive the RelJson codec.
+    for (RelNode promoted : List.of(windowProject, rankFilter, dropProject)) {
+      if (containsRelevanceFunction(promoted) || containsNonRoundTrippableEnum(promoted)) {
+        return null;
+      }
+    }
+
+    // --- Shared-subtree/join guard on the node replaceSubtree is about to replace ---
+    if (dropProject != root
+        && isSharedNode(root, dropProject)
+        && findDirectParent(root, dropProject) instanceof LogicalJoin) {
+      return null;
+    }
+
+    String indexName = shardScan.getOsIndex().getIndexName().toString();
+    RelNode shardFragment = replaceLeafWithSerializable(dropProject, shardScan, indexName);
+    RelNode coordinatorTree = replaceSubtree(root, dropProject, buildGatheredRowsScan(dropProject));
+
+    // Same post-split validations the CONCAT path applies (step 5a/5b). Returning null rather than
+    // coordinatorOnly keeps a single coordinatorOnly decision site in split().
+    if (containsIndexScan(coordinatorTree) || treeContainsRelevanceFunction(coordinatorTree)) {
+      return null;
+    }
+
+    // No earlyTerminationLimit: a window must see every matching document in the partition before
+    // any rank is known, so stopping doc collection early would silently truncate (Invariant 3).
+    return StagePlan.staged(
+        shardFragment,
+        CombineDescriptor.rankLimit(partitionKeys, orderKeys, k, rankKind.name()),
+        coordinatorTree,
+        shardScan,
+        (dropProject == root) ? null : findParentOf(root, dropProject));
+  }
+
+  /**
+   * Maps a field index from {@code windowProject}'s INPUT space to its position in {@code
+   * dropProject}'s output (the shipped row), or -1 when the field does not survive both projections
+   * as a plain reference.
+   */
+  private static int shippedPosition(Project windowProject, Project dropProject, int inputIndex) {
+    int afterWindow = outputPositionOfInputRef(windowProject, inputIndex);
+    if (afterWindow < 0) {
+      return -1;
+    }
+    return outputPositionOfInputRef(dropProject, afterWindow);
+  }
+
+  /** Returns the output position at which the project emits a bare ref to {@code inputIndex}. */
+  private static int outputPositionOfInputRef(Project project, int inputIndex) {
+    List<RexNode> projects = project.getProjects();
+    for (int i = 0; i < projects.size(); i++) {
+      if (projects.get(i) instanceof RexInputRef ref && ref.getIndex() == inputIndex) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   /**

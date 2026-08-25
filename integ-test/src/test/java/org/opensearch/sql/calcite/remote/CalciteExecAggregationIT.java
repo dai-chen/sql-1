@@ -635,4 +635,110 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
 
     return RelFragmentCodec.serialize(project);
   }
+
+  /**
+   * US-015 wire-volume evidence: for a LOW-CARDINALITY dedup key the shard must emit strictly fewer
+   * rows than it collected, which is the entire point of rule 3. {@code gender} has two distinct
+   * values across the 7 BANK documents, so a shard-local {@code RANK_LIMIT} dedup buffers 7 rows
+   * and ships 2 — O(distinct keys) rather than O(documents), the #5698 fix.
+   *
+   * <p>This drives the shard aggregation directly so the assertion is on the SHARD's own counters,
+   * before any coordinator reduce could mask the reduction.
+   */
+  @Test
+  public void testDedupFragmentEmitsFewerRowsThanItCollects() throws IOException {
+    RelNode tableScan = buildTableScan();
+    RelDataType accountType = tableScan.getRowType().getFieldList().get(0).getType();
+    RelDataType genderType = tableScan.getRowType().getFieldList().get(1).getType();
+
+    // Project(account_number, gender, rank=ROW_NUMBER() OVER (PARTITION BY gender))
+    RexNode rowNumber =
+        REX_BUILDER.makeOver(
+            TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+            SqlStdOperatorTable.ROW_NUMBER,
+            List.of(),
+            List.of(REX_BUILDER.makeInputRef(genderType, 1)),
+            com.google.common.collect.ImmutableList.of(),
+            RexWindowBounds.UNBOUNDED_PRECEDING,
+            RexWindowBounds.CURRENT_ROW,
+            true,
+            true,
+            false,
+            false);
+    RelNode windowProject =
+        LogicalProject.create(
+            tableScan,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(accountType, 0),
+                REX_BUILDER.makeInputRef(genderType, 1),
+                rowNumber),
+            List.of("account_number", "gender", "_row_number_dedup_"));
+
+    // Filter(rank <= 1)
+    RelNode rankFilter =
+        LogicalFilter.create(
+            windowProject,
+            REX_BUILDER.makeCall(
+                SqlStdOperatorTable.LESS_THAN_OR_EQUAL,
+                REX_BUILDER.makeInputRef(
+                    windowProject.getRowType().getFieldList().get(2).getType(), 2),
+                REX_BUILDER.makeLiteral(1, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false)));
+
+    // Project(account_number, gender) — drops the rank column before shipping
+    RelNode dropProject =
+        LogicalProject.create(
+            rankFilter,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(accountType, 0), REX_BUILDER.makeInputRef(genderType, 1)),
+            List.of("account_number", "gender"));
+
+    String base64Plan = RelFragmentCodec.serialize(dropProject);
+
+    String body =
+        """
+        {
+          "size": 0,
+          "aggs": {
+            "calcite_stage": {
+              "calcite_exec": {
+                "plan": "%s",
+                "fields": [
+                  {"name": "account_number", "type": "long"},
+                  {"name": "gender", "type": "keyword"}
+                ],
+                "combine": {"mode": "RANK_LIMIT", "partitionKeys": [1], "k": 1},
+                "row_budget": 200000
+              }
+            }
+          }
+        }
+        """
+            .formatted(base64Plan);
+
+    Request request =
+        new Request("POST", "/" + TEST_INDEX_BANK + "/_search?allow_partial_search_results=false");
+    request.setJsonEntity(body);
+    JSONObject response = new JSONObject(executeRequest(request));
+
+    assertFalse("Response should not contain an error field", response.has("error"));
+    assertEquals(0, response.getJSONObject("_shards").getInt("failed"));
+
+    JSONObject calciteStage = response.getJSONObject("aggregations").getJSONObject("calcite_stage");
+    long rowsCollected = calciteStage.getLong("rowsCollected");
+    long rowsEmitted = calciteStage.getLong("rowsEmitted");
+
+    // All 7 documents match, but only one row per distinct gender is shipped.
+    assertEquals(7, rowsCollected);
+    assertEquals(2, rowsEmitted);
+    assertTrue(
+        "rowsEmitted ("
+            + rowsEmitted
+            + ") must be strictly less than documents matched ("
+            + rowsCollected
+            + ")",
+        rowsEmitted < rowsCollected);
+    assertEquals(2, calciteStage.getJSONArray("rows").length());
+  }
 }

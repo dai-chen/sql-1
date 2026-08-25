@@ -385,4 +385,90 @@ public class FragmentExecutionTest {
         catalogReader.getTableForMember(List.of(RelFragmentCodec.SCHEMA_NAME, INDEX_NAME));
     return LogicalTableScan.create(CLUSTER, table, List.of());
   }
+
+  /**
+   * The load-bearing feasibility test for rule 3: a shard fragment containing a WINDOW must survive
+   * the RelJson round-trip AND reach a Janino-compiled Bindable. Two things could break and both
+   * are silent-looking failures rather than wrong answers — RelJson has to serialize the RexOver
+   * and its RexWindow, and the fragment optimizer has to extract the window before the Calc rules
+   * merge it into a Calc no rule can convert (the US-014 defect, on the shard side).
+   *
+   * <p>The plan is the exact dedup shape: Project(rank=ROW_NUMBER OVER (PARTITION BY gender)) +
+   * Filter(rank &lt;= 1) + Project(drops rank).
+   */
+  @Test
+  void execute_dedup_window_fragment_keeps_one_row_per_partition() {
+    RelNode tableScan = buildTableScan();
+    List<org.apache.calcite.rel.type.RelDataTypeField> fields =
+        tableScan.getRowType().getFieldList();
+    RexNode accountRef = REX_BUILDER.makeInputRef(fields.get(0).getType(), 0);
+    RexNode ageRef = REX_BUILDER.makeInputRef(fields.get(1).getType(), 1);
+    RexNode genderRef = REX_BUILDER.makeInputRef(fields.get(2).getType(), 2);
+
+    RexNode rowNumber =
+        REX_BUILDER.makeOver(
+            TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+            SqlStdOperatorTable.ROW_NUMBER,
+            List.of(),
+            List.of(genderRef),
+            ImmutableList.of(),
+            RexWindowBounds.UNBOUNDED_PRECEDING,
+            RexWindowBounds.CURRENT_ROW,
+            true,
+            true,
+            false,
+            false);
+    RelNode windowProject =
+        LogicalProject.create(
+            tableScan,
+            List.of(),
+            List.of(accountRef, ageRef, genderRef, rowNumber),
+            List.of("account_number", "age", "gender", "_row_number_dedup_"));
+    RelNode rankFilter =
+        LogicalFilter.create(
+            windowProject,
+            REX_BUILDER.makeCall(
+                SqlStdOperatorTable.LESS_THAN_OR_EQUAL,
+                REX_BUILDER.makeInputRef(
+                    windowProject.getRowType().getFieldList().get(3).getType(), 3),
+                REX_BUILDER.makeLiteral(1, TYPE_FAC.createSqlType(SqlTypeName.INTEGER), false)));
+    RelNode dropProject =
+        LogicalProject.create(
+            rankFilter,
+            List.of(),
+            List.of(
+                REX_BUILDER.makeInputRef(fields.get(0).getType(), 0),
+                REX_BUILDER.makeInputRef(fields.get(1).getType(), 1),
+                REX_BUILDER.makeInputRef(fields.get(2).getType(), 2)),
+            List.of("account_number", "age", "gender"));
+
+    String base64Plan = RelFragmentCodec.serialize(dropProject);
+    // The round trip must preserve the window, not merely produce *some* plan.
+    RelNode deserialized = RelFragmentCodec.deserialize(base64Plan, INDEX_NAME, FIELD_DESCRIPTORS);
+    assertTrue(
+        RelOptUtil.toString(deserialized).contains("ROW_NUMBER()"),
+        RelOptUtil.toString(deserialized));
+
+    List<Object[]> inputRows =
+        List.of(
+            new Object[] {1L, 25, "M"},
+            new Object[] {2L, 35, "F"},
+            new Object[] {3L, 40, "M"},
+            new Object[] {4L, 28, "F"});
+
+    List<List<Object>> result =
+        CalciteClassLoaderHelper.withCalciteClassLoader(
+            () ->
+                CalciteExecAggregator.executeFragment(
+                    base64Plan, FIELD_DESCRIPTORS, inputRows, INDEX_NAME),
+            FragmentExecutionTest.class);
+
+    // One row per gender, and the rank column is NOT shipped. EnumerableWindow re-partitions its
+    // input, so the surviving rows are grouped by partition key rather than left in doc order —
+    // assert the row SET, which is what dedup actually guarantees.
+    assertEquals(2, result.size());
+    assertEquals(
+        java.util.Set.of(List.of(1L, 25, "M"), List.of(2L, 35, "F")),
+        new java.util.HashSet<>(result));
+  }
 }

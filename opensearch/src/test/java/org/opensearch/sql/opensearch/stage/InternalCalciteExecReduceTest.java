@@ -415,4 +415,191 @@ public class InternalCalciteExecReduceTest {
     BigDecimal expected = new BigDecimal("100000000000000000.00");
     assertEquals(expected, result.getRows().get(0).get(1));
   }
+
+  // --- RANK_LIMIT (US-015, rule 3) ---
+
+  /**
+   * The #5698 dedup shape: each shard already kept at most one row per gender locally, so the
+   * coordinator's job is to collapse the per-shard survivors down to one row per gender again. The
+   * shipped rows carry NO rank column — the coordinator recomputes rank from the partition key.
+   */
+  @Test
+  void rank_limit_keeps_one_row_per_partition_across_shards() {
+    CombineDescriptor combine = CombineDescriptor.rankLimit(List.of(1), List.of(), 1, "ROW_NUMBER");
+
+    InternalCalciteExec shard1 =
+        new InternalCalciteExec(
+            NAME, combine, 40L, 2L, List.of(List.of(1L, "M"), List.of(2L, "F")), META);
+    InternalCalciteExec shard2 =
+        new InternalCalciteExec(
+            NAME, combine, 35L, 2L, List.of(List.of(3L, "M"), List.of(4L, "F")), META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard1.reduce(List.of(shard1, shard2), null);
+
+    assertEquals(List.of(List.of(1L, "M"), List.of(2L, "F")), result.getRows());
+    assertEquals(2L, result.getRowsEmitted());
+    // rowsCollected is the pre-fragment buffered count, summed across shards.
+    assertEquals(75L, result.getRowsCollected());
+  }
+
+  /** {@code dedup 2 gender} keeps two rows per partition, drawn from whichever shards had them. */
+  @Test
+  void rank_limit_keeps_k_rows_per_partition() {
+    CombineDescriptor combine = CombineDescriptor.rankLimit(List.of(1), List.of(), 2, "ROW_NUMBER");
+
+    InternalCalciteExec shard1 =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            9L,
+            3L,
+            List.of(List.of(1L, "M"), List.of(2L, "M"), List.of(3L, "F")),
+            META);
+    InternalCalciteExec shard2 =
+        new InternalCalciteExec(
+            NAME, combine, 9L, 2L, List.of(List.of(4L, "F"), List.of(5L, "F")), META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard1.reduce(List.of(shard1, shard2), null);
+
+    assertEquals(
+        List.of(List.of(1L, "M"), List.of(2L, "M"), List.of(3L, "F"), List.of(4L, "F")),
+        result.getRows());
+  }
+
+  /** A null partition key is a partition of its own, and all nulls group together. */
+  @Test
+  void rank_limit_groups_null_partition_keys_together() {
+    CombineDescriptor combine = CombineDescriptor.rankLimit(List.of(1), List.of(), 1, "ROW_NUMBER");
+
+    InternalCalciteExec shard1 =
+        new InternalCalciteExec(
+            NAME, combine, 4L, 2L, List.of(Arrays.asList(1L, null), Arrays.asList(2L, "M")), META);
+    InternalCalciteExec shard2 =
+        new InternalCalciteExec(NAME, combine, 4L, 1L, List.of(Arrays.asList(3L, null)), META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard1.reduce(List.of(shard1, shard2), null);
+
+    assertEquals(List.of(Arrays.asList(1L, null), Arrays.asList(2L, "M")), result.getRows());
+  }
+
+  /**
+   * With an ORDER BY the answer is fully determined: the k rows with the smallest order key per
+   * partition. Rows arrive out of order across shards, so this fails if the reduce does not sort.
+   */
+  @Test
+  void rank_limit_ordered_row_number_keeps_the_smallest_order_key_per_partition() {
+    // Row shape: (id, gender, age); partition by gender (1), order by age ASC (2).
+    CombineDescriptor combine =
+        CombineDescriptor.rankLimit(List.of(1), List.of("2:ASCENDING:LAST"), 1, "ROW_NUMBER");
+
+    InternalCalciteExec shard1 =
+        new InternalCalciteExec(
+            NAME, combine, 6L, 2L, List.of(List.of(1L, "M", 40), List.of(2L, "F", 25)), META);
+    InternalCalciteExec shard2 =
+        new InternalCalciteExec(
+            NAME, combine, 6L, 2L, List.of(List.of(3L, "M", 22), List.of(4L, "F", 31)), META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard1.reduce(List.of(shard1, shard2), null);
+
+    assertEquals(List.of(List.of(3L, "M", 22), List.of(2L, "F", 25)), result.getRows());
+  }
+
+  /**
+   * RANK and DENSE_RANK differ exactly on ties, which is why the ranking function has to travel on
+   * the wire rather than be assumed. With ages (10, 10, 20) and k = 2: RANK gives 1, 1, 3 and keeps
+   * two rows; DENSE_RANK gives 1, 1, 2 and keeps all three.
+   */
+  @Test
+  void rank_limit_rank_and_dense_rank_differ_on_ties() {
+    List<List<Object>> rows =
+        List.of(List.of(1L, "M", 10), List.of(2L, "M", 10), List.of(3L, "M", 20));
+
+    CombineDescriptor rank =
+        CombineDescriptor.rankLimit(List.of(1), List.of("2:ASCENDING:LAST"), 2, "RANK");
+    InternalCalciteExec rankShard = new InternalCalciteExec(NAME, rank, 3L, 3L, rows, META);
+    assertEquals(
+        List.of(List.of(1L, "M", 10), List.of(2L, "M", 10)),
+        ((InternalCalciteExec) rankShard.reduce(List.of(rankShard), null)).getRows());
+
+    CombineDescriptor denseRank =
+        CombineDescriptor.rankLimit(List.of(1), List.of("2:ASCENDING:LAST"), 2, "DENSE_RANK");
+    InternalCalciteExec denseShard = new InternalCalciteExec(NAME, denseRank, 3L, 3L, rows, META);
+    assertEquals(
+        rows, ((InternalCalciteExec) denseShard.reduce(List.of(denseShard), null)).getRows());
+  }
+
+  /** A DESCENDING order key reverses the comparison; nulls land where the wire says, absolutely. */
+  @Test
+  void rank_limit_honours_descending_order_and_null_placement() {
+    CombineDescriptor combine =
+        CombineDescriptor.rankLimit(List.of(1), List.of("2:DESCENDING:LAST"), 1, "ROW_NUMBER");
+
+    InternalCalciteExec shard =
+        new InternalCalciteExec(
+            NAME,
+            combine,
+            3L,
+            3L,
+            List.of(List.of(1L, "M", 10), List.of(2L, "M", 30), List.of(3L, "M", 20)),
+            META);
+
+    InternalCalciteExec result = (InternalCalciteExec) shard.reduce(List.of(shard), null);
+
+    assertEquals(List.of(List.of(2L, "M", 30)), result.getRows());
+  }
+
+  /**
+   * ASSOCIATIVITY PROOF for RANK_LIMIT, in the form the pattern demands: the SAME inputs reduced in
+   * two different batch groupings must give identical output, because reduce() runs in batches of
+   * 512 and its own output is fed straight back in.
+   */
+  @Test
+  void rank_limit_reduce_is_associative_across_batch_groupings() {
+    CombineDescriptor combine =
+        CombineDescriptor.rankLimit(List.of(1), List.of("2:ASCENDING:LAST"), 2, "ROW_NUMBER");
+
+    InternalCalciteExec s1 =
+        new InternalCalciteExec(
+            NAME, combine, 5L, 2L, List.of(List.of(1L, "M", 40), List.of(2L, "F", 25)), META);
+    InternalCalciteExec s2 =
+        new InternalCalciteExec(
+            NAME, combine, 5L, 2L, List.of(List.of(3L, "M", 22), List.of(4L, "F", 31)), META);
+    InternalCalciteExec s3 =
+        new InternalCalciteExec(
+            NAME, combine, 5L, 2L, List.of(List.of(5L, "M", 33), List.of(6L, "F", 19)), META);
+
+    InternalCalciteExec allAtOnce = (InternalCalciteExec) s1.reduce(List.of(s1, s2, s3), null);
+
+    InternalCalciteExec partial = (InternalCalciteExec) s1.reduce(List.of(s1, s2), null);
+    InternalCalciteExec batched = (InternalCalciteExec) partial.reduce(List.of(partial, s3), null);
+
+    assertEquals(allAtOnce.getRows(), batched.getRows());
+    assertEquals(allAtOnce.getRowsCollected(), batched.getRowsCollected());
+    assertEquals(allAtOnce.getRowsEmitted(), batched.getRowsEmitted());
+    // And the answer is the real global top-2 per partition, not merely self-consistent.
+    assertEquals(
+        List.of(
+            List.of(3L, "M", 22), List.of(5L, "M", 33), List.of(6L, "F", 19), List.of(2L, "F", 25)),
+        allAtOnce.getRows());
+  }
+
+  /** The unordered case is nondeterministic in principle but must still be batch-stable. */
+  @Test
+  void rank_limit_unordered_reduce_is_associative_across_batch_groupings() {
+    CombineDescriptor combine = CombineDescriptor.rankLimit(List.of(1), List.of(), 1, "ROW_NUMBER");
+
+    InternalCalciteExec s1 =
+        new InternalCalciteExec(NAME, combine, 3L, 1L, List.of(List.of(1L, "M")), META);
+    InternalCalciteExec s2 =
+        new InternalCalciteExec(NAME, combine, 3L, 1L, List.of(List.of(2L, "M")), META);
+    InternalCalciteExec s3 =
+        new InternalCalciteExec(NAME, combine, 3L, 1L, List.of(List.of(3L, "F")), META);
+
+    InternalCalciteExec allAtOnce = (InternalCalciteExec) s1.reduce(List.of(s1, s2, s3), null);
+    InternalCalciteExec partial = (InternalCalciteExec) s1.reduce(List.of(s1, s2), null);
+    InternalCalciteExec batched = (InternalCalciteExec) partial.reduce(List.of(partial, s3), null);
+
+    assertEquals(allAtOnce.getRows(), batched.getRows());
+    assertEquals(List.of(List.of(1L, "M"), List.of(3L, "F")), allAtOnce.getRows());
+  }
 }

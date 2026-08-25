@@ -6,6 +6,7 @@
 package org.opensearch.sql.opensearch.stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.io.IOException;
 import java.util.List;
@@ -252,5 +253,93 @@ public class CalciteExecAggregationBuilderWireTest {
         .combine(CombineDescriptor.concat())
         .rowBudget(200000)
         .forcingOperator(forcingOperator);
+  }
+
+  @Test
+  void round_trip_through_stream_with_rank_limit_combine() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalProject[window]")
+            .combine(
+                CombineDescriptor.rankLimit(
+                    List.of(2), List.of("1:ASCENDING:LAST"), 3, "DENSE_RANK"));
+
+    BytesStreamOutput out = new BytesStreamOutput();
+    original.writeTo(out);
+
+    StreamInput in = out.bytes().streamInput();
+    CalciteExecAggregationBuilder deserialized = new CalciteExecAggregationBuilder(in);
+
+    assertEquals(original, deserialized);
+  }
+
+  /**
+   * The rank function is the first thing to travel in CombineDescriptor's single-string slot, and
+   * it is the ONLY field distinguishing RANK from DENSE_RANK on the reduce side. A descriptor whose
+   * function is lost in the parser would silently change the answer on ties, so both the non-null
+   * and the null case are asserted for whole-object equality.
+   */
+  @Test
+  void round_trip_through_xcontent_with_rank_limit_combine() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalProject[window]")
+            .combine(
+                CombineDescriptor.rankLimit(
+                    List.of(2), List.of("1:ASCENDING:LAST"), 3, "DENSE_RANK"));
+
+    CalciteExecAggregationBuilder parsed = roundTripThroughXContent(original);
+
+    assertEquals(original, parsed);
+    assertEquals(List.of(2), parsed.getCombine().getIntListParam());
+    assertEquals(List.of("1:ASCENDING:LAST"), parsed.getCombine().getStringListParam());
+    assertEquals(3, parsed.getCombine().getIntParam());
+    assertEquals("DENSE_RANK", parsed.getCombine().getRankFunction());
+  }
+
+  @Test
+  void round_trip_through_xcontent_with_unordered_rank_limit_combine() throws IOException {
+    // The dedup shape: no order keys, default ranking function.
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalProject[window]")
+            .combine(CombineDescriptor.rankLimit(List.of(1), List.of(), 1, "ROW_NUMBER"));
+
+    CalciteExecAggregationBuilder parsed = roundTripThroughXContent(original);
+
+    assertEquals(original, parsed);
+    assertEquals(List.of(), parsed.getCombine().getStringListParam());
+    assertEquals("ROW_NUMBER", parsed.getCombine().getRankFunction());
+  }
+
+  /** A descriptor with no explicit rank function must survive both wires as an absent field. */
+  @Test
+  void round_trip_preserves_an_absent_rank_function() throws IOException {
+    CalciteExecAggregationBuilder original =
+        buildFullBuilder("LogicalSort").combine(CombineDescriptor.limit(7));
+
+    BytesStreamOutput out = new BytesStreamOutput();
+    original.writeTo(out);
+    CalciteExecAggregationBuilder deserialized =
+        new CalciteExecAggregationBuilder(out.bytes().streamInput());
+
+    assertEquals(original, deserialized);
+    assertNull(deserialized.getCombine().getStringParam());
+    assertEquals(original, roundTripThroughXContent(original));
+  }
+
+  private static CalciteExecAggregationBuilder roundTripThroughXContent(
+      CalciteExecAggregationBuilder original) throws IOException {
+    XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
+    xContentBuilder.startObject();
+    original.toXContent(xContentBuilder, null);
+    xContentBuilder.endObject();
+    xContentBuilder.flush();
+    String json = xContentBuilder.getOutputStream().toString();
+
+    XContentParser parser = XContentType.JSON.xContent().createParser(null, null, json);
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    parser.nextToken();
+    return CalciteExecAggregationBuilder.parse(parser, original.getName());
   }
 }
