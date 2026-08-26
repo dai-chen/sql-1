@@ -7,6 +7,7 @@ package org.opensearch.sql.opensearch.request;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -590,48 +591,37 @@ class AggregateAnalyzerTest {
   }
 
   @Test
-  void analyze_aggCall_complexScriptFilter() throws ExpressionNotAnalyzableException {
-    buildAggregation("filter_bool_count", "filter_complex_count")
-        .withAggCall(
-            b ->
-                b.aggregateCall(
-                    SqlStdOperatorTable.COUNT,
-                    false,
-                    b.call(SqlStdOperatorTable.IS_TRUE, b.field("d")), // bool field
-                    "filter_bool_count"))
-        .withAggCall(
-            b ->
-                b.aggregateCall(
-                    SqlStdOperatorTable.COUNT,
-                    false,
-                    b.call(
-                        SqlStdOperatorTable.IS_TRUE,
-                        b.call(
-                            SqlStdOperatorTable.OR,
-                            b.call(SqlStdOperatorTable.MOD, b.field("a"), b.literal(3)),
-                            b.call(SqlStdOperatorTable.LIKE, b.field("c"), b.literal("%test%")))),
-                    "filter_complex_count"))
-        .expectDslTemplate(
-            // filter_bool_count: Boolean field IS_TRUE is now pushed down as term query (issue
-            // #5054 fix)
-            "[{\"filter_bool_count\":{\"filter\":{\"term\":{\"d\":{\"value\":true,\"boost\":1.0}}},"
-                + "\"aggregations\":{\"filter_bool_count\":{\"value_count\":{\"field\":\"_index\"}}}}},"
-                // filter_complex_count: Complex expression still uses script query
-                + " {\"filter_complex_count\":{\"filter\":{\"script\":{\"script\":{\"source\":\"{\\\"langType\\\":\\\"calcite\\\",\\\"script\\\":\\\"*\\\"}\","
-                + "\"lang\":\"opensearch_compounded_script\",\"params\":{*}},\"boost\":1.0}},"
-                + "\"aggregations\":{\"filter_complex_count\":{\"value_count\":{\"field\":\"_index\"}}}}}]")
-        .expectResponseParser(
-            new MetricParserHelper(
-                List.of(
-                    FilterParser.builder()
-                        .name("filter_bool_count")
-                        .metricsParser(new SingleValueParser("filter_bool_count"))
-                        .build(),
-                    FilterParser.builder()
-                        .name("filter_complex_count")
-                        .metricsParser(new SingleValueParser("filter_complex_count"))
-                        .build())))
-        .verify();
+  void analyze_aggCall_complexScriptFilter_isNotPushable() {
+    // Complex predicate (OR containing MOD arithmetic and LIKE) is not index-accelerable.
+    // The aggregate filter throws ExpressionNotAnalyzableException, which means aggregation
+    // pushdown is abandoned — the Aggregate stays in the Calcite plan.
+    assertThrows(
+        ExpressionNotAnalyzableException.class,
+        () ->
+            buildAggregation("filter_bool_count", "filter_complex_count")
+                .withAggCall(
+                    b ->
+                        b.aggregateCall(
+                            SqlStdOperatorTable.COUNT,
+                            false,
+                            b.call(SqlStdOperatorTable.IS_TRUE, b.field("d")), // bool field
+                            "filter_bool_count"))
+                .withAggCall(
+                    b ->
+                        b.aggregateCall(
+                            SqlStdOperatorTable.COUNT,
+                            false,
+                            b.call(
+                                SqlStdOperatorTable.IS_TRUE,
+                                b.call(
+                                    SqlStdOperatorTable.OR,
+                                    b.call(SqlStdOperatorTable.MOD, b.field("a"), b.literal(3)),
+                                    b.call(
+                                        SqlStdOperatorTable.LIKE,
+                                        b.field("c"),
+                                        b.literal("%test%")))),
+                            "filter_complex_count"))
+                .verify());
   }
 
   @Test

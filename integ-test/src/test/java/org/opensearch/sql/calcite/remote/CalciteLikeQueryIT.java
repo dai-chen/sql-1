@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.calcite.remote;
 
+import static org.junit.Assert.assertFalse;
 import static org.opensearch.sql.legacy.TestsConstants.TEST_INDEX_WILDCARD;
 import static org.opensearch.sql.util.Capability.LIKE_CASE_SENSITIVITY;
 import static org.opensearch.sql.util.MatcherUtils.rows;
@@ -28,8 +29,21 @@ public class CalciteLikeQueryIT extends LikeQueryIT {
   @Override
   @Test
   public void test_convert_field_text_to_keyword() throws IOException {
+    // US-006: LIKE is intentionally no longer pushed down (not on the index-accelerable list).
+    // The superclass asserted that the explain plan contained "TextKeywordBody.keyword" (pushdown
+    // rewrite to .keyword subfield). That rewrite no longer happens under Calcite.
     enabledOnlyWhenPushdownIsEnabled();
-    super.test_convert_field_text_to_keyword();
+    String query = "SELECT * FROM " + TEST_INDEX_WILDCARD + " WHERE TextKeywordBody LIKE '*'";
+
+    // Verify explain no longer shows a wildcard query pushdown for LIKE.
+    String explain = explainQuery(query);
+    assertFalse(
+        "LIKE should no longer push down as a wildcard query", explain.contains("\"wildcard\""));
+
+    // LIKE '*' uses SQL semantics: '*' is a literal character, not a wildcard.
+    // No fixture rows contain a literal '*', so the result set should be empty.
+    JSONObject result = executeJdbcRequest(query);
+    verifyNumOfRows(result, 0);
   }
 
   @Test

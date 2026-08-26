@@ -7,3 +7,10 @@ calcite:
     EnumerableLimit(fetch=[10000])
       EnumerableCalc(expr#0..11=[{inputs}], expr#12=['dummy-datasource':VARCHAR], expr#13=[GEOIP($t12, $t0)], expr#14=['dummy_sub_field'], expr#15=[ITEM($t13, $t14)], host=[$t0], info=[$t13], info.dummy_sub_field=[$t15])
         CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_weblogs]])
+  shardFragment: |
+    LogicalSort(fetch=[10000])
+      LogicalProject(host=[$0], info=[GEOIP('dummy-datasource':VARCHAR, $0)], info.dummy_sub_field=[ITEM(GEOIP('dummy-datasource':VARCHAR, $0), 'dummy_sub_field')])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_weblogs]])
+  combine: "LIMIT{n:10000}"
+  coordinatorTree: |
+    LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

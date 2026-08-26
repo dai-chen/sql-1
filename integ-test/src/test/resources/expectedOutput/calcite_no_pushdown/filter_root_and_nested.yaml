@@ -8,3 +8,11 @@ calcite:
     EnumerableLimit(fetch=[10000])
       EnumerableCalc(expr#0..15=[{inputs}], expr#16=['Seattle':VARCHAR], expr#17=[=($t7, $t16)], expr#18=[CHAR_LENGTH($t3)], expr#19=[29], expr#20=[>($t18, $t19)], expr#21=[AND($t17, $t20)], accounts=[$t0], projects=[$t2], city=[$t4], account=[$t8], $condition=[$t21])
         CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_deep_nested]])
+  shardFragment: |
+    LogicalSort(fetch=[10000])
+      LogicalProject(accounts=[$0], projects=[$2], city=[$4], account=[$8])
+        LogicalFilter(condition=[AND(=($7, 'Seattle'), >(CHAR_LENGTH($3), 29))])
+          CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_deep_nested]])
+  combine: "LIMIT{n:10000}"
+  coordinatorTree: |
+    LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

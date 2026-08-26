@@ -91,42 +91,60 @@ import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory.ExprUDT;
  * use of these private fields has to be copied in ExtendedRelJson.
  */
 public class ExtendedRelJson extends RelJson {
+  private static final org.apache.logging.log4j.Logger LOG =
+      org.apache.logging.log4j.LogManager.getLogger(ExtendedRelJson.class);
+
   private final JsonBuilder jsonBuilder;
   private final InputTranslator inputTranslator;
   private final SqlOperatorTable operatorTable;
 
   /**
    * Registry of enum classes that can be serialized to JSON, replicated from {@link RelEnumTypes}
-   * as toEnum(String) method is package private
+   * as toEnum(String) method is package private. SqlTypeName is deliberately NOT in this map
+   * because its constant names collide with other enums (e.g. DISTINCT). Instead, SqlTypeName
+   * values are handled with a distinguishing prefix in both the write and read paths.
    */
   private static final ImmutableMap<String, Enum<?>> ENUM_BY_NAME;
 
   static {
-    // Build a mapping from enum constants to the enum instances, same as RelEnumTypes
     final ImmutableMap.Builder<String, Enum<?>> enumByName = ImmutableMap.builder();
-    registerEnum(enumByName, JoinConditionType.class);
-    registerEnum(enumByName, JoinType.class);
-    registerEnum(enumByName, RexUnknownAs.class);
-    registerEnum(enumByName, SqlExplain.Depth.class);
-    registerEnum(enumByName, SqlExplainFormat.class);
-    registerEnum(enumByName, SqlExplainLevel.class);
-    registerEnum(enumByName, SqlInsertKeyword.class);
-    registerEnum(enumByName, SqlJsonConstructorNullClause.class);
-    registerEnum(enumByName, SqlJsonQueryWrapperBehavior.class);
-    registerEnum(enumByName, SqlJsonValueEmptyOrErrorBehavior.class);
-    registerEnum(enumByName, SqlMatchRecognize.AfterOption.class);
-    registerEnum(enumByName, SqlSelectKeyword.class);
-    registerEnum(enumByName, SqlTrimFunction.Flag.class);
-    registerEnum(enumByName, TimeUnitRange.class);
-    registerEnum(enumByName, TableModify.Operation.class);
+    addEnum(enumByName, JoinConditionType.class);
+    addEnum(enumByName, JoinType.class);
+    addEnum(enumByName, RexUnknownAs.class);
+    addEnum(enumByName, SqlExplain.Depth.class);
+    addEnum(enumByName, SqlExplainFormat.class);
+    addEnum(enumByName, SqlExplainLevel.class);
+    addEnum(enumByName, SqlInsertKeyword.class);
+    addEnum(enumByName, SqlJsonConstructorNullClause.class);
+    addEnum(enumByName, SqlJsonQueryWrapperBehavior.class);
+    addEnum(enumByName, SqlJsonValueEmptyOrErrorBehavior.class);
+    addEnum(enumByName, SqlMatchRecognize.AfterOption.class);
+    addEnum(enumByName, SqlSelectKeyword.class);
+    addEnum(enumByName, SqlTrimFunction.Flag.class);
+    addEnum(enumByName, TimeUnitRange.class);
+    addEnum(enumByName, TableModify.Operation.class);
     ENUM_BY_NAME = enumByName.build();
   }
 
-  private static void registerEnum(
+  private static void addEnum(
       ImmutableMap.Builder<String, Enum<?>> builder, Class<? extends Enum<?>> enumClass) {
     for (Enum<?> enumConstant : enumClass.getEnumConstants()) {
       builder.put(enumConstant.name(), enumConstant);
     }
+  }
+
+  /**
+   * Returns true if the given enum constant is round-trippable through the RelJson codec — i.e., it
+   * can survive serialization by our write path AND deserialization by both our own toRex AND the
+   * parent RelJson's package-private toRex (which delegates to RelEnumTypes.toEnum). SqlTypeName is
+   * NOT round-trippable because RelEnumTypes does not register it, and the parent's package-
+   * private toRex — which RelJsonReader calls — will NPE on unknown enum names. Our own toRex
+   * override handles the "SqlTypeName." prefix, but RelJsonReader's internal path does not.
+   *
+   * <p>StagePlanner uses this to classify containing nodes as NEEDS_GATHER per Design Invariant 1.
+   */
+  public static boolean isRoundTrippableEnum(Enum<?> value) {
+    return !(value instanceof SqlTypeName);
   }
 
   private ExtendedRelJson(JsonBuilder jsonBuilder) {
@@ -144,6 +162,20 @@ public class ExtendedRelJson extends RelJson {
     this.jsonBuilder = jsonBuilder;
     this.inputTranslator = requireNonNull(inputTranslator, "inputTranslator");
     this.operatorTable = requireNonNull(operatorTable, "operatorTable");
+    // Also set the parent RelJson's private operatorTable field so that the parent's
+    // package-private toOp() (called from RelJsonReader's inner RelInput implementation)
+    // uses our custom operator table instead of the default SqlStdOperatorTable.
+    try {
+      java.lang.reflect.Field parentField = RelJson.class.getDeclaredField("operatorTable");
+      parentField.setAccessible(true);
+      parentField.set(this, operatorTable);
+    } catch (NoSuchFieldException | IllegalAccessException e) {
+      throw new IllegalStateException(
+          "Failed to set RelJson.operatorTable via reflection; "
+              + "deserialization of PPL builtins, ILIKE, and SAFE_CAST will fail. "
+              + "Likely a Calcite version change renamed the field.",
+          e);
+    }
   }
 
   /** Creates a ExtendedRelJson. */
@@ -201,7 +233,12 @@ public class ExtendedRelJson extends RelJson {
         map = jsonBuilder().map();
         //noinspection rawtypes
         map.put(
-            "literal", value instanceof Enum ? RelEnumTypes.fromEnum((Enum) value) : toJson(value));
+            "literal",
+            value instanceof Enum
+                ? (value instanceof SqlTypeName
+                    ? "SqlTypeName." + ((SqlTypeName) value).name()
+                    : RelEnumTypes.fromEnum((Enum) value))
+                : toJson(value));
         map.put("type", toJson(node.getType()));
         return map;
       case INPUT_REF:
@@ -553,6 +590,19 @@ public class ExtendedRelJson extends RelJson {
   }
 
   // Copied from RelJson for the usage of custom operatorTable
+  // Well-known operators that fail standard lookupOperatorOverloads round-trip due to
+  // Calcite's operator table lookup matching nuances (ILIKE, SAFE_CAST, etc.)
+  private static final Map<String, SqlOperator> WELL_KNOWN_OPERATORS = buildWellKnownOperators();
+
+  private static Map<String, SqlOperator> buildWellKnownOperators() {
+    Map<String, SqlOperator> map = new java.util.HashMap<>();
+    // ILIKE (kind=LIKE, syntax=SPECIAL) — in SqlLibraryOperators (POSTGRESQL library)
+    map.put("ILIKE", org.apache.calcite.sql.fun.SqlLibraryOperators.ILIKE);
+    // SAFE_CAST (kind=SAFE_CAST, syntax=SPECIAL) — in SqlLibraryOperators (BIG_QUERY library)
+    map.put("SAFE_CAST", org.apache.calcite.sql.fun.SqlLibraryOperators.SAFE_CAST);
+    return map;
+  }
+
   @Nullable SqlOperator toOp(Map<String, ? extends @Nullable Object> map) {
     // in case different operator has the same kind, check with both name and kind.
     String name = get(map, "name");
@@ -572,9 +622,59 @@ public class ExtendedRelJson extends RelJson {
         return operator;
       }
     }
+    // Fallback: some operators (ILIKE, SAFE_CAST, LEFT, etc.) serialize with a syntax that
+    // lookupOperatorOverloads does not match on certain table implementations.
+    // Try FUNCTION syntax as a secondary lookup.
+    if (sqlSyntax != SqlSyntax.FUNCTION) {
+      operators.clear();
+      operatorTable.lookupOperatorOverloads(
+          new SqlIdentifier(name, SqlParserPos.ZERO),
+          null,
+          SqlSyntax.FUNCTION,
+          operators,
+          SqlNameMatchers.liberal());
+      for (SqlOperator operator : operators) {
+        if (operator.kind == sqlKind) {
+          return operator;
+        }
+      }
+      // Match by name only if kind lookup failed (e.g. LEFT has kind=OTHER_FUNCTION)
+      for (SqlOperator operator : operators) {
+        if (operator.getName().equalsIgnoreCase(name)) {
+          return operator;
+        }
+      }
+    }
+    // Check well-known operators that don't round-trip through lookupOperatorOverloads
+    SqlOperator wellKnown = WELL_KNOWN_OPERATORS.get(name.toUpperCase(java.util.Locale.ROOT));
+    if (wellKnown != null && wellKnown.kind == sqlKind) {
+      return wellKnown;
+    }
     String class_ = (String) map.get("class");
     if (class_ != null) {
-      return AvaticaUtils.instantiatePlugin(SqlOperator.class, class_);
+      // Anonymous inner classes (e.g. UserDefinedFunctionBuilder$1) cannot be instantiated.
+      // These are UDFs registered in the operator table by name; try a name-only lookup.
+      if (class_.contains("$")) {
+        operators.clear();
+        for (SqlSyntax anySyntax : SqlSyntax.values()) {
+          operatorTable.lookupOperatorOverloads(
+              new SqlIdentifier(name, SqlParserPos.ZERO),
+              null,
+              anySyntax,
+              operators,
+              SqlNameMatchers.liberal());
+        }
+        for (SqlOperator operator : operators) {
+          if (operator.getName().equalsIgnoreCase(name)) {
+            return operator;
+          }
+        }
+      }
+      try {
+        return AvaticaUtils.instantiatePlugin(SqlOperator.class, class_);
+      } catch (RuntimeException e) {
+        // If instantiation fails (e.g. no default ctor), ignore and throw the standard error
+      }
     }
     throw RESOURCE.noOperator(name, kind, syntax).ex();
   }
@@ -619,10 +719,15 @@ public class ExtendedRelJson extends RelJson {
 
   /**
    * Converts a string to an enum value. Replicated from RelEnumTypes.toEnum() since it's
-   * package-private.
+   * package-private. Handles the "SqlTypeName." prefix produced by our write path for SqlTypeName
+   * flag literals, which cannot be registered in the shared ENUM_BY_NAME due to name collisions
+   * (e.g. DISTINCT exists in both SqlTypeName and SqlSelectKeyword).
    */
   @SuppressWarnings("unchecked")
   private static <E extends Enum<E>> E toEnum(String name) {
+    if (name.startsWith("SqlTypeName.")) {
+      return (E) SqlTypeName.valueOf(name.substring("SqlTypeName.".length()));
+    }
     return (E) requireNonNull(ENUM_BY_NAME.get(name), () -> "No enum registered for name: " + name);
   }
 

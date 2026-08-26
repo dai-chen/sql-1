@@ -56,7 +56,12 @@ public class RelJsonSerializer {
     this.cluster = cluster;
   }
 
-  private static SqlOperatorTable getPplSqlOperatorTable() {
+  /**
+   * Returns the chained operator table containing PPL built-in operators, standard SQL operators,
+   * the plugin operator table, and relevant SQL library operators (MySQL, BigQuery, Spark,
+   * PostgreSQL). Thread-safe and lazily initialized.
+   */
+  public static SqlOperatorTable getPplSqlOperatorTable() {
     if (pplSqlOperatorTable == null) {
       synchronized (RelJsonSerializer.class) {
         if (pplSqlOperatorTable == null) {
