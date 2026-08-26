@@ -8,6 +8,8 @@ package org.opensearch.sql.opensearch.client;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.opensearch.action.fieldcaps.FieldCapabilitiesRequest;
+import org.opensearch.action.fieldcaps.FieldCapabilitiesResponse;
 import org.opensearch.action.search.CreatePitRequest;
 import org.opensearch.action.search.DeletePitRequest;
 import org.opensearch.sql.opensearch.mapping.IndexMapping;
@@ -46,6 +48,14 @@ public interface OpenSearchClient {
    * @return index mapping(s) from index name to its mapping
    */
   Map<String, IndexMapping> getIndexMappings(String... indexExpression);
+
+  /**
+   * Fetch field capabilities across the indices matched by the request.
+   *
+   * @param request field capabilities request
+   * @return field capabilities response
+   */
+  FieldCapabilitiesResponse fieldCaps(FieldCapabilitiesRequest request);
 
   /**
    * Fetch index.max_result_window settings according to index expression given.

@@ -180,6 +180,13 @@ public class OpenSearchSettings extends Settings {
           Setting.Property.NodeScope,
           Setting.Property.Dynamic);
 
+  public static final Setting<?> CALCITE_PRUNING_ENABLED_SETTING =
+      Setting.boolSetting(
+          Key.CALCITE_PRUNING_ENABLED.getKeyValue(),
+          false,
+          Setting.Property.NodeScope,
+          Setting.Property.Dynamic);
+
   public static final Setting<Double> CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR_SETTING =
       Setting.doubleSetting(
           Key.CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR.getKeyValue(),
@@ -486,6 +493,12 @@ public class OpenSearchSettings extends Settings {
     register(
         settingBuilder,
         clusterSettings,
+        Key.CALCITE_PRUNING_ENABLED,
+        CALCITE_PRUNING_ENABLED_SETTING,
+        new Updater(Key.CALCITE_PRUNING_ENABLED));
+    register(
+        settingBuilder,
+        clusterSettings,
         Key.CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR,
         CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR_SETTING,
         new Updater(Key.CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR));
@@ -699,6 +712,7 @@ public class OpenSearchSettings extends Settings {
         .add(CALCITE_ENGINE_ENABLED_SETTING)
         .add(CALCITE_FALLBACK_ALLOWED_SETTING)
         .add(CALCITE_PUSHDOWN_ENABLED_SETTING)
+        .add(CALCITE_PRUNING_ENABLED_SETTING)
         .add(CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR_SETTING)
         .add(CALCITE_SUPPORT_ALL_JOIN_TYPES_SETTING)
         .add(DEFAULT_PATTERN_METHOD_SETTING)

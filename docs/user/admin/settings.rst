@@ -961,6 +961,18 @@ If Calcite is enabled, you can use this setting to decide whether to enable the 
 2. This setting is node scope.
 3. This setting can be updated dynamically.
 
+plugins.calcite.pruning.enabled
+===============================
+
+Description
+-----------
+
+If Calcite is enabled, you can use this setting to decide whether to enable plan-time index pruning, which skips indices that cannot match a query's time range before the schema is resolved. This is an experimental feature.
+
+1. The default value is false.
+2. This setting is node scope.
+3. This setting can be updated dynamically.
+
 plugins.calcite.pushdown.rowcount.estimation.factor
 ===================================================
 
