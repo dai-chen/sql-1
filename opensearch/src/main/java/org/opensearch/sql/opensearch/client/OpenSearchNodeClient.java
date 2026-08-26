@@ -24,6 +24,8 @@ import org.opensearch.action.admin.indices.exists.indices.IndicesExistsResponse;
 import org.opensearch.action.admin.indices.get.GetIndexResponse;
 import org.opensearch.action.admin.indices.mapping.get.GetMappingsResponse;
 import org.opensearch.action.admin.indices.settings.get.GetSettingsResponse;
+import org.opensearch.action.fieldcaps.FieldCapabilitiesRequest;
+import org.opensearch.action.fieldcaps.FieldCapabilitiesResponse;
 import org.opensearch.action.search.*;
 import org.opensearch.cluster.metadata.AliasMetadata;
 import org.opensearch.common.action.ActionFuture;
@@ -122,6 +124,33 @@ public class OpenSearchNodeClient implements OpenSearchClient {
               + String.join(",", indexExpression)
               + "]: "
               + e.getMessage(),
+          e);
+    }
+  }
+
+  @Override
+  public FieldCapabilitiesResponse fieldCaps(FieldCapabilitiesRequest request) {
+    try {
+      return client.fieldCaps(request).actionGet();
+    } catch (IndexNotFoundException e) {
+      // Re-throw directly to be treated as client error finally
+      throw ErrorReport.wrap(e)
+          .code(ErrorCode.INDEX_NOT_FOUND)
+          .location("while fetching field capabilities")
+          .context("index_name", String.join(",", request.indices()))
+          .build();
+    } catch (OpenSearchSecurityException e) {
+      // Re-throw with permission denied code
+      throw ErrorReport.wrap(e)
+          .code(ErrorCode.PERMISSION_DENIED)
+          .location("while fetching field capabilities")
+          .context("index_name", String.join(",", request.indices()))
+          .build();
+    } catch (Exception e) {
+      throw new IllegalStateException(
+          String.format(
+              "Failed to read field capabilities for index pattern [%s]: %s",
+              String.join(",", request.indices()), e.getMessage()),
           e);
     }
   }

@@ -32,6 +32,7 @@ import org.opensearch.sql.opensearch.executor.protector.ExecutionProtector;
 import org.opensearch.sql.opensearch.executor.protector.OpenSearchExecutionProtector;
 import org.opensearch.sql.opensearch.monitor.OpenSearchMemoryHealthy;
 import org.opensearch.sql.opensearch.monitor.OpenSearchResourceMonitor;
+import org.opensearch.sql.opensearch.planner.pruning.PlanTimeIndexPruner;
 import org.opensearch.sql.opensearch.storage.OpenSearchStorageEngine;
 import org.opensearch.sql.planner.Planner;
 import org.opensearch.sql.planner.optimizer.LogicalPlanOptimizer;
@@ -119,7 +120,8 @@ public class OpenSearchPluginModule extends AbstractModule {
       DataSourceService dataSourceService,
       ExecutionEngine executionEngine,
       Settings settings,
-      NodeClient nodeClient) {
+      NodeClient nodeClient,
+      OpenSearchClient client) {
     Analyzer analyzer =
         new Analyzer(
             new ExpressionAnalyzer(functionRepository), dataSourceService, functionRepository);
@@ -129,6 +131,7 @@ public class OpenSearchPluginModule extends AbstractModule {
     QueryService queryService =
         new QueryService(
             analyzer, executionEngine, planner, dataSourceService, settings, executionDispatcher);
+    queryService.setPlanTimeRewriter(new PlanTimeIndexPruner(client, settings));
     return new QueryPlanFactory(queryService);
   }
 }

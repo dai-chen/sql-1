@@ -42,6 +42,7 @@ public abstract class Settings {
     CALCITE_ENGINE_ENABLED("plugins.calcite.enabled"),
     CALCITE_FALLBACK_ALLOWED("plugins.calcite.fallback.allowed"),
     CALCITE_PUSHDOWN_ENABLED("plugins.calcite.pushdown.enabled"),
+    CALCITE_PRUNING_ENABLED("plugins.calcite.pruning.enabled"),
     CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR(
         "plugins.calcite.pushdown.rowcount.estimation.factor"),
     CALCITE_SUPPORT_ALL_JOIN_TYPES("plugins.calcite.all_join_types.allowed"),

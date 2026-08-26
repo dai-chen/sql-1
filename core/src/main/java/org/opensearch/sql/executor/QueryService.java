@@ -82,6 +82,11 @@ public class QueryService {
   private DataSourceService dataSourceService;
   private Settings settings;
   private ExecutionDispatcher executionDispatcher = new DirectExecutionDispatcher();
+  private PlanTimeRewriter planTimeRewriter;
+
+  public void setPlanTimeRewriter(PlanTimeRewriter planTimeRewriter) {
+    this.planTimeRewriter = planTimeRewriter;
+  }
 
   public QueryService(
       Analyzer analyzer,
@@ -234,11 +239,14 @@ public class QueryService {
 
                   context.setHighlightConfig(highlightConfig);
 
+                  UnresolvedPlan rewrittenPlan =
+                      planTimeRewriter == null ? plan : planTimeRewriter.rewrite(plan);
+
                   // Wrap analyze with ANALYZING stage tracking
                   RelNode relNode =
                       StageErrorHandler.executeStage(
                           QueryProcessingStage.ANALYZING,
-                          () -> analyze(plan, context),
+                          () -> analyze(rewrittenPlan, context),
                           "while preparing and validating the query plan");
 
                   // Wrap plan conversion with PLAN_CONVERSION stage tracking

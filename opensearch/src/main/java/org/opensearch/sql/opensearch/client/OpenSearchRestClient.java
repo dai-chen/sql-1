@@ -20,6 +20,8 @@ import lombok.RequiredArgsConstructor;
 import org.opensearch.action.admin.cluster.settings.ClusterGetSettingsRequest;
 import org.opensearch.action.admin.indices.settings.get.GetSettingsRequest;
 import org.opensearch.action.admin.indices.settings.get.GetSettingsResponse;
+import org.opensearch.action.fieldcaps.FieldCapabilitiesRequest;
+import org.opensearch.action.fieldcaps.FieldCapabilitiesResponse;
 import org.opensearch.action.search.*;
 import org.opensearch.client.RequestOptions;
 import org.opensearch.client.RestHighLevelClient;
@@ -86,6 +88,11 @@ public class OpenSearchRestClient implements OpenSearchClient {
               + e.getMessage(),
           e);
     }
+  }
+
+  @Override
+  public FieldCapabilitiesResponse fieldCaps(FieldCapabilitiesRequest request) {
+    throw new UnsupportedOperationException("fieldCaps is not supported in REST client mode");
   }
 
   @Override
