@@ -15,14 +15,19 @@ import org.opensearch.sql.common.setting.Settings;
  * SearchRequest → InternalCalciteExec.reduce → CoordinatorTreeExecutor.
  */
 @Ignore(
-    "US-012 complete, 4/63 remain: 'Unable to implement EnumerableAggregate' x2"
-        + " (testStatsTimeSpan, testStatsSpanSortOnMeasure — SPAN UDF CallImplementor not"
-        + " resolvable in shard-side Janino compilation, US-016 scope),"
-        + " ExpressionEvaluationException x1 (testStatsBySpanTimeWithNullBucket — timestamp"
-        + " format parsing on coordinator, also US-016 scope),"
-        + " UnsupportedOperationException x1 (testStatsSortOnMeasureComplex — plan contains"
-        + " DISTINCT_COUNT_APPROX UDF which is unsplittable and whose implementor is not"
-        + " registered in shard-side compilation context, US-016 scope).")
+    "US-016 final measurement: 59/63 pass, 4 remain, and both root causes are missing function"
+        + " implementations on the staged compile paths rather than split defects. (1)"
+        + " testStatsTimeSpan and testStatsSpanSortOnMeasure fail with a shard 'Unable to implement"
+        + " EnumerableAggregate' whose SUPPRESSED cause is 'IllegalArgumentException: Unsupported"
+        + " expr type: TIMESTAMP' — SpanFunction.SpanImplementor requires an ExprSqlType UDT while"
+        + " RelFragmentCodec maps date to a plain TIMESTAMP so the RelJson round-trip works."
+        + " (2) testStatsBySpanTimeWithNullBucket is the same cause on the value side: staged rows"
+        + " carry epoch millis where SpanFunction.evalTimestamp expects the UDT's formatted string."
+        + " (3) testStatsSortOnMeasureComplex uses dc(employer); DISTINCT_COUNT_APPROX is a logical"
+        + " marker that throws on every accumulator method, and the real HLL++ implementation lives"
+        + " in PPLFuncImpTable's external registry which neither the shard fragment compiler nor"
+        + " CoordinatorTreeExecutor consults. See the Results section of"
+        + " docs/dev/poc-staged-calcite-exec-design.md.")
 public class StagedCalciteStatsCommandIT extends CalciteStatsCommandIT {
 
   @Override

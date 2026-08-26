@@ -20,7 +20,10 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.AggregateCall;
+import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.logical.LogicalTableScan;
@@ -34,6 +37,7 @@ import org.apache.calcite.schema.impl.AbstractSchema;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.tools.Frameworks;
+import org.apache.calcite.util.ImmutableBitSet;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
@@ -634,6 +638,97 @@ public class CalciteExecAggregationIT extends SQLIntegTestCase {
     RelNode project = LogicalProject.create(tableScan, List.of(), projects, fieldNames);
 
     return RelFragmentCodec.serialize(project);
+  }
+
+  /**
+   * US-016 wire-volume evidence for {@code stats}: a shard-local {@code MERGE_AGG} partial must
+   * emit one row per distinct group key rather than one row per document. {@code gender} has two
+   * distinct values across the 7 BANK documents, so the shard buffers 7 rows and ships 2 —
+   * O(distinct group keys) instead of O(documents).
+   *
+   * <p>Asserted on the SHARD's own counters, before any coordinator reduce could mask the
+   * reduction, and paired with {@link #testDedupFragmentEmitsFewerRowsThanItCollects} to give the
+   * design doc's Phase E both shapes.
+   */
+  @Test
+  public void testStatsFragmentEmitsOneRowPerGroupKey() throws IOException {
+    RelNode tableScan = buildTableScan();
+
+    // Aggregate(group by gender, count()) — output row type is (gender, cnt)
+    RelNode agg =
+        LogicalAggregate.create(
+            tableScan,
+            List.of(),
+            ImmutableBitSet.of(1),
+            null,
+            List.of(
+                AggregateCall.create(
+                    SqlStdOperatorTable.COUNT,
+                    false,
+                    false,
+                    false,
+                    List.of(),
+                    List.of(),
+                    -1,
+                    null,
+                    RelCollations.EMPTY,
+                    TYPE_FAC.createSqlType(SqlTypeName.BIGINT),
+                    "cnt")));
+
+    String base64Plan = RelFragmentCodec.serialize(agg);
+
+    String body =
+        """
+        {
+          "size": 0,
+          "aggs": {
+            "calcite_stage": {
+              "calcite_exec": {
+                "plan": "%s",
+                "fields": [
+                  {"name": "account_number", "type": "long"},
+                  {"name": "gender", "type": "keyword"}
+                ],
+                "combine": {"mode": "MERGE_AGG", "groupKeys": [0], "aggs": ["SUM"]},
+                "row_budget": 200000
+              }
+            }
+          }
+        }
+        """
+            .formatted(base64Plan);
+
+    Request request =
+        new Request("POST", "/" + TEST_INDEX_BANK + "/_search?allow_partial_search_results=false");
+    request.setJsonEntity(body);
+    JSONObject response = new JSONObject(executeRequest(request));
+
+    assertFalse("Response should not contain an error field", response.has("error"));
+    assertEquals(0, response.getJSONObject("_shards").getInt("failed"));
+
+    JSONObject calciteStage = response.getJSONObject("aggregations").getJSONObject("calcite_stage");
+    long rowsCollected = calciteStage.getLong("rowsCollected");
+    long rowsEmitted = calciteStage.getLong("rowsEmitted");
+
+    // All 7 documents match, but only one partial row per distinct gender is shipped.
+    assertEquals(7, rowsCollected);
+    assertEquals(2, rowsEmitted);
+    assertTrue(
+        "rowsEmitted ("
+            + rowsEmitted
+            + ") must be strictly less than documents matched ("
+            + rowsCollected
+            + ")",
+        rowsEmitted < rowsCollected);
+
+    // The partial carries UNFINALIZED per-group counts summing to the document count.
+    JSONArray rows = calciteStage.getJSONArray("rows");
+    assertEquals(2, rows.length());
+    long total = 0;
+    for (int i = 0; i < rows.length(); i++) {
+      total += rows.getJSONArray(i).getLong(1);
+    }
+    assertEquals(7, total);
   }
 
   /**

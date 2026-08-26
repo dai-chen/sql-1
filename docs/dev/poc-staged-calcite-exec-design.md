@@ -415,6 +415,109 @@ With `row_budget` set very low: the query fails with an error naming the row cou
 
 `InternalCalciteExec` carries collection stats (rows collected, rows emitted). Assert that for `dedup` and `stats`, rows emitted per shard is strictly less than documents matched — proving the shard did real work rather than passing rows through, which is the specific defect this design replaces.
 
+## Results (US-016)
+
+Final state of the PoC on branch `poc/staged-calcite-exec` at commit `d621a10c3` plus this story. Measured 2026-08-26 with `plugins.calcite.pushdown.enabled=false` and `plugins.calcite.fallback.allowed=false`, every class in **one** `:integ-test:integTest --rerun-tasks` invocation (Gradle wipes the results directory per invocation, so batched runs are unverifiable), every number read from JUnit XML archived to `.sisyphus/handoff/us016-xml/`. Cluster health confirmed before trusting the run: no `classMethod` pseudo-test in any XML, no mid-run node shutdown.
+
+### Final coverage — the three buckets
+
+| Staged IT class | Tests | Skipped | pass | fail-on-assertion | fail-on-ceiling |
+|---|---|---|---|---|---|
+| StagedCalciteFieldsCommandIT | 39 | 0 | 39 | 0 | 0 |
+| StagedCalciteWhereCommandIT | 41 | 3 | 38 | 0 | 0 |
+| StagedCalciteEvalCommandIT | 9 | 0 | 9 | 0 | 0 |
+| StagedCalciteHeadCommandIT | 6 | 2 | 4 | 0 | 0 |
+| StagedCalcitePPLSortIT | 18 | 0 | 18 | 0 | 0 |
+| StagedCalciteTopCommandIT | 9 | 0 | 9 | 0 | 0 |
+| StagedCalciteStatsCommandIT | 63 | 0 | 59 | 4 | 0 |
+| StagedCalciteDedupCommandIT | 5 | 0 | 5 | 0 | 0 |
+| StagedCalcitePPLEventstatsIT | 27 | 0 | 27 | 0 | 0 |
+| StagedCalciteExplainIT | 266 | 80 | 186 | 0 | 0 |
+| **Total** | **483** | **85** | **394** | **4** | **0** |
+
+Against the US-010 baseline measured on the same ten classes: **333 pass / 65 fail-on-assertion → 394 pass / 4 fail-on-assertion**. Every row satisfies `tests − skipped == pass + fail + ceiling`; the total does too (`483 − 85 = 398 = 394 + 4`).
+
+Nine further classes ran in the same invocation as regression gates, all at zero failures: non-staged `CalciteExplainIT` 266/4 skipped, `CalciteStatsCommandIT` 63, `CalciteDedupCommandIT` 5, `CalciteTopCommandIT` 9, `CalcitePPLEventstatsIT` 27; staged `StagedCalcitePPLJoinIT` 43, `StagedCalciteUnionCommandIT` 15; plus `CalciteStageSplitExplainIT` 5 and `CalciteExecAggregationIT` 9. Whole invocation: **925 tests, 89 skipped, 4 failures**, and the 4 are the ones in the table.
+
+Skips are unchanged in character from US-010 and none are new: 76 of `StagedCalciteExplainIT`'s 80 are the suite's own `assumeTrue("This test is only for when push down is enabled")`, so staged explain coverage is 186 of 266, not 266; the remaining 4 plus Head's 2 and Where's 3 are inherited `@Ignore`s that predate the PoC.
+
+**The 4 remaining fail-on-assertion entries, with verified root causes.** `StagedCalciteStatsCommandIT` carries a class-level `@Ignore` in CI naming these four; the numbers above were taken with the annotation temporarily removed.
+
+| Test | Symptom | Root cause |
+|---|---|---|
+| `testStatsTimeSpan`, `testStatsSpanSortOnMeasure` | shard `IllegalStateException: Unable to implement EnumerableAggregate` | **Verified by unit reproduction.** The suppressed exception is `IllegalArgumentException: Unsupported expr type: TIMESTAMP`, thrown by `SpanFunction.SpanImplementor.implement`, which requires the field type to be a PPL `ExprSqlType` UDT (`EXPR_TIMESTAMP`). `RelFragmentCodec.osTypeToSqlType` deliberately maps `date` to a plain `TIMESTAMP` because the UDT wrappers do not survive the RelJson round-trip, so the implementor falls through to its throw. |
+| `testStatsBySpanTimeWithNullBucket` | HTTP 400 `ExpressionEvaluationException: timestamp:1753661723000 in unsupported format` | Same root family. Staged rows carry temporal values as epoch millis, while `SpanFunction.evalTimestamp(String, int, String)` expects the UDT's formatted string form. |
+| `testStatsSortOnMeasureComplex` | HTTP 500 `UnsupportedOperationException`, empty details | The query uses `dc(employer)`. `DISTINCT_COUNT_APPROX` is a **logical marker** whose accumulator throws on every method (`core/.../calcite/udf/udaf/DistinctCountApproxLogicalAggFunction.java:26-58`); the real HyperLogLog++ implementation is injected into `PPLFuncImpTable`'s external registry by `OpenSearchExecutionEngine`, and neither the shard fragment compiler nor `CoordinatorTreeExecutor` applies that override. Whether the marker is reached on the shard or on the coordinator was not isolated. |
+
+So the two causes behind all four are (i) the staged wire drops PPL UDT typing and the temporal value form that PPL UDF implementors dispatch on, and (ii) logical-marker aggregate functions resolved through a registry the staged compilers do not consult. Neither is a limit of the split model.
+
+**`fail-on-ceiling` is zero, and that is still not evidence the ceiling works.** The largest index in these ten classes is `accounts` at 1 000 documents against a 200 000-row budget, so nothing came within two orders of magnitude of the refusal path. That path is exercised only by `CalciteExecAggregationIT.testRowBudgetBreachFailsFast`, which sets `row_budget: 2` on the 7-document `bank` index and asserts the exact message `gathered 3 rows, budget 2` with `allow_partial_search_results=false` on the URL.
+
+### What actually gets staged
+
+Census over the 209 goldens in `expectedOutput/calcite_no_pushdown/` (171 YAML, 38 JSON; the `json_tree` format deliberately does not render the sections):
+
+| combine | Goldens | Rule |
+|---|---|---|
+| `LIMIT` | 67 | rule 4 — dominant because the `LogicalSystemLimit(QUERY_SIZE_LIMIT)` wrapping every plan is itself an unordered fetch and is promoted |
+| `MERGE_AGG` | 40 | rule 1 |
+| `CONCAT` | 39 | generic placement floor, full gather |
+| `TOP_N` | 4 | rule 2 |
+| `RANK_LIMIT` | 2 | rule 3 |
+| none (coordinator-only) | 19 YAML | see below |
+
+152 of 171 YAML goldens render a split. The 19 that do not: 12 are multi-scan shapes (`join`, `union`, `append`, `multisearch`) which have no single gather boundary; 5 are the `search_with_*` relative-time shapes whose plans contain a relevance function that has no row-level enumerable implementor; 2 are `chart_single_group`/`chart_multiple_groups`, an `avg`-with-sort shape whose refusal cause was **not isolated** in this story. Every one of these still executes, entirely on the coordinator — Design Invariant 1 holds by refusing to stage, never by rejecting.
+
+### Ceiling map
+
+The row budget counts **buffered** rows (`CalciteExecAggregator.collect` throws when `rowsCollected > rowBudget`), not shipped rows. Tier-1 combines reduce wire volume; they do **not** reduce shard memory. The only mechanism that bounds collection is rule 4's `earlyTerminationLimit`, set only when every node between the promoted unordered fetch and the scan is cardinality-preserving (`StagePlannerTest.earlyTerminationLimit_is_non_null_for_fetch_over_project_over_scan` and `..._is_null_when_filter_sits_between_fetch_and_scan` pin both directions).
+
+| PPL shape | combine | Bounds shard buffering | Breach volume at the 200 000 default | Observed |
+|---|---|---|---|---|
+| `fields`, `eval` (no residual filter) | `LIMIT{10000}` | early termination at the system limit | never — collection stops at 10 000 rows/shard | 0 breaches, 48 tests |
+| `head N` unordered over a plain scan | `LIMIT{n}` | early termination at n | never | 0 breaches, 6 tests (4 run) |
+| `where` with a residual filter | `LIMIT` | nothing — the filter is inside the fragment, so termination is unsafe | > 200 000 matching docs/shard | 0 breaches, 41 tests |
+| `sort … \| head N` | `TOP_N` | nothing — the n-th key is unknown until all matches are examined | > 200 000 matching docs/shard | 0 breaches, 18 + 9 tests |
+| `stats … by` | `MERGE_AGG` | nothing — the partial aggregate still consumes every row | > 200 000 matching docs/shard | 0 breaches, 63 tests |
+| `dedup` | `RANK_LIMIT` | nothing — a window must see the whole partition | > 200 000 matching docs/shard | 0 breaches, 5 tests |
+| `eventstats`, non-rank window | `CONCAT` | nothing | > 200 000 matching docs/shard | 0 breaches, 27 tests |
+| nested-field queries | any | nothing; `rowsCollected` counts post-expansion rows | > 200 000 / mean sub-documents per parent | 0 breaches |
+| `join`, `union`, `append`, `multisearch` | not staged | no `calcite_exec` is issued at all | n/a | 0 breaches, 58 tests |
+
+No PPL shape exceeded the budget at IT data volumes (7 to 1 000 documents, single-shard indices). The breach threshold is the same for every shape except the two early-terminating ones, which is the honest form of this map: staging changes **what crosses the wire**, and only rule 4 changes **what a shard holds**.
+
+### Wire-volume deltas (Phase E)
+
+Asserted on the shard's own `rowsCollected`/`rowsEmitted` counters inside the `calcite_exec` response, before any coordinator reduce could mask the reduction. Both use the 7-document `bank` index with the low-cardinality `gender` key (2 distinct values).
+
+| Shape | combine | Documents matched | Rows emitted per shard | Test |
+|---|---|---|---|---|
+| `dedup gender` | `RANK_LIMIT{partitionKeys:[1], k:1}` | 7 | 2 | `CalciteExecAggregationIT.testDedupFragmentEmitsFewerRowsThanItCollects` |
+| `stats count() by gender` | `MERGE_AGG{groupKeys:[0], aggs:[SUM]}` | 7 | 2 | `CalciteExecAggregationIT.testStatsFragmentEmitsOneRowPerGroupKey` |
+
+Both are O(distinct keys) rather than O(documents), and the `stats` case additionally asserts that the unfinalized per-group counts sum to 7 — the partial carries accumulator state, not a finalized answer. This is the specific behaviour that replaces issue #5698's ship-everything-then-paginate: the row volume crossing the wire is now proportional to key cardinality, and no PIT is created anywhere on this path.
+
+### Remaining gaps
+
+Ordered by how far each is from being fixable inside this design. The first four need neither a shuffle nor the option-C bridge.
+
+| Gap | Effect today | What it needs |
+|---|---|---|
+| The wire drops PPL UDT typing and the temporal value form | Any fragment containing a UDF whose implementor dispatches on `ExprSqlType` fails to compile (`SPAN`: 3 tests) | Local fix: carry the `ExprType` on `FieldDescriptor` and rebuild UDT-typed row types on the shard, or give the affected implementors a plain-SQL-type branch. Both sides of the symmetric-`Writeable` checklist apply. |
+| Logical-marker aggregates | `dc`/`distinct_count` throws (1 test) | Local fix: apply `PPLFuncImpTable`'s external implementor registry in the shard fragment compiler and in `CoordinatorTreeExecutor`. |
+| Staging and DSL pushdown never coexist | The staged path is gated on `pushdown.enabled == false`, so a staged fragment never carries a pushed query clause and the `shardFragment` explain section always renders an empty DSL. Relevance functions therefore force a coordinator-only plan (5 goldens) rather than being pushed. | Local but non-trivial: let `StagePlanner` run with pushdown rules registered, so the scan inside the fragment carries its DSL and relevance predicates ride in the query clause instead of the fragment. |
+| `OpenSearchRestClient` path | `IllegalStateException("Staged execution requires a NodeClient")` | Local fix: a REST-side response parser that preserves the raw `InternalCalciteExec`. |
+| Multi-scan plans: `join`, `union`, `append`, `multisearch` | Coordinator-only (12 goldens, 58 tests still correct) | More than one gather boundary. A small-side broadcast needs multiple fragments per query; a large×large join needs a **shuffle**. The stage model generalizes to N stages, so this is additive rather than blocked. |
+| Non-rank `Window` (`eventstats`), global sort without a limit, high-cardinality `stats` | `CONCAT`/`MERGE_AGG` gather; correct, but bounded by one coordinator's heap and refused by the budget beyond it | A **shard-to-shard shuffle**, to repartition by the window's `PARTITION BY` key or the sort key. OpenSearch has no such primitive; this is the ~15–25% class named under Known limitations. |
+| Shard memory is O(matching docs) for every shape except an early-terminating unordered limit | The budget converts an OOM into a diagnosable refusal; it does not make the query work | The **option-C lazy doc-ID bridge** — stream rows into the fragment instead of buffering them. It is the only listed option that removes the buffer rather than bounding its failure. |
+| Fields under two different `nested` paths | Cross-product, documented in code and not silent | Local fix: correlated expansion, or a refusal. |
+| Rule-3 refusals: `rank = k` for k > 1, unordered `RANK`/`DENSE_RANK`, `dedup keepempty=true`; rule-4 refusal: non-zero offset | Fall through to `CONCAT`, so results stay correct and only the optimization is lost | Each is a correctness boundary, not an omission — see the rule 3 and rule 4 sections. `keepempty=true` would need a nulls-pass-through flag on the descriptor. |
+| `chart_single_group` / `chart_multiple_groups` are coordinator-only | 2 goldens; results correct | Cause not isolated. Recorded as open rather than guessed. |
+
+### Verdict
+
+The PoC's central claim was totality: that a split which defaults to `NEEDS_GATHER` never turns a missing optimization into a query failure. That held. Across 398 executed staged tests no plan was ever rejected by the planner and no query was silently truncated; 4 failures remain and both of their causes are missing function implementations on the staged compile paths, not gaps in the split. The `#5698` shape specifically is fixed: `dedup` now ships 2 rows per shard where it previously shipped every matching document through a PIT, and no PIT, scroll, or `search_after` is created anywhere on this path.
+
 ## Out of scope
 
 Lazy doc-ID bridge (option C); approximate/truncating mode for high-cardinality `stats`; shard-to-shard shuffle; cost-based push decisions; routing-key-aligned window optimization; performance parity with today's pushdown.
