@@ -88,6 +88,10 @@ public class QueryService {
     this.planTimeRewriter = planTimeRewriter;
   }
 
+  private UnresolvedPlan rewritePlan(UnresolvedPlan plan) {
+    return planTimeRewriter == null ? plan : planTimeRewriter.rewrite(plan);
+  }
+
   public QueryService(
       Analyzer analyzer,
       ExecutionEngine executionEngine,
@@ -239,8 +243,7 @@ public class QueryService {
 
                   context.setHighlightConfig(highlightConfig);
 
-                  UnresolvedPlan rewrittenPlan =
-                      planTimeRewriter == null ? plan : planTimeRewriter.rewrite(plan);
+                  UnresolvedPlan rewrittenPlan = rewritePlan(plan);
 
                   // Wrap analyze with ANALYZING stage tracking
                   RelNode relNode =
@@ -333,7 +336,7 @@ public class QueryService {
                   context.setHighlightConfig(highlightConfig);
                   context.run(
                       () -> {
-                        RelNode relNode = analyze(plan, context);
+                        RelNode relNode = analyze(rewritePlan(plan), context);
                         RelNode calcitePlan =
                             withCheckedArithmetic(convertToCalcitePlan(relNode, context), context);
                         if (format != null) {
