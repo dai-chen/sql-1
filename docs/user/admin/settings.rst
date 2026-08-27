@@ -214,7 +214,7 @@ Version
 Description
 -----------
 
-Experimental. Narrows a wildcard index expression to the indices that can match the query's pushed-down filter, so fewer indices and shards are touched. Currently the main use is to avoid exhausting the open point-in-time (PIT) context limit when a query would otherwise open a reader context over many indices.
+Experimental. Narrows a wildcard index expression to the indices that can match the query's pushed-down filter, so fewer indices and shards are touched. Currently the main use is to avoid exhausting the open point-in-time (PIT) context limit when a query would otherwise open a reader context over many indices. Because ``_field_caps`` does not report per-index failures, in the rare case where every shard of an index is unavailable that index may be omitted. Pruning also requires the field-capabilities permission, so a principal without it falls back to querying the full expression.
 
 1. The default value is false.
 2. This setting is node scope.

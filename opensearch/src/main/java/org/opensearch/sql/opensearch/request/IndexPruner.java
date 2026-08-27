@@ -12,7 +12,9 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.opensearch.action.fieldcaps.FieldCapabilitiesRequest;
+import org.opensearch.action.search.SearchRequest;
 import org.opensearch.common.regex.Regex;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.ConstantScoreQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
@@ -37,6 +39,11 @@ public class IndexPruner {
 
   private final OpenSearchClient client;
 
+  // No cancellation or circuit breaker on _field_caps, so bound it to avoid hanging the thread.
+  private static final TimeValue PROBE_TIMEOUT = TimeValue.timeValueSeconds(3);
+
+  private static final int MAX_PRUNED_INDICES = 50;
+
   public IndexName prune(IndexName indexName, QueryBuilder filter) {
     try {
       return isPrunable(indexName, filter) ? doPrune(indexName, filter) : indexName;
@@ -56,8 +63,8 @@ public class IndexPruner {
     if (hasClusterQualifier(indexName)) {
       return false;
     }
-    // can_match proves disjointness only via RangeQueryBuilder; a rangeless filter cannot prune.
-    return containsRange(filter);
+    // can_match proves disjointness only for date ranges, so any other filter cannot prune.
+    return containsTimestampRange(filter);
   }
 
   private IndexName doPrune(IndexName indexName, QueryBuilder filter) {
@@ -71,9 +78,13 @@ public class IndexPruner {
             .indices(indexName.getIndexNames())
             .fields(OpenSearchConstants.IMPLICIT_FIELD_TIMESTAMP);
     request.indexFilter(filter);
-    List<String> survivors = List.of(node.get().fieldCaps(request).actionGet().getIndices());
+    // Probe must expand indices like the search, else survivors reflect a different set.
+    request.indicesOptions(SearchRequest.DEFAULT_INDICES_OPTIONS);
+    List<String> survivors =
+        List.of(node.get().fieldCaps(request).actionGet(PROBE_TIMEOUT).getIndices());
     // An empty list would mean "all indices" to OpenSearch, so leave the expression alone.
-    if (survivors.isEmpty()) {
+    // A list past the cap is heavier and more brittle than the wildcard, so keep the wildcard.
+    if (survivors.isEmpty() || survivors.size() > MAX_PRUNED_INDICES) {
       return indexName;
     }
     log.info("Index pruning narrowed {} to {} indices", indexName, survivors.size());
@@ -89,17 +100,17 @@ public class IndexPruner {
         .anyMatch(name -> name.indexOf(RemoteClusterAware.REMOTE_CLUSTER_INDEX_SEPARATOR) >= 0);
   }
 
-  private boolean containsRange(QueryBuilder query) {
-    if (query instanceof RangeQueryBuilder) {
-      return true;
+  private boolean containsTimestampRange(QueryBuilder query) {
+    if (query instanceof RangeQueryBuilder range) {
+      return OpenSearchConstants.IMPLICIT_FIELD_TIMESTAMP.equals(range.fieldName());
     }
     if (query instanceof BoolQueryBuilder bool) {
       return Stream.of(bool.must(), bool.filter(), bool.should())
           .flatMap(List::stream)
-          .anyMatch(this::containsRange);
+          .anyMatch(this::containsTimestampRange);
     }
     if (query instanceof ConstantScoreQueryBuilder constantScore) {
-      return containsRange(constantScore.innerQuery());
+      return containsTimestampRange(constantScore.innerQuery());
     }
     return false;
   }

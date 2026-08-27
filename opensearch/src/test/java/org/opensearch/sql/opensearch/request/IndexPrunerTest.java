@@ -15,16 +15,22 @@ import static org.opensearch.index.query.QueryBuilders.boolQuery;
 import static org.opensearch.index.query.QueryBuilders.queryStringQuery;
 import static org.opensearch.index.query.QueryBuilders.rangeQuery;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.action.fieldcaps.FieldCapabilities;
+import org.opensearch.action.fieldcaps.FieldCapabilitiesRequest;
 import org.opensearch.action.fieldcaps.FieldCapabilitiesResponse;
+import org.opensearch.action.search.SearchRequest;
 import org.opensearch.common.action.ActionFuture;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.sql.opensearch.client.OpenSearchClient;
 import org.opensearch.sql.opensearch.request.OpenSearchRequest.IndexName;
@@ -52,7 +58,7 @@ class IndexPrunerTest {
 
   private void survivors(String... names) {
     when(node.fieldCaps(any())).thenReturn(future);
-    when(future.actionGet()).thenReturn(response(names));
+    when(future.actionGet(any(TimeValue.class))).thenReturn(response(names));
   }
 
   @Test
@@ -128,8 +134,37 @@ class IndexPrunerTest {
   void fieldCapsThrowingReturnsOriginal() {
     nodeAvailable();
     when(node.fieldCaps(any())).thenReturn(future);
-    when(future.actionGet()).thenThrow(new RuntimeException("boom"));
+    when(future.actionGet(any(TimeValue.class))).thenThrow(new RuntimeException("boom"));
     IndexName original = new IndexName("logs-*");
     assertSame(original, pruner().prune(original, rangeQuery("@timestamp").gte("now-1d")));
+  }
+
+  @Test
+  void rangeOnNonTimestampFieldReturnsOriginalWithoutProbe() {
+    IndexName original = new IndexName("logs-*");
+    assertSame(original, pruner().prune(original, rangeQuery("status").gte(200)));
+    verify(client, never()).getNodeClient();
+  }
+
+  @Test
+  void survivorsExceedingCapReturnOriginal() {
+    nodeAvailable();
+    survivors(IntStream.rangeClosed(1, 51).mapToObj(i -> "logs-" + i).toArray(String[]::new));
+    IndexName original = new IndexName("logs-*");
+    assertSame(original, pruner().prune(original, rangeQuery("@timestamp").gte("now-1d")));
+  }
+
+  @Test
+  void probeCarriesTimestampFieldAndSearchIndicesOptions() {
+    nodeAvailable();
+    survivors("logs-a");
+    ArgumentCaptor<FieldCapabilitiesRequest> captor =
+        ArgumentCaptor.forClass(FieldCapabilitiesRequest.class);
+    pruner().prune(new IndexName("logs-*"), rangeQuery("@timestamp").gte("now-1d"));
+    verify(node).fieldCaps(captor.capture());
+    FieldCapabilitiesRequest probe = captor.getValue();
+    assertEquals(
+        "[@timestamp]|" + SearchRequest.DEFAULT_INDICES_OPTIONS,
+        Arrays.toString(probe.fields()) + "|" + probe.indicesOptions());
   }
 }
