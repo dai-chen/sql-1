@@ -17,6 +17,7 @@ import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.ConstantScoreQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.RangeQueryBuilder;
+import org.opensearch.sql.calcite.plan.OpenSearchConstants;
 import org.opensearch.sql.opensearch.client.OpenSearchClient;
 import org.opensearch.sql.opensearch.request.OpenSearchRequest.IndexName;
 import org.opensearch.transport.RemoteClusterAware;
@@ -33,8 +34,6 @@ import org.opensearch.transport.client.node.NodeClient;
 @Log4j2
 @RequiredArgsConstructor
 public class IndexPruner {
-
-  private static final String PROBE_FIELD = "__sql_prune_probe__";
 
   private final OpenSearchClient client;
 
@@ -57,8 +56,7 @@ public class IndexPruner {
     if (hasClusterQualifier(indexName)) {
       return false;
     }
-    // can_match only proves range disjointness via RangeQueryBuilder, so a rangeless filter such
-    // as query_string cannot prune.
+    // can_match proves disjointness only via RangeQueryBuilder; a rangeless filter cannot prune.
     return containsRange(filter);
   }
 
@@ -67,7 +65,13 @@ public class IndexPruner {
     if (node.isEmpty()) {
       return indexName;
     }
-    List<String> survivors = probeMatchingIndices(node.get(), indexName, filter);
+    // Only the response's index list matters, not its field data, so one field keeps merges cheap.
+    FieldCapabilitiesRequest request =
+        new FieldCapabilitiesRequest()
+            .indices(indexName.getIndexNames())
+            .fields(OpenSearchConstants.IMPLICIT_FIELD_TIMESTAMP);
+    request.indexFilter(filter);
+    List<String> survivors = List.of(node.get().fieldCaps(request).actionGet().getIndices());
     // An empty list would mean "all indices" to OpenSearch, so leave the expression alone.
     if (survivors.isEmpty()) {
       return indexName;
@@ -83,16 +87,6 @@ public class IndexPruner {
   private boolean hasClusterQualifier(IndexName indexName) {
     return Arrays.stream(indexName.getIndexNames())
         .anyMatch(name -> name.indexOf(RemoteClusterAware.REMOTE_CLUSTER_INDEX_SEPARATOR) >= 0);
-  }
-
-  private List<String> probeMatchingIndices(
-      NodeClient node, IndexName indexName, QueryBuilder filter) {
-    // a nonexistent field keeps the merge cost near zero while the index filter still drives
-    // can_match to drop indices whose shards cannot match.
-    FieldCapabilitiesRequest request =
-        new FieldCapabilitiesRequest().indices(indexName.getIndexNames()).fields(PROBE_FIELD);
-    request.indexFilter(filter);
-    return List.of(node.fieldCaps(request).actionGet().getIndices());
   }
 
   private boolean containsRange(QueryBuilder query) {
