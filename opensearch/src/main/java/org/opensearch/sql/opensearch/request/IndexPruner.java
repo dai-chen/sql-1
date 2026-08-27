@@ -11,14 +11,12 @@ import java.util.Optional;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.opensearch.action.admin.indices.resolve.ResolveIndexAction;
 import org.opensearch.action.fieldcaps.FieldCapabilitiesRequest;
 import org.opensearch.common.regex.Regex;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.ConstantScoreQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.RangeQueryBuilder;
-import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.opensearch.client.OpenSearchClient;
 import org.opensearch.sql.opensearch.request.OpenSearchRequest.IndexName;
 import org.opensearch.transport.RemoteClusterAware;
@@ -39,7 +37,6 @@ public class IndexPruner {
   private static final String PROBE_FIELD = "__sql_prune_probe__";
 
   private final OpenSearchClient client;
-  private final Settings settings;
 
   public IndexName prune(IndexName indexName, QueryBuilder filter) {
     try {
@@ -51,9 +48,6 @@ public class IndexPruner {
   }
 
   private boolean isPrunable(IndexName indexName, QueryBuilder filter) {
-    if (!Boolean.TRUE.equals(settings.getSettingValue(Settings.Key.QUERY_PRUNING_ENABLED))) {
-      return false;
-    }
     if (filter == null) {
       return false;
     }
@@ -73,17 +67,12 @@ public class IndexPruner {
     if (node.isEmpty()) {
       return indexName;
     }
-    List<String> matched = resolveConcreteIndices(node.get(), indexName);
-    if (matched.size() <= 1) {
-      return indexName;
-    }
     List<String> survivors = probeMatchingIndices(node.get(), indexName, filter);
-    // an empty inclusion list would mean "all indices" to OpenSearch, so the guard is
-    // load-bearing.
-    if (survivors.isEmpty() || survivors.size() >= matched.size()) {
+    // An empty list would mean "all indices" to OpenSearch, so leave the expression alone.
+    if (survivors.isEmpty()) {
       return indexName;
     }
-    log.info("Index pruning narrowed {} indices to {}", matched.size(), survivors.size());
+    log.info("Index pruning narrowed {} to {} indices", indexName, survivors.size());
     return new IndexName(String.join(",", survivors));
   }
 
@@ -91,22 +80,9 @@ public class IndexPruner {
     return Arrays.stream(indexName.getIndexNames()).anyMatch(Regex::isSimpleMatchPattern);
   }
 
-  // A colon does not guarantee a remote cluster (core resolves it against configured cluster
-  // names), so treat any qualifier as out of scope rather than trying to decide.
   private boolean hasClusterQualifier(IndexName indexName) {
     return Arrays.stream(indexName.getIndexNames())
         .anyMatch(name -> name.indexOf(RemoteClusterAware.REMOTE_CLUSTER_INDEX_SEPARATOR) >= 0);
-  }
-
-  // Resolves against cluster state only (no shard fan-out), so it is the cheap way to learn the
-  // full matched index set.
-  private List<String> resolveConcreteIndices(NodeClient node, IndexName indexName) {
-    ResolveIndexAction.Response response =
-        node.execute(
-                ResolveIndexAction.INSTANCE,
-                new ResolveIndexAction.Request(indexName.getIndexNames()))
-            .actionGet();
-    return response.getIndices().stream().map(ResolveIndexAction.ResolvedIndex::getName).toList();
   }
 
   private List<String> probeMatchingIndices(

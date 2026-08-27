@@ -163,8 +163,11 @@ public class OpenSearchRequestBuilder {
 
   private OpenSearchRequest.IndexName resolvePrunedIndexName(
       OpenSearchRequest.IndexName indexName, OpenSearchClient client) {
+    if (!Boolean.TRUE.equals(settings.getSettingValue(Settings.Key.QUERY_PRUNING_ENABLED))) {
+      return indexName;
+    }
     if (prunedIndexName == null) {
-      prunedIndexName = new IndexPruner(client, settings).prune(indexName, sourceBuilder.query());
+      prunedIndexName = new IndexPruner(client).prune(indexName, sourceBuilder.query());
     }
     return prunedIndexName;
   }

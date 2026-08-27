@@ -138,6 +138,31 @@ class OpenSearchRequestBuilderTest {
   }
 
   @Test
+  void build_PIT_request_does_not_prune_when_pruning_disabled() {
+    when(client.createPit(any(CreatePitRequest.class))).thenReturn("samplePITId");
+    when(settings.getSettingValue(Settings.Key.QUERY_PRUNING_ENABLED)).thenReturn(false);
+    OpenSearchRequest.IndexName wildcard = new OpenSearchRequest.IndexName("test-*");
+    requestBuilder.pushDownFilter(rangeQuery("@timestamp").gte("now-1d"));
+    requestBuilder.pushDownLimit(1, 0);
+    requestBuilder.pushDownPageSize(2);
+
+    assertEquals(
+        OpenSearchQueryRequest.pitOf(
+            new OpenSearchRequest.IndexName("test-*"),
+            new SearchSourceBuilder()
+                .from(0)
+                .size(2)
+                .timeout(DEFAULT_QUERY_TIMEOUT)
+                .query(rangeQuery("@timestamp").gte("now-1d")),
+            exprValueFactory,
+            List.of(),
+            TimeValue.timeValueMinutes(1),
+            "samplePITId"),
+        requestBuilder.build(wildcard, DEFAULT_QUERY_TIMEOUT, client));
+    verify(client, never()).getNodeClient();
+  }
+
+  @Test
   void buildRequestWithPit_pageSizeNull_sizeGreaterThanMaxResultWindow() {
     when(client.createPit(any(CreatePitRequest.class))).thenReturn("samplePITId");
     Integer limit = 600;
