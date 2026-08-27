@@ -1,0 +1,239 @@
+setup:
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.calcite.enabled : true
+            plugins.query.pruning.enabled : true
+  - do:
+      indices.create:
+        index: pruning-it-2026-01
+        body:
+          settings:
+            number_of_shards: 1
+            number_of_replicas: 0
+            # head 5 must exceed max_result_window to force the PIT path that pruning runs on.
+            max_result_window: 2
+          mappings:
+            properties:
+              "@timestamp": { type: date }
+              status: { type: integer }
+              body: { type: text }
+  - do:
+      indices.create:
+        index: pruning-it-2026-02
+        body:
+          settings:
+            number_of_shards: 1
+            number_of_replicas: 0
+            max_result_window: 2
+          mappings:
+            properties:
+              "@timestamp": { type: date }
+              status: { type: integer }
+              body: { type: text }
+  - do:
+      indices.create:
+        index: pruning-it-2026-03
+        body:
+          settings:
+            number_of_shards: 1
+            number_of_replicas: 0
+            max_result_window: 2
+          mappings:
+            properties:
+              "@timestamp": { type: date }
+              status: { type: integer }
+              body: { type: text }
+  - do:
+      bulk:
+        index: pruning-it-2026-01
+        refresh: true
+        body:
+          - '{"index": {}}'
+          - '{"@timestamp": "2026-01-15T12:00:00Z", "status": 1, "body": "january"}'
+  - do:
+      bulk:
+        index: pruning-it-2026-02
+        refresh: true
+        body:
+          - '{"index": {}}'
+          - '{"@timestamp": "2026-02-15T12:00:00Z", "status": 2, "body": "february"}'
+  - do:
+      bulk:
+        index: pruning-it-2026-03
+        refresh: true
+        body:
+          - '{"index": {}}'
+          - '{"@timestamp": "2026-03-15T12:00:00Z", "status": 3, "body": "march"}'
+
+---
+teardown:
+  - do:
+      indices.delete:
+        index: pruning-it-2026-01,pruning-it-2026-02,pruning-it-2026-03
+        ignore_unavailable: true
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.calcite.enabled : null
+            plugins.query.pruning.enabled : null
+
+---
+"Pruning opens a PIT only on the index within range":
+  - skip:
+      features:
+        - headers
+  - do:
+      headers:
+        Content-Type: 'application/json'
+      ppl:
+        body:
+          query: "source=pruning-it-* | where @timestamp >= '2026-02-01 00:00:00' and @timestamp <= '2026-02-28 23:59:59' | head 5"
+  # can_match already skips the query phase on non-matching shards regardless of pruning, so query_total cannot distinguish the two; PIT creation ignores can_match.
+  - do:
+      indices.stats:
+        index: pruning-it-*
+        metric: search
+        filter_path: 'indices.*.total.search.point_in_time_total'
+  - match:
+      indices:
+        pruning-it-2026-01: {total: {search: {point_in_time_total: 0}}}
+        pruning-it-2026-02: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-03: {total: {search: {point_in_time_total: 0}}}
+
+---
+"Pruning keeps both indices within range":
+  - skip:
+      features:
+        - headers
+  - do:
+      headers:
+        Content-Type: 'application/json'
+      ppl:
+        body:
+          query: "source=pruning-it-* | where @timestamp >= '2026-01-01 00:00:00' and @timestamp <= '2026-02-28 23:59:59' | head 5"
+  - do:
+      indices.stats:
+        index: pruning-it-*
+        metric: search
+        filter_path: 'indices.*.total.search.point_in_time_total'
+  - match:
+      indices:
+        pruning-it-2026-01: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-02: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-03: {total: {search: {point_in_time_total: 0}}}
+
+---
+"Pruning keeps the later indices after an open ended start":
+  - skip:
+      features:
+        - headers
+  - do:
+      headers:
+        Content-Type: 'application/json'
+      ppl:
+        body:
+          query: "source=pruning-it-* | where @timestamp >= '2026-02-01 00:00:00' | head 5"
+  - do:
+      indices.stats:
+        index: pruning-it-*
+        metric: search
+        filter_path: 'indices.*.total.search.point_in_time_total'
+  - match:
+      indices:
+        pruning-it-2026-01: {total: {search: {point_in_time_total: 0}}}
+        pruning-it-2026-02: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-03: {total: {search: {point_in_time_total: 1}}}
+
+---
+"Every index opens a PIT when pruning is disabled":
+  - skip:
+      features:
+        - headers
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.query.pruning.enabled : false
+  - do:
+      headers:
+        Content-Type: 'application/json'
+      ppl:
+        body:
+          query: "source=pruning-it-* | where @timestamp >= '2026-02-01 00:00:00' and @timestamp <= '2026-02-28 23:59:59' | head 5"
+  - do:
+      indices.stats:
+        index: pruning-it-*
+        metric: search
+        filter_path: 'indices.*.total.search.point_in_time_total'
+  - match:
+      indices:
+        pruning-it-2026-01: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-02: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-03: {total: {search: {point_in_time_total: 1}}}
+
+---
+"Every index opens a PIT when the filter has no range":
+  - skip:
+      features:
+        - headers
+  - do:
+      headers:
+        Content-Type: 'application/json'
+      ppl:
+        body:
+          query: "source=pruning-it-* | where status = 2 | head 5"
+  - do:
+      indices.stats:
+        index: pruning-it-*
+        metric: search
+        filter_path: 'indices.*.total.search.point_in_time_total'
+  - match:
+      indices:
+        pruning-it-2026-01: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-02: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-03: {total: {search: {point_in_time_total: 1}}}
+
+---
+"Every index opens a PIT when the range is not on the timestamp":
+  - skip:
+      features:
+        - headers
+  - do:
+      headers:
+        Content-Type: 'application/json'
+      ppl:
+        body:
+          query: "source=pruning-it-* | where status >= 1 and status <= 100 | head 5"
+  - do:
+      indices.stats:
+        index: pruning-it-*
+        metric: search
+        filter_path: 'indices.*.total.search.point_in_time_total'
+  - match:
+      indices:
+        pruning-it-2026-01: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-02: {total: {search: {point_in_time_total: 1}}}
+        pruning-it-2026-03: {total: {search: {point_in_time_total: 1}}}
+
+---
+"A backfilled document stored outside its month is still returned":
+  - skip:
+      features:
+        - headers
+  - do:
+      bulk:
+        index: pruning-it-2026-03
+        refresh: true
+        body:
+          - '{"index": {}}'
+          - '{"@timestamp": "2026-02-20T12:00:00Z", "status": 99, "body": "backfill"}'
+  - do:
+      headers:
+        Content-Type: 'application/json'
+      ppl:
+        body:
+          query: "source=pruning-it-* | where @timestamp >= '2026-02-01 00:00:00' and @timestamp <= '2026-02-28 23:59:59' | sort @timestamp | fields body | head 5"
+  - match: {datarows: [["february"], ["backfill"]]}
