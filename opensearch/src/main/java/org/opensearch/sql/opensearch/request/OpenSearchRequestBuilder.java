@@ -74,6 +74,8 @@ public class OpenSearchRequestBuilder {
 
   @EqualsAndHashCode.Exclude @ToString.Exclude private final Settings settings;
 
+  @EqualsAndHashCode.Exclude @ToString.Exclude private OpenSearchRequest.IndexName prunedIndexName;
+
   public static class PushDownUnSupportedException extends RuntimeException {
     public PushDownUnSupportedException(String message) {
       super(message);
@@ -135,9 +137,10 @@ public class OpenSearchRequestBuilder {
       if (startFrom + size > maxResultWindow) {
         sourceBuilder.size(maxResultWindow - startFrom);
         // Search with PIT request
-        String pitId = createPit(indexName, cursorKeepAlive, client);
+        OpenSearchRequest.IndexName prunedName = pruneForPit(indexName, client);
+        String pitId = createPit(prunedName, cursorKeepAlive, client);
         return OpenSearchQueryRequest.pitOf(
-            indexName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
+            prunedName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
       } else {
         sourceBuilder.from(startFrom);
         sourceBuilder.size(size);
@@ -150,10 +153,19 @@ public class OpenSearchRequestBuilder {
       }
       sourceBuilder.size(pageSize);
       // Search with PIT request
-      String pitId = createPit(indexName, cursorKeepAlive, client);
+      OpenSearchRequest.IndexName prunedName = pruneForPit(indexName, client);
+      String pitId = createPit(prunedName, cursorKeepAlive, client);
       return OpenSearchQueryRequest.pitOf(
-          indexName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
+          prunedName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
     }
+  }
+
+  private OpenSearchRequest.IndexName pruneForPit(
+      OpenSearchRequest.IndexName indexName, OpenSearchClient client) {
+    if (prunedIndexName == null) {
+      prunedIndexName = new IndexPruner(client, settings).prune(indexName, sourceBuilder.query());
+    }
+    return prunedIndexName;
   }
 
   private String createPit(

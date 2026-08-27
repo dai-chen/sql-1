@@ -52,6 +52,7 @@ public abstract class Settings {
     /** Common Settings for SQL and PPL. */
     QUERY_MEMORY_LIMIT("plugins.query.memory_limit"),
     QUERY_SIZE_LIMIT("plugins.query.size_limit"),
+    QUERY_PRUNING_ENABLED("plugins.query.pruning.enabled"),
     MAX_EXPRESSION_DEPTH("plugins.query.max_expression_depth"),
     QUERY_BUCKET_SIZE("plugins.query.buckets"),
     SEARCH_MAX_BUCKETS("search.max_buckets"),

@@ -204,6 +204,22 @@ Result set::
       }
     }
 
+plugins.query.pruning.enabled
+=============================
+
+Version
+-------
+3.3
+
+Description
+-----------
+
+Experimental. Enables index pruning before creating a point-in-time (PIT) reader context, narrowing a wildcard index expression to only the indices that can match the pushed-down filter to avoid exhausting the open PIT context limit.
+
+1. The default value is false.
+2. This setting is node scope.
+3. This setting can be updated dynamically.
+
 plugins.query.max_expression_depth
 ==================================
 
