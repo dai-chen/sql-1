@@ -209,12 +209,12 @@ plugins.query.pruning.enabled
 
 Version
 -------
-3.3
+3.9
 
 Description
 -----------
 
-Experimental. Enables index pruning before creating a point-in-time (PIT) reader context, narrowing a wildcard index expression to only the indices that can match the pushed-down filter to avoid exhausting the open PIT context limit.
+Experimental. Narrows a wildcard index expression to the indices that can match the query's pushed-down filter, so fewer indices and shards are touched. Currently the main use is to avoid exhausting the open point-in-time (PIT) context limit when a query would otherwise open a reader context over many indices.
 
 1. The default value is false.
 2. This setting is node scope.

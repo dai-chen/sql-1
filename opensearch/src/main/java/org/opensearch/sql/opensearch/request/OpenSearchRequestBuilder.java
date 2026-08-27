@@ -74,6 +74,7 @@ public class OpenSearchRequestBuilder {
 
   @EqualsAndHashCode.Exclude @ToString.Exclude private final Settings settings;
 
+  // Memoized within a single-threaded builder: build() runs once per scan on the calling thread.
   @EqualsAndHashCode.Exclude @ToString.Exclude private OpenSearchRequest.IndexName prunedIndexName;
 
   public static class PushDownUnSupportedException extends RuntimeException {
@@ -137,7 +138,7 @@ public class OpenSearchRequestBuilder {
       if (startFrom + size > maxResultWindow) {
         sourceBuilder.size(maxResultWindow - startFrom);
         // Search with PIT request
-        OpenSearchRequest.IndexName prunedName = pruneForPit(indexName, client);
+        OpenSearchRequest.IndexName prunedName = resolvePrunedIndexName(indexName, client);
         String pitId = createPit(prunedName, cursorKeepAlive, client);
         return OpenSearchQueryRequest.pitOf(
             prunedName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
@@ -153,14 +154,14 @@ public class OpenSearchRequestBuilder {
       }
       sourceBuilder.size(pageSize);
       // Search with PIT request
-      OpenSearchRequest.IndexName prunedName = pruneForPit(indexName, client);
+      OpenSearchRequest.IndexName prunedName = resolvePrunedIndexName(indexName, client);
       String pitId = createPit(prunedName, cursorKeepAlive, client);
       return OpenSearchQueryRequest.pitOf(
           prunedName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
     }
   }
 
-  private OpenSearchRequest.IndexName pruneForPit(
+  private OpenSearchRequest.IndexName resolvePrunedIndexName(
       OpenSearchRequest.IndexName indexName, OpenSearchClient client) {
     if (prunedIndexName == null) {
       prunedIndexName = new IndexPruner(client, settings).prune(indexName, sourceBuilder.query());

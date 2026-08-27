@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.opensearch.action.admin.indices.resolve.ResolveIndexAction;
 import org.opensearch.action.fieldcaps.FieldCapabilitiesRequest;
 import org.opensearch.common.regex.Regex;
 import org.opensearch.index.query.BoolQueryBuilder;
@@ -42,43 +43,48 @@ public class IndexPruner {
 
   public IndexName prune(IndexName indexName, QueryBuilder filter) {
     try {
-      if (!Boolean.TRUE.equals(settings.getSettingValue(Settings.Key.QUERY_PRUNING_ENABLED))) {
-        return indexName;
-      }
-      if (filter == null) {
-        return indexName;
-      }
-      if (!hasWildcard(indexName)) {
-        return indexName;
-      }
-      if (hasClusterQualifier(indexName)) {
-        return indexName;
-      }
-      // can_match only proves range disjointness via RangeQueryBuilder, so a rangeless filter such
-      // as query_string cannot prune.
-      if (!containsRange(filter)) {
-        return indexName;
-      }
-      Optional<NodeClient> node = client.getNodeClient();
-      if (node.isEmpty()) {
-        return indexName;
-      }
-      List<String> matched = probe(node.get(), indexName.toString(), null);
-      if (matched.size() <= 1) {
-        return indexName;
-      }
-      List<String> survivors = probe(node.get(), indexName.toString(), filter);
-      // an empty inclusion list would mean "all indices" to OpenSearch, so the guard is
-      // load-bearing.
-      if (survivors.isEmpty() || survivors.size() >= matched.size()) {
-        return indexName;
-      }
-      log.debug("Index pruning narrowed {} indices to {}", matched.size(), survivors.size());
-      return new IndexName(String.join(",", survivors));
+      return isPrunable(indexName, filter) ? doPrune(indexName, filter) : indexName;
     } catch (Exception e) {
       log.warn("Index pruning failed; querying the full index expression", e);
       return indexName;
     }
+  }
+
+  private boolean isPrunable(IndexName indexName, QueryBuilder filter) {
+    if (!Boolean.TRUE.equals(settings.getSettingValue(Settings.Key.QUERY_PRUNING_ENABLED))) {
+      return false;
+    }
+    if (filter == null) {
+      return false;
+    }
+    if (!hasWildcard(indexName)) {
+      return false;
+    }
+    if (hasClusterQualifier(indexName)) {
+      return false;
+    }
+    // can_match only proves range disjointness via RangeQueryBuilder, so a rangeless filter such
+    // as query_string cannot prune.
+    return containsRange(filter);
+  }
+
+  private IndexName doPrune(IndexName indexName, QueryBuilder filter) {
+    Optional<NodeClient> node = client.getNodeClient();
+    if (node.isEmpty()) {
+      return indexName;
+    }
+    List<String> matched = resolveConcreteIndices(node.get(), indexName);
+    if (matched.size() <= 1) {
+      return indexName;
+    }
+    List<String> survivors = probeMatchingIndices(node.get(), indexName, filter);
+    // an empty inclusion list would mean "all indices" to OpenSearch, so the guard is
+    // load-bearing.
+    if (survivors.isEmpty() || survivors.size() >= matched.size()) {
+      return indexName;
+    }
+    log.info("Index pruning narrowed {} indices to {}", matched.size(), survivors.size());
+    return new IndexName(String.join(",", survivors));
   }
 
   private boolean hasWildcard(IndexName indexName) {
@@ -92,13 +98,24 @@ public class IndexPruner {
         .anyMatch(name -> name.indexOf(RemoteClusterAware.REMOTE_CLUSTER_INDEX_SEPARATOR) >= 0);
   }
 
-  private List<String> probe(NodeClient node, String expression, QueryBuilder filter) {
-    // a nonexistent field yields a correct indices list at near-zero merge cost.
+  // Resolves against cluster state only (no shard fan-out), so it is the cheap way to learn the
+  // full matched index set.
+  private List<String> resolveConcreteIndices(NodeClient node, IndexName indexName) {
+    ResolveIndexAction.Response response =
+        node.execute(
+                ResolveIndexAction.INSTANCE,
+                new ResolveIndexAction.Request(indexName.getIndexNames()))
+            .actionGet();
+    return response.getIndices().stream().map(ResolveIndexAction.ResolvedIndex::getName).toList();
+  }
+
+  private List<String> probeMatchingIndices(
+      NodeClient node, IndexName indexName, QueryBuilder filter) {
+    // a nonexistent field keeps the merge cost near zero while the index filter still drives
+    // can_match to drop indices whose shards cannot match.
     FieldCapabilitiesRequest request =
-        new FieldCapabilitiesRequest().indices(expression.split(",")).fields(PROBE_FIELD);
-    if (filter != null) {
-      request.indexFilter(filter);
-    }
+        new FieldCapabilitiesRequest().indices(indexName.getIndexNames()).fields(PROBE_FIELD);
+    request.indexFilter(filter);
     return List.of(node.fieldCaps(request).actionGet().getIndices());
   }
 

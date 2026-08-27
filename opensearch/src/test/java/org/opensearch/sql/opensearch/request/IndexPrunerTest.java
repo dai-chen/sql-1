@@ -8,6 +8,8 @@ package org.opensearch.sql.opensearch.request;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,13 +17,17 @@ import static org.opensearch.index.query.QueryBuilders.boolQuery;
 import static org.opensearch.index.query.QueryBuilders.queryStringQuery;
 import static org.opensearch.index.query.QueryBuilders.rangeQuery;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.opensearch.action.admin.indices.resolve.ResolveIndexAction;
 import org.opensearch.action.fieldcaps.FieldCapabilities;
 import org.opensearch.action.fieldcaps.FieldCapabilitiesResponse;
 import org.opensearch.common.action.ActionFuture;
@@ -38,10 +44,25 @@ class IndexPrunerTest {
   @Mock private Settings settings;
   @Mock private NodeClient node;
   @Mock private ActionFuture<FieldCapabilitiesResponse> future;
+  @Mock private ActionFuture<ResolveIndexAction.Response> resolveFuture;
 
   private FieldCapabilitiesResponse response(String... indices) {
     Map<String, Map<String, FieldCapabilities>> empty = Collections.emptyMap();
     return new FieldCapabilitiesResponse(indices, empty);
+  }
+
+  private ResolveIndexAction.Response resolved(String... names) {
+    List<ResolveIndexAction.ResolvedIndex> indices =
+        Arrays.stream(names)
+            .map(
+                name -> {
+                  ResolveIndexAction.ResolvedIndex index =
+                      mock(ResolveIndexAction.ResolvedIndex.class);
+                  when(index.getName()).thenReturn(name);
+                  return index;
+                })
+            .collect(Collectors.toList());
+    return new ResolveIndexAction.Response(indices, List.of(), List.of());
   }
 
   private IndexPruner pruner() {
@@ -54,7 +75,17 @@ class IndexPrunerTest {
 
   private void nodeAvailable() {
     when(client.getNodeClient()).thenReturn(Optional.of(node));
+  }
+
+  private void matched(String... names) {
+    ResolveIndexAction.Response resolved = resolved(names);
+    when(node.execute(eq(ResolveIndexAction.INSTANCE), any())).thenReturn(resolveFuture);
+    when(resolveFuture.actionGet()).thenReturn(resolved);
+  }
+
+  private void survivors(String... names) {
     when(node.fieldCaps(any())).thenReturn(future);
+    when(future.actionGet()).thenReturn(response(names));
   }
 
   @Test
@@ -118,7 +149,7 @@ class IndexPrunerTest {
   void singleMatchedReturnsOriginal() {
     enable();
     nodeAvailable();
-    when(future.actionGet()).thenReturn(response("logs-a"));
+    matched("logs-a");
     IndexName original = new IndexName("logs-*");
     assertSame(original, pruner().prune(original, rangeQuery("@timestamp").gte("now-1d")));
   }
@@ -127,7 +158,8 @@ class IndexPrunerTest {
   void emptySurvivorsReturnsOriginal() {
     enable();
     nodeAvailable();
-    when(future.actionGet()).thenReturn(response("logs-a", "logs-b"), response());
+    matched("logs-a", "logs-b");
+    survivors();
     IndexName original = new IndexName("logs-*");
     assertSame(original, pruner().prune(original, rangeQuery("@timestamp").gte("now-1d")));
   }
@@ -136,7 +168,8 @@ class IndexPrunerTest {
   void survivorsEqualMatchedReturnsOriginal() {
     enable();
     nodeAvailable();
-    when(future.actionGet()).thenReturn(response("logs-a", "logs-b"), response("logs-a", "logs-b"));
+    matched("logs-a", "logs-b");
+    survivors("logs-a", "logs-b");
     IndexName original = new IndexName("logs-*");
     assertSame(original, pruner().prune(original, rangeQuery("@timestamp").gte("now-1d")));
   }
@@ -145,10 +178,8 @@ class IndexPrunerTest {
   void happyPathReturnsSurvivorInclusionList() {
     enable();
     nodeAvailable();
-    when(future.actionGet())
-        .thenReturn(
-            response("logs-a", "logs-b", "logs-c", "logs-d", "logs-e", "logs-f"),
-            response("logs-e", "logs-f"));
+    matched("logs-a", "logs-b", "logs-c", "logs-d", "logs-e", "logs-f");
+    survivors("logs-e", "logs-f");
     IndexName result =
         pruner().prune(new IndexName("logs-*"), rangeQuery("@timestamp").gte("now-1d"));
     assertEquals(new IndexName("logs-e,logs-f"), result);
@@ -158,7 +189,8 @@ class IndexPrunerTest {
   void rangeNestedInBoolIsFound() {
     enable();
     nodeAvailable();
-    when(future.actionGet()).thenReturn(response("logs-a", "logs-b"), response("logs-b"));
+    matched("logs-a", "logs-b");
+    survivors("logs-b");
     QueryBuilder filter = boolQuery().filter(rangeQuery("@timestamp").gte("now-1d"));
     IndexName result = pruner().prune(new IndexName("logs-*"), filter);
     assertEquals(new IndexName("logs-b"), result);
@@ -168,6 +200,8 @@ class IndexPrunerTest {
   void fieldCapsThrowingReturnsOriginal() {
     enable();
     nodeAvailable();
+    matched("logs-a", "logs-b");
+    when(node.fieldCaps(any())).thenReturn(future);
     when(future.actionGet()).thenThrow(new RuntimeException("boom"));
     IndexName original = new IndexName("logs-*");
     assertSame(original, pruner().prune(original, rangeQuery("@timestamp").gte("now-1d")));
