@@ -580,10 +580,16 @@ public enum Capability {
       "An untyped NULL literal in a no-FROM query (SELECT NULL, NULL in operators/intervals,"
           + " typeof(NULL)) can't be serialized to Substrait on the analytics-engine route."),
 
-  /** BACKEND: FILTER(WHERE) on aggregates can't be executed via Substrait streaming. */
-  FILTERED_AGGREGATE(
-      "FILTER(WHERE) on aggregates can't be executed on the analytics-engine route: the Substrait"
-          + " streaming path doesn't support filtered aggregates."),
+  /**
+   * BACKEND: {@code SUM} over a group in which no row contributes a value returns 0 on the
+   * v2/Calcite path but NULL (as the SQL standard requires) on the analytics-engine route.
+   * Reachable either through {@code FILTER(WHERE ...)} that matches nothing or through a {@code
+   * WHERE} clause that leaves the group empty; other aggregates agree (COUNT yields 0, MIN/MAX/AVG
+   * yield NULL on both).
+   */
+  SUM_EMPTY_GROUP(
+      "SUM over a group with no contributing rows returns 0 on the v2/Calcite path but NULL on the"
+          + " analytics-engine route."),
 
   /** Combining the result rows of two or more queries with a SQL set operator. */
   SET_OPERATION("SQL set operations are unsupported.");

@@ -387,8 +387,8 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
     givenQuery("SELECT COUNT(*) FILTER(WHERE age > 30) FROM catalog.employees")
         .assertPlan(
             """
-            LogicalAggregate(group=[{}], COUNT(*) FILTER(WHERE age > 30)=[COUNT() FILTER $0])
-              LogicalProject($f1=[>($2, 30)])
+            LogicalAggregate(group=[{}], COUNT(*) FILTER(WHERE age > 30)=[COUNT($0)])
+              LogicalProject($f2=[CASE(>($2, 30), 1, null:INTEGER)])
                 LogicalTableScan(table=[[catalog, employees]])
             """);
   }
@@ -402,8 +402,8 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
             """)
         .assertPlan(
             """
-            LogicalAggregate(group=[{0}], SUM(age) FILTER(WHERE age > 30)=[CHECKED_LONG_SUM($1) FILTER $2])
-              LogicalProject(department=[$3], age=[$2], $f3=[>($2, 30)])
+            LogicalAggregate(group=[{0}], SUM(age) FILTER(WHERE age > 30)=[CHECKED_LONG_SUM($1)])
+              LogicalProject(department=[$3], $f3=[CASE(>($2, 30), $2, null:INTEGER)])
                 LogicalTableScan(table=[[catalog, employees]])
             """);
   }
@@ -417,8 +417,8 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
             """)
         .assertPlan(
             """
-            LogicalAggregate(group=[{}], MAX(age) FILTER(WHERE age > 30)=[MAX($0) FILTER $1], MIN(age) FILTER(WHERE age < 50)=[MIN($0) FILTER $2])
-              LogicalProject(age=[$2], $f4=[>($2, 30)], $f5=[<($2, 50)])
+            LogicalAggregate(group=[{}], MAX(age) FILTER(WHERE age > 30)=[MAX($0)], MIN(age) FILTER(WHERE age < 50)=[MIN($1)])
+              LogicalProject($f4=[CASE(>($2, 30), $2, null:INTEGER)], $f5=[CASE(<($2, 50), $2, null:INTEGER)])
                 LogicalTableScan(table=[[catalog, employees]])
             """);
   }
