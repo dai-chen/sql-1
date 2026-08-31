@@ -62,6 +62,74 @@ public class AggregationIT extends SQLIntegTestCase {
   }
 
   @Test
+  public void testGroupByCaseExpression() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT CASE WHEN age > 35 THEN 'old' ELSE 'young' END AS g, COUNT(*) FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY CASE WHEN age > 35 THEN 'old' ELSE 'young' END");
+    verifyDataRows(response, rows("old", 3), rows("young", 4));
+  }
+
+  @Test
+  public void testGroupByCaseExpressionBySelectAlias() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT CASE WHEN age > 35 THEN 'old' ELSE 'young' END AS g, COUNT(*) FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY g");
+    verifyDataRows(response, rows("old", 3), rows("young", 4));
+  }
+
+  /** The aggregate still reads a base column that the group-by expression consumed. */
+  @Test
+  public void testGroupByCaseExpressionWithAggregateOnBaseColumn() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT CASE WHEN age > 35 THEN 'old' ELSE 'young' END AS g, AVG(age) AS a FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY CASE WHEN age > 35 THEN 'old' ELSE 'young' END");
+    verifyDataRows(response, rows("old", 37.0), rows("young", 31.75));
+  }
+
+  @Test
+  public void testGroupByCastExpression() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT CAST(age AS STRING) AS c, COUNT(*) FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY CAST(age AS STRING)");
+    verifyDataRows(
+        response,
+        rows("28", 1),
+        rows("32", 1),
+        rows("33", 1),
+        rows("34", 1),
+        rows("36", 2),
+        rows("39", 1));
+  }
+
+  @Test
+  public void testGroupByInPredicate() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT age IN (32, 36) AS i, COUNT(*) FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY age IN (32, 36)");
+    verifyDataRows(response, rows(false, 4), rows(true, 3));
+  }
+
+  @Test
+  public void testGroupByNotPredicate() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT NOT (age > 35) AS n, COUNT(*) FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY NOT (age > 35)");
+    verifyDataRows(response, rows(false, 3), rows(true, 4));
+  }
+
+  @Test
   public void testPushDownAggregationOnNullValues() throws IOException {
     // OpenSearch aggregation query (MetricAggregation)
     var response =

@@ -603,15 +603,26 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
               .forEach(field -> expandedFields.add(context.relBuilder.field(field)));
         }
         case Alias alias -> {
+          String displayName =
+              Strings.isNullOrEmpty(alias.getAlias()) ? alias.getName() : alias.getAlias();
           // SQL aggregate aliases (e.g., COUNT(*) AS cnt): reference the already-computed field
           // and rebind under the user's alias, since re-analyzing the alias returns null.
           if (alias.getDelegated() instanceof AggregateFunction
               && alias.getName() != null
               && currentFields.contains(alias.getName())) {
-            String displayName =
-                Strings.isNullOrEmpty(alias.getAlias()) ? alias.getName() : alias.getAlias();
             expandedFields.add(
                 context.relBuilder.alias(context.relBuilder.field(alias.getName()), displayName));
+          } else if (currentFields.contains(alias.getDelegated().toString())) {
+            // A computed GROUP BY key (e.g. SELECT CASE ... END ... GROUP BY CASE ... END). The
+            // Aggregate already exposes it, named after the group-by expression -- see
+            // AstAggregationBuilder#replaceGroupByItemIfAliasOrOrdinal. Reference that column:
+            // the base columns it was computed from are no longer in scope, so re-analyzing the
+            // expression here would fail to resolve them. Matching on the rendered expression is
+            // what lines up with the Aggregate's field name; the select item's own name is the
+            // raw query text, which does not.
+            expandedFields.add(
+                context.relBuilder.alias(
+                    context.relBuilder.field(alias.getDelegated().toString()), displayName));
           } else {
             expandedFields.add(rexVisitor.analyze(alias, context));
           }
