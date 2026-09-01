@@ -1,0 +1,140 @@
+# Batched index reads: https://github.com/opensearch-project/sql/issues/5698
+#
+# One PIT over an index expression opens a reader context per shard, all at once, so a wide
+# expression can exceed search.max_open_pit_context and fail. Reading the expression in groups opens
+# one group's contexts at a time instead.
+#
+# That count is not observable: point_in_time_total counts contexts created, which is the same either
+# way, and it is per index rather than per moment. What these tests assert instead is the row set,
+# which differs because `_shard_doc` carries a per-index shard ordinal: across several indices
+# (_doc, _shard_doc) is not a unique order, so a paged read can skip rows that tie its cursor. One
+# index per group makes the order unique, so a batched read returns rows that an unbatched read of
+# the same expression drops.
+#
+# max_result_window is 2 so these queries exceed it and take the PIT path that batching runs on, and
+# so that ties fall on a page boundary. The queries carry no sort, because a sort pushed into the
+# search is refused: it orders rows only within a group.
+
+setup:
+  - skip:
+      features:
+        - headers
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.calcite.enabled: true
+            # Without this a Calcite failure is silently answered by the v2 engine, which never batches.
+            plugins.calcite.fallback.allowed: false
+            plugins.query.batching.max_shards_per_batch: 1
+  - do:
+      indices.put_index_template:
+        name: batching-it
+        body:
+          index_patterns: ['batching-it-*']
+          template:
+            settings:
+              number_of_shards: 1
+              number_of_replicas: 0
+              max_result_window: 2
+            mappings:
+              properties:
+                body: {type: keyword}
+  - do:
+      bulk:
+        refresh: true
+        body:
+          - '{"index": {"_index": "batching-it-01"}}'
+          - '{"body": "m1"}'
+          - '{"index": {"_index": "batching-it-02"}}'
+          - '{"body": "m2"}'
+          - '{"index": {"_index": "batching-it-03"}}'
+          - '{"body": "m3"}'
+          - '{"index": {"_index": "batching-it-04"}}'
+          - '{"body": "m4"}'
+          - '{"index": {"_index": "batching-it-05"}}'
+          - '{"body": "m5"}'
+
+---
+teardown:
+  - do:
+      indices.delete:
+        index: 'batching-it-*'
+        ignore_unavailable: true
+  - do:
+      indices.delete_index_template:
+        name: batching-it
+        ignore: 404
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.calcite.enabled: null
+            plugins.calcite.fallback.allowed: null
+            plugins.query.batching.max_shards_per_batch: null
+
+---
+"Reads every index of a wide expression":
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | eventstats count() as total | sort body | fields body, total"
+  # total is counted over the whole expression, so 5 on every row means every group reached the one
+  # aggregate. Reading this expression unbatched returns two of these five rows.
+  - match: {datarows: [["m1", 5], ["m2", 5], ["m3", 5], ["m4", 5], ["m5", 5]]}
+
+---
+"Reads every index for an unbounded scan":
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | streamstats count() as seen | stats count() as rows, max(seen) as seen"
+  - match: {datarows: [[5, 5]]}
+
+---
+"Reads a single index as one group":
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-01 | eventstats count() as total | fields body, total"
+  - match: {datarows: [["m1", 1]]}
+
+---
+"Declines to batch when a sort is pushed into the search":
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | sort body | fields body | head 5"
+  - match: {datarows: [["m1"], ["m2"], ["m3"], ["m4"], ["m5"]]}
+
+---
+"Reads the expression as one when the budget covers it":
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.query.batching.max_shards_per_batch: 50
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-01 | eventstats count() as total | fields body, total"
+  - match: {datarows: [["m1", 1]]}
+
+---
+"Reads the expression as one when batching is off":
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.query.batching.max_shards_per_batch: 0
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-01 | eventstats count() as total | fields body, total"
+  - match: {datarows: [["m1", 1]]}

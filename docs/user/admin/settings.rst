@@ -249,6 +249,52 @@ Result set::
       }
     }
 
+plugins.query.batching.max_shards_per_batch (Experimental)
+=========================================================
+
+Version
+-------
+3.9
+
+Description
+-----------
+
+Reads a wildcard index expression in groups rather than all at once, so a point-in-time (PIT) read opens a reader context over one group's shards at a time instead of over every matching shard together. Set it to the most primary shards one group may cover; ``0``, the default, reads the expression as one.
+
+The budget counts shards rather than indices, because a reader context is opened per shard. A value around a fifth of ``search.max_open_pit_context`` (default 300) leaves room for the other queries sharing that per-node limit. An index whose own shard count exceeds the budget becomes a group of its own, since a group cannot be narrower than one index.
+
+Batching applies only where reading the groups in turn cannot change the answer, so any query carrying a sort, a collapse, score tracking or pagination is read as one, as is an expression matching an alias or a data stream. Weigh these limitations before enabling it:
+
+1. The rows are read group by group rather than interleaved across indices. Where a query returns fewer rows than it scanned, the rows come from the earliest indices in the expression rather than from across it. Nothing promises either order, but it does change which rows an unsorted query returns.
+2. Commands whose output depends on the order rows arrive, such as ``streamstats``, ``trendline`` and ``dedup``, see a different order and so can produce different values, or keep a different one of a set of duplicates.
+3. Each group is read at its own point in time rather than all groups sharing one, so a document written during the read may be seen by a later group and not an earlier one.
+4. A batched read takes longer overall, and each group's PIT is opened for ``plugins.sql.cursor.keep_alive``. A read long enough to outlive that keep-alive fails.
+5. Batching probes the cluster with the ``indices:admin/resolve/index`` and ``indices:monitor/settings/get`` actions. A principal lacking either falls back to reading the full expression silently, so batching simply never takes effect.
+
+Enable it with::
+
+	>> curl -H 'Content-Type: application/json' -X PUT localhost:9200/_plugins/_query/settings -d '{
+	  "transient" : {
+	    "plugins.query.batching.max_shards_per_batch" : 50
+	  }
+	}'
+
+Result set::
+
+    {
+      "acknowledged" : true,
+      "persistent" : { },
+      "transient" : {
+        "plugins" : {
+          "query" : {
+            "batching" : {
+              "max_shards_per_batch" : "50"
+            }
+          }
+        }
+      }
+    }
+
 Settings:
 
 1. The default value is false.
