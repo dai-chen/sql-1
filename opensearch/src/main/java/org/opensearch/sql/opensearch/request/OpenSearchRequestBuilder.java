@@ -10,12 +10,9 @@ import static java.util.stream.Collectors.toList;
 import static org.opensearch.index.query.QueryBuilders.matchAllQuery;
 import static org.opensearch.index.query.QueryBuilders.nestedQuery;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,16 +29,11 @@ import org.jetbrains.annotations.TestOnly;
 import org.opensearch.action.search.CreatePitRequest;
 import org.opensearch.action.search.DeletePitRequest;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.xcontent.LoggingDeprecationHandler;
-import org.opensearch.common.xcontent.XContentType;
-import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.InnerHitBuilder;
 import org.opensearch.index.query.NestedQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
-import org.opensearch.search.SearchModule;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.collapse.CollapseBuilder;
@@ -66,12 +58,6 @@ import org.opensearch.sql.opensearch.response.agg.OpenSearchAggregationResponseP
 @ToString
 public class OpenSearchRequestBuilder {
 
-  /** Parses a source builder back from its own JSON, so a batched read can copy it per group. */
-  private static final NamedXContentRegistry SOURCE_REGISTRY =
-      new NamedXContentRegistry(
-          new SearchModule(org.opensearch.common.settings.Settings.EMPTY, Collections.emptyList())
-              .getNamedXContents());
-
   /** Search request source builder. */
   private final SearchSourceBuilder sourceBuilder;
 
@@ -94,6 +80,10 @@ public class OpenSearchRequestBuilder {
   /** Memoized because build() runs once per scan on the calling thread. */
   @EqualsAndHashCode.Exclude @ToString.Exclude private OpenSearchRequest.IndexName prunedIndexName;
 
+  /** Reads a wide index expression group by group. */
+  @EqualsAndHashCode.Exclude @ToString.Exclude
+  private final OpenSearchBatchRequestFactory batchRequests;
+
   public static class PushDownUnSupportedException extends RuntimeException {
     public PushDownUnSupportedException(String message) {
       super(message);
@@ -115,6 +105,8 @@ public class OpenSearchRequestBuilder {
             .timeout(OpenSearchRequest.DEFAULT_QUERY_TIMEOUT)
             .trackScores(false);
     this.exprValueFactory = exprValueFactory;
+    this.batchRequests =
+        new OpenSearchBatchRequestFactory(settings, maxResultWindow, exprValueFactory);
   }
 
   /**
@@ -130,6 +122,7 @@ public class OpenSearchRequestBuilder {
     return build(indexName, cursorKeepAlive, client, false);
   }
 
+  /** Builds a request read as one, which a v2 cursor can serialize and resume. */
   public OpenSearchRequest build(
       OpenSearchRequest.IndexName indexName,
       TimeValue cursorKeepAlive,
@@ -138,7 +131,21 @@ public class OpenSearchRequestBuilder {
     return build(indexName, cursorKeepAlive, client, isMappingEmpty, false);
   }
 
-  public OpenSearchRequest build(
+  /**
+   * Builds a request that may read a wide index expression group by group.
+   *
+   * <p>Only for the v3 scan: a cursor serializes one PIT, so a batched request resumed from one
+   * would read a single group.
+   */
+  public OpenSearchRequest buildBatchable(
+      OpenSearchRequest.IndexName indexName,
+      TimeValue cursorKeepAlive,
+      OpenSearchClient client,
+      boolean isMappingEmpty) {
+    return build(indexName, cursorKeepAlive, client, isMappingEmpty, true);
+  }
+
+  private OpenSearchRequest build(
       OpenSearchRequest.IndexName indexName,
       TimeValue cursorKeepAlive,
       OpenSearchClient client,
@@ -179,14 +186,14 @@ public class OpenSearchRequestBuilder {
         throw new UnsupportedOperationException("Non-zero offset is not supported with pagination");
       }
       sourceBuilder.size(pageSize);
-      // Search with PIT request
-      return pitRequest(indexName, cursorKeepAlive, client, includes, batchingAllowed);
+      // Search with PIT request. Never batched: a cursor serializes one PIT.
+      return pitRequest(indexName, cursorKeepAlive, client, includes, false);
     }
   }
 
   /**
-   * Reads the index expression under one PIT, or under one PIT per group when the expression is
-   * wide enough to split and every group can be read in turn without changing the answer.
+   * Reads the index expression under one PIT, or group by group when it is wide enough to split and
+   * every group can be read in turn without changing the answer.
    */
   private OpenSearchRequest pitRequest(
       OpenSearchRequest.IndexName indexName,
@@ -195,79 +202,28 @@ public class OpenSearchRequestBuilder {
       List<String> includes,
       boolean batchingAllowed) {
     OpenSearchRequest.IndexName prunedName = pruneIndexName(indexName, client);
-    List<OpenSearchRequest.IndexName> groups =
-        batchingAllowed ? splitIndexName(prunedName, client) : List.of(prunedName);
+    OpenSearchBatchRequestFactory.ReadOne readOne =
+        (name, source) ->
+            OpenSearchQueryRequest.pitOf(
+                name,
+                source,
+                exprValueFactory,
+                includes,
+                cursorKeepAlive,
+                createPit(name, cursorKeepAlive, client));
 
-    if (groups.size() < 2) {
-      return singlePitRequest(prunedName, sourceBuilder, cursorKeepAlive, client, includes);
+    if (!batchingAllowed) {
+      return readOne.apply(prunedName, sourceBuilder);
     }
-    // Mapped lazily, so a group's PIT is opened only once the group before it is exhausted.
-    Iterator<OpenSearchRequest> batches =
-        groups.stream()
-            .map(
-                name ->
-                    (OpenSearchRequest)
-                        singlePitRequest(
-                            name, copyOf(sourceBuilder), cursorKeepAlive, client, includes))
-            .iterator();
-    return new OpenSearchBatchRequest(
-        batches,
-        maxResultWindow,
-        exprValueFactory,
-        includes,
-        pitId -> client.deletePit(new DeletePitRequest(pitId)));
-  }
-
-  private OpenSearchRequest singlePitRequest(
-      OpenSearchRequest.IndexName indexName,
-      SearchSourceBuilder source,
-      TimeValue cursorKeepAlive,
-      OpenSearchClient client,
-      List<String> includes) {
-    String pitId = createPit(indexName, cursorKeepAlive, client);
-    return OpenSearchQueryRequest.pitOf(
-        indexName, source, exprValueFactory, includes, cursorKeepAlive, pitId);
-  }
-
-  private List<OpenSearchRequest.IndexName> splitIndexName(
-      OpenSearchRequest.IndexName indexName, OpenSearchClient client) {
-    int shardBudget = settings.getSettingValue(Settings.Key.QUERY_BATCHING_MAX_SHARDS_PER_BATCH);
-    if (shardBudget <= 0 || !isBatchable()) {
-      return List.of(indexName);
-    }
-    // Only the node client can issue the splitting probes, so the REST client never splits.
-    return client
-        .getNodeClient()
-        .map(nodeClient -> new IndexSplitter(nodeClient).split(indexName, shardBudget))
-        .orElse(List.of(indexName));
-  }
-
-  /**
-   * A pushed sort orders each group's rows only within that group, so reading the groups in turn
-   * would emit them out of order. The rest carry state that means nothing across separate reads.
-   */
-  private boolean isBatchable() {
-    return startFrom == 0
-        && pageSize == null
-        && (sourceBuilder.sorts() == null || sourceBuilder.sorts().isEmpty())
-        && sourceBuilder.collapse() == null
-        && sourceBuilder.searchAfter() == null
-        && !sourceBuilder.trackScores();
-  }
-
-  /**
-   * A detached copy, because a PIT search appends its tiebreaker sorts and its cursor position to
-   * the source builder it is given, and {@code shallowCopy} shares both with the original.
-   */
-  private static SearchSourceBuilder copyOf(SearchSourceBuilder source) {
-    try (XContentParser parser =
-        XContentType.JSON
-            .xContent()
-            .createParser(SOURCE_REGISTRY, LoggingDeprecationHandler.INSTANCE, source.toString())) {
-      return SearchSourceBuilder.fromXContent(parser);
-    } catch (IOException e) {
-      throw new IllegalStateException("Failed to copy the search source for a batched read", e);
-    }
+    return batchRequests
+        .create(
+            prunedName,
+            sourceBuilder,
+            includes,
+            client.getNodeClient(),
+            readOne,
+            pitId -> client.deletePit(new DeletePitRequest(pitId)))
+        .orElseGet(() -> readOne.apply(prunedName, sourceBuilder));
   }
 
   private OpenSearchRequest.IndexName pruneIndexName(
