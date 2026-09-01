@@ -277,4 +277,76 @@ public class WindowFunctionIT extends SQLIntegTestCase {
         rows(32, 5),
         rows(28, 6));
   }
+
+  /** ORDER BY a column the SELECT list doesn't project: the window is computed over all rows. */
+  @Test
+  public void testWindowWithOuterSortOnNonProjectedColumn() {
+    JSONObject response =
+        new JSONObject(
+            executeQuery(
+                """
+                SELECT lastname, ROW_NUMBER() OVER(ORDER BY age) AS rn FROM %s ORDER BY age\
+                """
+                    .formatted(TestsConstants.TEST_INDEX_BANK),
+                "jdbc"));
+
+    verifyDataRowsInOrder(
+        response,
+        rows("Bates", 1),
+        rows("Duke Willmington", 2),
+        rows("Adams", 3),
+        rows("Mcpherson", 4),
+        rows("Bond", 5),
+        rows("Ratliff", 6),
+        rows("Ayala", 7));
+  }
+
+  @Test
+  public void testWindowWithOuterSortOnNonProjectedColumnAndLimit() {
+    JSONObject response =
+        new JSONObject(
+            executeQuery(
+                """
+                SELECT lastname, ROW_NUMBER() OVER(ORDER BY age) AS rn FROM %s\
+                 ORDER BY age LIMIT 3\
+                """
+                    .formatted(TestsConstants.TEST_INDEX_BANK),
+                "jdbc"));
+
+    verifyDataRowsInOrder(
+        response, rows("Bates", 1), rows("Duke Willmington", 2), rows("Adams", 3));
+  }
+
+  /** The sort column is projected here, so nothing has to be borrowed and then dropped. */
+  @Test
+  public void testWindowWithOuterSortOnProjectedColumnAndLimit() {
+    JSONObject response =
+        new JSONObject(
+            executeQuery(
+                """
+                SELECT lastname, age, ROW_NUMBER() OVER(ORDER BY age) AS rn FROM %s\
+                 ORDER BY age LIMIT 3\
+                """
+                    .formatted(TestsConstants.TEST_INDEX_BANK),
+                "jdbc"));
+
+    verifyDataRowsInOrder(
+        response, rows("Bates", 28, 1), rows("Duke Willmington", 32, 2), rows("Adams", 33, 3));
+  }
+
+  @Test
+  public void testRankWithOuterSortOnNonProjectedColumnAndLimit() {
+    JSONObject response =
+        new JSONObject(
+            executeQuery(
+                """
+                SELECT lastname, RANK() OVER(ORDER BY age DESC) AS r FROM %s\
+                 ORDER BY age DESC LIMIT 3\
+                """
+                    .formatted(TestsConstants.TEST_INDEX_BANK),
+                "jdbc"));
+
+    // Bond and Ratliff tie on age, so their relative order is not defined.
+    verifyDataRows(response, rows("Ayala", 1), rows("Bond", 2), rows("Ratliff", 2));
+  }
 }

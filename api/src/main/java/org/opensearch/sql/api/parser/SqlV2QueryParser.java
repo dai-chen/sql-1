@@ -12,13 +12,17 @@ import static org.opensearch.sql.ast.dsl.AstDSL.unionAll;
 import static org.opensearch.sql.ast.dsl.AstDSL.unionDistinct;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.opensearch.sql.ast.expression.Alias;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Not;
+import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.expression.WindowFunction;
 import org.opensearch.sql.ast.statement.Query;
@@ -91,19 +95,86 @@ public class SqlV2QueryParser implements UnifiedQueryParser<UnresolvedPlan> {
       context.push();
       context.peek().collect(queryContext, query);
       Project project = (Project) visit(queryContext.selectClause());
-      UnresolvedPlan result = project.attach(visit(queryContext.fromClause()));
 
       // Window output must be computed before ORDER BY/LIMIT, so build Limit(Sort(Project(from)))
       OrderByClauseContext orderByClause = queryContext.fromClause().orderByClause();
-      if (orderByClause != null) {
-        result = new ExtendedAstSortBuilder(context.peek()).visit(orderByClause).attach(result);
+      Sort sort =
+          orderByClause == null
+              ? null
+              : (Sort) new ExtendedAstSortBuilder(context.peek()).visit(orderByClause);
+
+      // A sort key the select list doesn't produce (ORDER BY on a column that isn't selected) is
+      // out of scope once the Project narrows the row type, so carry it through the Project and
+      // drop it again afterwards. The trailing Project references columns by name instead of
+      // re-visiting the select list, which would build a second RexOver for the window function.
+      List<UnresolvedExpression> borrowed = sortKeysNotProjected(sort, project);
+      List<UnresolvedExpression> selectList = project.getProjectList();
+      if (!borrowed.isEmpty()) {
+        List<UnresolvedExpression> widened = new ArrayList<>(selectList);
+        widened.addAll(borrowed);
+        project = new Project(widened);
+      }
+
+      UnresolvedPlan result = project.attach(visit(queryContext.fromClause()));
+      if (sort != null) {
+        result = sort.attach(result);
       }
       if (queryContext.limitClause() != null) {
         result = visit(queryContext.limitClause()).attach(result);
       }
+      if (!borrowed.isEmpty()) {
+        result = new Project(referencesTo(selectList)).attach(result);
+      }
 
       context.pop();
       return result;
+    }
+
+    /**
+     * Sort keys that the select list does not already produce. A key that resolves to a select
+     * alias is left alone: {@link ExtendedAstSortBuilder} keeps it as a reference to the projected
+     * column.
+     */
+    private List<UnresolvedExpression> sortKeysNotProjected(Sort sort, Project project) {
+      if (sort == null) {
+        return List.of();
+      }
+      Set<String> projected = new LinkedHashSet<>();
+      for (UnresolvedExpression item : project.getProjectList()) {
+        if (item instanceof Alias alias) {
+          projected.add(alias.getName());
+          if (alias.getAlias() != null && !alias.getAlias().isEmpty()) {
+            projected.add(alias.getAlias());
+          }
+        } else {
+          projected.add(item.toString());
+        }
+      }
+      List<UnresolvedExpression> borrowed = new ArrayList<>();
+      Set<String> seen = new LinkedHashSet<>();
+      for (Field sortField : sort.getSortList()) {
+        UnresolvedExpression key = sortField.getField();
+        String name = key.toString();
+        if (!projected.contains(name) && seen.add(name)) {
+          borrowed.add(new Alias(name, key));
+        }
+      }
+      return borrowed;
+    }
+
+    /** Name-only references to the given select items, used to drop borrowed sort keys. */
+    private List<UnresolvedExpression> referencesTo(List<UnresolvedExpression> selectList) {
+      List<UnresolvedExpression> refs = new ArrayList<>(selectList.size());
+      for (UnresolvedExpression item : selectList) {
+        String name =
+            item instanceof Alias alias
+                ? (alias.getAlias() == null || alias.getAlias().isEmpty()
+                    ? alias.getName()
+                    : alias.getAlias())
+                : item.toString();
+        refs.add(new Field(new QualifiedName(name)));
+      }
+      return refs;
     }
 
     @Override
