@@ -324,7 +324,7 @@ public class OpenSearchIndex extends AbstractOpenSearchTable {
   /** The v3 API to build an OpenSearchRequest, calling by CalciteEnumerableIndexScan */
   public OpenSearchRequest buildRequest(OpenSearchRequestBuilder requestBuilder) {
     final TimeValue cursorKeepAlive = settings.getSettingValue(Settings.Key.SQL_CURSOR_KEEP_ALIVE);
-    return requestBuilder.build(
+    return requestBuilder.buildBatchable(
         indexName, cursorKeepAlive, client, cachedFieldOpenSearchTypes.isEmpty());
   }
 }
