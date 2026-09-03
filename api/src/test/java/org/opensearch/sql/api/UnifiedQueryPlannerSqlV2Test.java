@@ -543,6 +543,65 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
             """);
   }
 
+  /**
+   * An ORDER BY key the select list doesn't project is borrowed through the Project and dropped
+   * again above the Sort. The RexOver must sit *below* the Sort: the window is computed over all
+   * rows in its own OVER order, not over the outer ORDER BY's order.
+   */
+  @Test
+  public void testWindowWithOuterSortOnNonProjectedColumn() {
+    givenQuery(
+            """
+            SELECT name, ROW_NUMBER() OVER (ORDER BY age) AS rn FROM catalog.employees
+              ORDER BY department
+            """)
+        .assertPlan(
+            """
+            LogicalProject(name=[$0], rn=[$1])
+              LogicalSort(sort0=[$2], dir0=[ASC-nulls-first])
+                LogicalProject(name=[$1], rn=[ROW_NUMBER() OVER (ORDER BY $2 NULLS FIRST)], department=[$3])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /**
+   * An aliased select item does not put its source name in scope, so ORDER BY age still borrows.
+   */
+  @Test
+  public void testWindowWithOuterSortOnAliasedColumn() {
+    givenQuery(
+            """
+            SELECT age AS years, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM catalog.employees
+              ORDER BY age
+            """)
+        .assertPlan(
+            """
+            LogicalProject(years=[$0], rn=[$1])
+              LogicalSort(sort0=[$2], dir0=[ASC-nulls-first])
+                LogicalProject(years=[$2], rn=[ROW_NUMBER() OVER (ORDER BY $0 NULLS FIRST)], age=[$2])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /**
+   * Regression guard: {@code SELECT *} keeps every column in the Project's row type, so the Sort
+   * resolves without borrowing. AllFields has no single output name, so the name-only trailing
+   * Project must not be built for it.
+   */
+  @Test
+  public void testWindowWithSelectStarAndOuterSort() {
+    givenQuery(
+            """
+            SELECT *, ROW_NUMBER() OVER (ORDER BY age) AS rn FROM catalog.employees ORDER BY age
+            """)
+        .assertPlan(
+            """
+            LogicalSort(sort0=[$2], dir0=[ASC-nulls-first])
+              LogicalProject(id=[$0], name=[$1], age=[$2], department=[$3], rn=[ROW_NUMBER() OVER (ORDER BY $2 NULLS FIRST)])
+                LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
   @Test
   public void testWindowRank() {
     givenQuery(

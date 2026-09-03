@@ -10,6 +10,7 @@ import static org.opensearch.sql.util.MatcherUtils.rows;
 import static org.opensearch.sql.util.MatcherUtils.verifyDataRows;
 import static org.opensearch.sql.util.MatcherUtils.verifyDataRowsInOrder;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.opensearch.sql.legacy.SQLIntegTestCase;
@@ -348,5 +349,47 @@ public class WindowFunctionIT extends SQLIntegTestCase {
 
     // Bond and Ratliff tie on age, so their relative order is not defined.
     verifyDataRows(response, rows("Ayala", 1), rows("Bond", 2), rows("Ratliff", 2));
+  }
+
+  /**
+   * An aliased select item puts only its alias in scope, not its source column name, so ORDER BY on
+   * that column must still be borrowed through the Project. Sorting on the same column the window
+   * orders by keeps the expectation identical on both query routes.
+   */
+  @Test
+  public void testWindowWithOuterSortOnAliasedColumn() {
+    JSONObject response =
+        new JSONObject(
+            executeQuery(
+                """
+                SELECT age AS years, ROW_NUMBER() OVER(ORDER BY age) AS rn FROM %s\
+                 ORDER BY age LIMIT 3\
+                """
+                    .formatted(TestsConstants.TEST_INDEX_BANK),
+                "jdbc"));
+
+    verifyDataRowsInOrder(response, rows(28, 1), rows(32, 2), rows(33, 3));
+  }
+
+  /**
+   * Regression guard: {@code SELECT *} already keeps every column in scope, so no sort key has to
+   * be borrowed and no trailing Project may be added -- {@code AllFields} has no single output name
+   * to reference it by.
+   */
+  @Test
+  public void testWindowWithSelectStarAndOuterSort() {
+    JSONObject response =
+        new JSONObject(
+            executeQuery(
+                """
+                SELECT *, ROW_NUMBER() OVER(ORDER BY age) AS rn FROM %s ORDER BY age LIMIT 2\
+                """
+                    .formatted(TestsConstants.TEST_INDEX_BANK),
+                "jdbc"));
+
+    JSONArray rows = response.getJSONArray("datarows");
+    assertEquals(2, rows.length());
+    JSONArray firstRow = rows.getJSONArray(0);
+    assertEquals(1, firstRow.getInt(firstRow.length() - 1));
   }
 }

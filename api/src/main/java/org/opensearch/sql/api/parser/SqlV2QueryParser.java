@@ -20,6 +20,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.opensearch.sql.ast.expression.Alias;
+import org.opensearch.sql.ast.expression.AllFields;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Not;
 import org.opensearch.sql.ast.expression.QualifiedName;
@@ -139,16 +140,19 @@ public class SqlV2QueryParser implements UnifiedQueryParser<UnresolvedPlan> {
       if (sort == null) {
         return List.of();
       }
+      // The trailing Project drops borrowed keys by name, so the borrow is only safe when every
+      // select item has a distinct, nameable output column. Bail out otherwise and leave the query
+      // exactly as it behaved before: SELECT * (AllFields has no output name of its own) and
+      // duplicate output names would both make the trailing Project reference the wrong columns.
+      if (!hasUniqueNameableOutputs(project)) {
+        return List.of();
+      }
       Set<String> projected = new LinkedHashSet<>();
       for (UnresolvedExpression item : project.getProjectList()) {
-        if (item instanceof Alias alias) {
-          projected.add(alias.getName());
-          if (alias.getAlias() != null && !alias.getAlias().isEmpty()) {
-            projected.add(alias.getAlias());
-          }
-        } else {
-          projected.add(item.toString());
-        }
+        // Only the name the Project actually emits counts as in scope. For `x AS y` that is `y`;
+        // treating the source name `x` as projected too would wrongly skip borrowing it, leaving
+        // ORDER BY x unresolvable above the Project.
+        projected.add(outputNameOf(item));
       }
       List<UnresolvedExpression> borrowed = new ArrayList<>();
       Set<String> seen = new LinkedHashSet<>();
@@ -166,15 +170,38 @@ public class SqlV2QueryParser implements UnifiedQueryParser<UnresolvedPlan> {
     private List<UnresolvedExpression> referencesTo(List<UnresolvedExpression> selectList) {
       List<UnresolvedExpression> refs = new ArrayList<>(selectList.size());
       for (UnresolvedExpression item : selectList) {
-        String name =
-            item instanceof Alias alias
-                ? (alias.getAlias() == null || alias.getAlias().isEmpty()
-                    ? alias.getName()
-                    : alias.getAlias())
-                : item.toString();
-        refs.add(new Field(new QualifiedName(name)));
+        refs.add(new Field(new QualifiedName(outputNameOf(item))));
       }
       return refs;
+    }
+
+    /**
+     * The name the Project emits for a select item: its alias when it has one, else its own name.
+     */
+    private String outputNameOf(UnresolvedExpression item) {
+      if (item instanceof Alias alias) {
+        return alias.getAlias() == null || alias.getAlias().isEmpty()
+            ? alias.getName()
+            : alias.getAlias();
+      }
+      return item.toString();
+    }
+
+    /**
+     * Whether every select item has an output name that uniquely identifies its column, which the
+     * name-only trailing Project requires. {@code SELECT *} fails this because {@link AllFields}
+     * stands for a set of columns rather than one named output, and two items sharing an output
+     * name fail it because a reference to that name cannot distinguish them.
+     */
+    private boolean hasUniqueNameableOutputs(Project project) {
+      Set<String> names = new LinkedHashSet<>();
+      for (UnresolvedExpression item : project.getProjectList()) {
+        UnresolvedExpression inner = item instanceof Alias alias ? alias.getDelegated() : item;
+        if (inner instanceof AllFields || !names.add(outputNameOf(item))) {
+          return false;
+        }
+      }
+      return true;
     }
 
     @Override
