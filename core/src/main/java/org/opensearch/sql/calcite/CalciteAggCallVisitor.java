@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.calcite;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.rex.RexNode;
@@ -45,22 +46,49 @@ public class CalciteAggCallVisitor extends AbstractNodeVisitor<AggCall, CalciteP
     for (UnresolvedExpression arg : node.getArgList()) {
       argList.add(rexNodeVisitor.analyze(arg, context));
     }
+    // Apply the optional FILTER(WHERE ...) predicate by guarding the aggregated argument rather
+    // than by setting AggregateCall.filterArg -- see guardWithFilterCondition.
+    final RexNode aggField =
+        node.condition() == null ? field : guardWithFilterCondition(field, node, context);
     return BuiltinFunctionName.ofAggregation(node.getFuncName())
         .map(
             functionName ->
-                PlanUtils.makeAggCall(context, functionName, node.getDistinct(), field, argList))
-        // Apply the optional FILTER(WHERE ...) predicate; IS TRUE treats NULL as non-matching.
-        .map(
-            aggCall ->
-                node.condition() == null
-                    ? aggCall
-                    : aggCall.filter(
-                        context.rexBuilder.makeCall(
-                            SqlStdOperatorTable.IS_TRUE,
-                            rexNodeVisitor.analyze(node.condition(), context))))
+                PlanUtils.makeAggCall(context, functionName, node.getDistinct(), aggField, argList))
         .orElseThrow(
             () ->
                 new UnsupportedOperationException("Unexpected aggregation: " + node.getFuncName()));
+  }
+
+  /**
+   * Rewrites {@code agg(x) FILTER(WHERE cond)} into {@code agg(CASE WHEN cond THEN x END)}, and
+   * {@code COUNT(*) FILTER(WHERE cond)} into {@code COUNT(CASE WHEN cond THEN 1 END)}.
+   *
+   * <p>The equivalent {@link AggCall#filter} form sets Calcite's {@code AggregateCall.filterArg},
+   * which the analytics-engine route cannot execute: the filter is serialized to Substrait as an
+   * extra aggregate input field, and DataFusion then rejects its own plan because the two sides
+   * disagree on that field's nullability ("Physical input schema should be the same as the one
+   * converted from logical input schema ... field nullability at index N [&lt;pred&gt; IS TRUE]:
+   * (physical) true vs (logical) false"). Guarding the argument keeps the predicate inside an
+   * ordinary projection, which both backends handle.
+   *
+   * <p>Semantics are preserved because every aggregate here ignores NULL arguments, so a row whose
+   * predicate is false — or NULL, which the {@code ELSE} branch also covers — does not contribute.
+   * The one visible difference is {@code SUM} over a group where no row matches: this form yields
+   * NULL (SQL standard) whereas {@code filterArg} on the V2 engine yields 0.
+   *
+   * <p>Note this rewrite is not undone downstream: Calcite's {@code AggregateCaseToFilterRule},
+   * which would convert the CASE back into a filter, is not registered in this repository.
+   */
+  private RexNode guardWithFilterCondition(
+      RexNode field, AggregateFunction node, CalcitePlanContext context) {
+    RexNode condition = rexNodeVisitor.analyze(node.condition(), context);
+    // COUNT(*) carries no field; count a constant so NULL-skipping does the filtering.
+    RexNode value = field != null ? field : context.rexBuilder.makeExactLiteral(BigDecimal.ONE);
+    return context.rexBuilder.makeCall(
+        SqlStdOperatorTable.CASE,
+        condition,
+        value,
+        context.rexBuilder.makeNullLiteral(value.getType()));
   }
 
   // Visit special UDAFs that are derived from command. For example, patterns command generates
