@@ -328,6 +328,77 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
             """);
   }
 
+  /**
+   * A computed GROUP BY key must be referenced from the group-key column the Aggregate already
+   * produces: the base column it was computed from (age) is gone above the Aggregate.
+   */
+  @Test
+  public void testGroupByCaseExpression() {
+    givenQuery(
+            """
+            SELECT CASE WHEN age > 30 THEN 'old' ELSE 'young' END AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Case(caseValue=null, whenClauses=[When(condition=>(age, 30), result=old)], elseClause=Optional[young])=[CASE(>($2, 30), 'old':VARCHAR, 'young':VARCHAR)])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testGroupByCastExpression() {
+    givenQuery(
+            """
+            SELECT CAST(age AS STRING) AS c, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY CAST(age AS STRING)
+            """)
+        .assertPlan(
+            """
+            LogicalProject(c=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Cast(expression=age, convertedType=STRING)=[SAFE_CAST($2)])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /** A select item that wraps the group key resolves the key and applies the wrapper on top. */
+  @Test
+  public void testGroupByExpressionWrappedInSelectItem() {
+    givenQuery(
+            """
+            SELECT UPPER(CASE WHEN age > 30 THEN 'old' ELSE 'young' END) AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[UPPER($0)], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Case(caseValue=null, whenClauses=[When(condition=>(age, 30), result=old)], elseClause=Optional[young])=[CASE(>($2, 30), 'old':VARCHAR, 'young':VARCHAR)])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /**
+   * Regression guard: a select-list literal must stay a literal even when its text equals a column
+   * name. Group-key resolution is keyed on the registered group-by expressions, so it can never
+   * rebind an unrelated expression to a same-named column.
+   */
+  @Test
+  public void testSelectLiteralMatchingColumnName() {
+    givenQuery(
+            """
+            SELECT name, 'age' AS tag FROM catalog.employees
+            """)
+        .assertPlan(
+            """
+            LogicalProject(name=[$1], tag=['age':VARCHAR])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
   @Test
   public void testOrderByAggregateAlias() {
     givenQuery(

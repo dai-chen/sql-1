@@ -129,6 +129,19 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
     return context.relBuilder.field(index);
   }
 
+  /**
+   * Resolves a reference to a GROUP BY expression to the Aggregate's group-key column, using the
+   * registry populated in {@code CalciteRelNodeVisitor#visitAggregation}. Above the Aggregate the
+   * base columns the key was computed from are no longer in scope, so re-analyzing the expression
+   * there would fail; the already-computed column is the only thing it can mean.
+   *
+   * @return the group-key column, or {@code null} when {@code node} is not a registered group key
+   */
+  private RexNode resolveGroupKey(UnresolvedExpression node, CalcitePlanContext context) {
+    Integer groupKeyIndex = context.getGroupKeyOutputIndex().get(node);
+    return groupKeyIndex == null ? null : context.relBuilder.field(groupKeyIndex);
+  }
+
   @Override
   public RexNode visitLiteral(Literal node, CalcitePlanContext context) {
     RexBuilder rexBuilder = context.rexBuilder;
@@ -224,6 +237,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitNot(Not node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     // Special handling for NOT(boolean_field = true/false) - see boolean comparison helpers below
     UnresolvedExpression inner = node.getExpression();
     if (inner instanceof Compare compare && "=".equals(compare.getOperator())) {
@@ -237,6 +254,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitIn(In node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     final RexNode field = analyze(node.getField(), context);
     final List<RexNode> valueList =
         node.getValueList().stream().map(value -> analyze(value, context)).toList();
@@ -664,10 +685,9 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitFunction(Function node, CalcitePlanContext context) {
-    // Resolve a group-by expression to its group-key output index.
-    Integer groupKeyIndex = context.getGroupKeyOutputIndex().get(node);
-    if (groupKeyIndex != null) {
-      return context.relBuilder.field(groupKeyIndex);
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
     }
     List<UnresolvedExpression> args = node.getFuncArgs();
     List<RexNode> arguments = new ArrayList<>();
@@ -926,6 +946,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitCast(Cast node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     RexNode expr = analyze(node.getExpression(), context);
     RelDataType type =
         OpenSearchTypeFactory.convertExprTypeToRelDataType(node.getDataType().getCoreType());
@@ -937,6 +961,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitCase(Case node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     List<RexNode> caseOperands = new ArrayList<>();
     List<RelDataType> resultTypes = new ArrayList<>();
     for (When when : node.getWhenClauses()) {

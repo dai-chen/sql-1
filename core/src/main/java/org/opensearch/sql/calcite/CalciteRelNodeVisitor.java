@@ -603,27 +603,19 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
               .forEach(field -> expandedFields.add(context.relBuilder.field(field)));
         }
         case Alias alias -> {
-          String displayName =
-              Strings.isNullOrEmpty(alias.getAlias()) ? alias.getName() : alias.getAlias();
           // SQL aggregate aliases (e.g., COUNT(*) AS cnt): reference the already-computed field
           // and rebind under the user's alias, since re-analyzing the alias returns null.
           if (alias.getDelegated() instanceof AggregateFunction
               && alias.getName() != null
               && currentFields.contains(alias.getName())) {
+            String displayName =
+                Strings.isNullOrEmpty(alias.getAlias()) ? alias.getName() : alias.getAlias();
             expandedFields.add(
                 context.relBuilder.alias(context.relBuilder.field(alias.getName()), displayName));
-          } else if (currentFields.contains(alias.getDelegated().toString())) {
-            // A computed GROUP BY key (e.g. SELECT CASE ... END ... GROUP BY CASE ... END). The
-            // Aggregate already exposes it, named after the group-by expression -- see
-            // AstAggregationBuilder#replaceGroupByItemIfAliasOrOrdinal. Reference that column:
-            // the base columns it was computed from are no longer in scope, so re-analyzing the
-            // expression here would fail to resolve them. Matching on the rendered expression is
-            // what lines up with the Aggregate's field name; the select item's own name is the
-            // raw query text, which does not.
-            expandedFields.add(
-                context.relBuilder.alias(
-                    context.relBuilder.field(alias.getDelegated().toString()), displayName));
           } else {
+            // Anything else -- including a computed GROUP BY key -- resolves through the rex
+            // visitor, which maps a registered group-by expression to the Aggregate's output
+            // column (CalciteRexNodeVisitor#resolveGroupKey).
             expandedFields.add(rexVisitor.analyze(alias, context));
           }
         }
@@ -1857,10 +1849,10 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     context.getGroupKeyOutputIndex().clear();
     int groupStartIdx = metricsFirst ? aggRexList.size() : 0;
     for (int i = 0; i < groupExprList.size(); i++) {
-      Function groupFunc = extractFunction(groupExprList.get(i));
-      if (groupFunc != null) {
-        context.getGroupKeyOutputIndex().put(groupFunc, groupStartIdx + i);
-      }
+      // Register every group key, not just Function nodes: CASE/CAST/IN/NOT extend
+      // UnresolvedExpression directly, and those are exactly the keys whose base columns are gone
+      // above the Aggregate, so a post-aggregate reference to them has nothing else to resolve to.
+      context.getGroupKeyOutputIndex().put(unwrapAlias(groupExprList.get(i)), groupStartIdx + i);
     }
   }
 
@@ -1870,10 +1862,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     return null;
   }
 
-  private static Function extractFunction(UnresolvedExpression expr) {
-    if (expr instanceof Function f) return f;
-    if (expr instanceof Alias alias) return extractFunction(alias.getDelegated());
-    return null;
+  /** Strips enclosing aliases so a group key is registered under the expression itself. */
+  private static UnresolvedExpression unwrapAlias(UnresolvedExpression expr) {
+    return expr instanceof Alias alias ? unwrapAlias(alias.getDelegated()) : expr;
   }
 
   /**

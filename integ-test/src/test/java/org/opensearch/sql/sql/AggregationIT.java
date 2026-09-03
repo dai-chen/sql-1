@@ -129,6 +129,30 @@ public class AggregationIT extends SQLIntegTestCase {
     verifyDataRows(response, rows(false, 3), rows(true, 4));
   }
 
+  /** A select item may wrap the group key; the wrapper applies on top of the resolved key. */
+  @Test
+  public void testGroupByCaseExpressionWrappedInSelectItem() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT UPPER(CASE WHEN age > 35 THEN 'old' ELSE 'young' END) AS g, COUNT(*) FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY CASE WHEN age > 35 THEN 'old' ELSE 'young' END");
+    verifyDataRows(response, rows("OLD", 3), rows("YOUNG", 4));
+  }
+
+  /**
+   * Regression guard for group-key resolution: a select-list literal whose text equals a column
+   * name must stay a literal. Resolution matches the registered GROUP BY expressions by AST
+   * equality, so it can never rebind an unrelated expression to a same-named column.
+   */
+  @Test
+  public void testSelectLiteralMatchingColumnName() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT lastname, 'age' AS tag FROM " + TEST_INDEX_BANK + " WHERE lastname = 'Adams'");
+    verifyDataRows(response, rows("Adams", "age"));
+  }
+
   @Test
   public void testPushDownAggregationOnNullValues() throws IOException {
     // OpenSearch aggregation query (MetricAggregation)

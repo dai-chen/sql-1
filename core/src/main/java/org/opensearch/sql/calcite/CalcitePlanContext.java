@@ -137,8 +137,13 @@ public class CalcitePlanContext {
    */
   @Getter private final Map<AggregateFunction, Integer> aggregateOutputIndex = new HashMap<>();
 
-  /** Maps GROUP BY Function AST nodes to their output field index for post-aggregate resolution. */
-  @Getter private final Map<Function, Integer> groupKeyOutputIndex = new HashMap<>();
+  /**
+   * Maps GROUP BY expression AST nodes to their output field index for post-aggregate resolution.
+   * Keyed by {@link UnresolvedExpression} rather than {@link Function} because a group key may be
+   * any computed expression, and {@code CASE}/{@code CAST}/{@code IN}/{@code NOT} are not {@code
+   * Function} nodes.
+   */
+  @Getter private final Map<UnresolvedExpression, Integer> groupKeyOutputIndex = new HashMap<>();
 
   /**
    * List of captured variables from outer scope for lambda functions. When a lambda body references
