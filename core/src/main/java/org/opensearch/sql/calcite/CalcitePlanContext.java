@@ -24,7 +24,6 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.opensearch.sql.ast.expression.AggregateFunction;
-import org.opensearch.sql.ast.expression.Function;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.HighlightConfig;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
@@ -137,13 +136,8 @@ public class CalcitePlanContext {
    */
   @Getter private final Map<AggregateFunction, Integer> aggregateOutputIndex = new HashMap<>();
 
-  /**
-   * Maps GROUP BY expression AST nodes to their output field index for post-aggregate resolution.
-   * Keyed by {@link UnresolvedExpression} rather than {@link Function} because a group key may be
-   * any computed expression, and {@code CASE}/{@code CAST}/{@code IN}/{@code NOT} are not {@code
-   * Function} nodes.
-   */
-  @Getter private final Map<UnresolvedExpression, Integer> groupKeyOutputIndex = new HashMap<>();
+  /** The GROUP BY columns the innermost {@code Aggregate} exposes to the expressions above it. */
+  @Getter private final AggregateOutputScope aggregateOutputScope = new AggregateOutputScope();
 
   /**
    * List of captured variables from outer scope for lambda functions. When a lambda body references

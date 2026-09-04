@@ -130,16 +130,11 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
   }
 
   /**
-   * Resolves a reference to a GROUP BY expression to the Aggregate's group-key column, using the
-   * registry populated in {@code CalciteRelNodeVisitor#visitAggregation}. Above the Aggregate the
-   * base columns the key was computed from are no longer in scope, so re-analyzing the expression
-   * there would fail; the already-computed column is the only thing it can mean.
-   *
-   * @return the group-key column, or {@code null} when {@code node} is not a registered group key
+   * @return the Aggregate's group-key column for {@code node}, or {@code null} when it is not a
+   *     registered group key -- see {@link AggregateOutputScope}
    */
   private RexNode resolveGroupKey(UnresolvedExpression node, CalcitePlanContext context) {
-    Integer groupKeyIndex = context.getGroupKeyOutputIndex().get(node);
-    return groupKeyIndex == null ? null : context.relBuilder.field(groupKeyIndex);
+    return context.getAggregateOutputScope().lookupGroupKey(node, context.relBuilder);
   }
 
   @Override
