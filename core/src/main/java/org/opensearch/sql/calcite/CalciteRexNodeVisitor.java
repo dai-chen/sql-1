@@ -214,6 +214,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitAnd(And node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     final RelDataType booleanType =
         context.rexBuilder.getTypeFactory().createSqlType(SqlTypeName.BOOLEAN);
     final RexNode left = analyze(node.getLeft(), context);
@@ -223,6 +227,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitOr(Or node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     final RexNode left = analyze(node.getLeft(), context);
     final RexNode right = analyze(node.getRight(), context);
     return context.relBuilder.or(left, right);
@@ -332,6 +340,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitBetween(Between node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     RexNode value = analyze(node.getValue(), context);
     RexNode lowerBound = analyze(node.getLowerBound(), context);
     RexNode upperBound = analyze(node.getUpperBound(), context);

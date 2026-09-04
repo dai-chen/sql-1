@@ -382,6 +382,80 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
   }
 
   /**
+   * {@code And}, {@code Or} and {@code Between} extend {@code UnresolvedExpression} directly for
+   * the same reason {@code Case}/{@code Cast}/{@code In}/{@code Not} do, so a group key whose
+   * top-level node is one of them needs the same resolution.
+   */
+  @Test
+  public void testGroupByAndExpression() {
+    givenQuery(
+            """
+            SELECT age > 30 AND age < 50 AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY age > 30 AND age < 50
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(And(left=>(age, 30), right=<(age, 50))=[SEARCH($2, Sarg[(30..50)])])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testGroupByOrExpression() {
+    givenQuery(
+            """
+            SELECT age > 30 OR age < 20 AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY age > 30 OR age < 20
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Or(left=>(age, 30), right=<(age, 20))=[SEARCH($2, Sarg[(-∞..20), (30..+∞)])])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testGroupByBetweenExpression() {
+    givenQuery(
+            """
+            SELECT age BETWEEN 30 AND 40 AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY age BETWEEN 30 AND 40
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Between(value=age, lowerBound=30, upperBound=40)=[SEARCH($2, Sarg[[30..40]])])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /**
+   * Regression guard for group-key scope: two aggregates in one query, each grouping by the same
+   * computed key. The inner Aggregate's registered ordinal must not leak into the outer one, whose
+   * input has a different row type -- it used to resolve there and throw IndexOutOfBoundsException,
+   * and would have returned the wrong column had the ordinal been in range.
+   */
+  @Test
+  public void testAggregatesInOneQuerySharingComputedGroupKey() {
+    givenQuery(
+            """
+            SELECT a.g FROM
+              (SELECT CASE WHEN age > 30 THEN 'old' ELSE 'young' END AS g, COUNT(*) AS cnt
+                 FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END) a
+              JOIN
+              (SELECT CASE WHEN age > 30 THEN 'old' ELSE 'young' END AS g, COUNT(*) AS cnt
+                 FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END) b
+              ON a.g = b.g
+            """)
+        .assertFields("a.g");
+  }
+
+  /**
    * Regression guard: a select-list literal must stay a literal even when its text equals a column
    * name. Group-key resolution is keyed on the registered group-by expressions, so it can never
    * rebind an unrelated expression to a same-named column.

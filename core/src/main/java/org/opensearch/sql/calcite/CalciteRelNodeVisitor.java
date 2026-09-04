@@ -1759,6 +1759,14 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       boolean metricsFirst,
       boolean includeAggFieldsInNullFilter) {
     visitChildren(node, context);
+    // The ordinals in groupKeyOutputIndex only address the row type of the Aggregate that
+    // registered them. An inner Aggregate built by visitChildren above (a subquery, or the other
+    // side of a join) leaves its own entries behind, and everything below resolves against a
+    // different row type -- so drop them before resolving this aggregation's own expressions.
+    // Without this, a group key that is AST-equal to the inner one resolves to the inner
+    // Aggregate's ordinal: out of range (IndexOutOfBoundsException) or, worse, silently the
+    // wrong column when it happens to be in range.
+    context.getGroupKeyOutputIndex().clear();
 
     List<UnresolvedExpression> aggExprList = node.getAggExprList();
     List<UnresolvedExpression> groupExprList = new ArrayList<>();
@@ -1849,7 +1857,7 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     context.getGroupKeyOutputIndex().clear();
     int groupStartIdx = metricsFirst ? aggRexList.size() : 0;
     for (int i = 0; i < groupExprList.size(); i++) {
-      // Register every group key, not just Function nodes: CASE/CAST/IN/NOT extend
+      // Register every group key, not just Function nodes: CASE/CAST/IN/NOT/AND/OR/BETWEEN extend
       // UnresolvedExpression directly, and those are exactly the keys whose base columns are gone
       // above the Aggregate, so a post-aggregate reference to them has nothing else to resolve to.
       context.getGroupKeyOutputIndex().put(unwrapAlias(groupExprList.get(i)), groupStartIdx + i);
