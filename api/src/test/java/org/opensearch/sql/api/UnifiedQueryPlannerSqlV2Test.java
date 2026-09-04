@@ -328,6 +328,151 @@ public class UnifiedQueryPlannerSqlV2Test extends UnifiedQueryTestBase {
             """);
   }
 
+  /**
+   * A computed GROUP BY key must be referenced from the group-key column the Aggregate already
+   * produces: the base column it was computed from (age) is gone above the Aggregate.
+   */
+  @Test
+  public void testGroupByCaseExpression() {
+    givenQuery(
+            """
+            SELECT CASE WHEN age > 30 THEN 'old' ELSE 'young' END AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Case(caseValue=null, whenClauses=[When(condition=>(age, 30), result=old)], elseClause=Optional[young])=[CASE(>($2, 30), 'old':VARCHAR, 'young':VARCHAR)])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testGroupByCastExpression() {
+    givenQuery(
+            """
+            SELECT CAST(age AS STRING) AS c, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY CAST(age AS STRING)
+            """)
+        .assertPlan(
+            """
+            LogicalProject(c=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Cast(expression=age, convertedType=STRING)=[SAFE_CAST($2)])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /** A select item that wraps the group key resolves the key and applies the wrapper on top. */
+  @Test
+  public void testGroupByExpressionWrappedInSelectItem() {
+    givenQuery(
+            """
+            SELECT UPPER(CASE WHEN age > 30 THEN 'old' ELSE 'young' END) AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[UPPER($0)], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Case(caseValue=null, whenClauses=[When(condition=>(age, 30), result=old)], elseClause=Optional[young])=[CASE(>($2, 30), 'old':VARCHAR, 'young':VARCHAR)])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /**
+   * {@code And}, {@code Or} and {@code Between} extend {@code UnresolvedExpression} directly for
+   * the same reason {@code Case}/{@code Cast}/{@code In}/{@code Not} do, so a group key whose
+   * top-level node is one of them needs the same resolution.
+   */
+  @Test
+  public void testGroupByAndExpression() {
+    givenQuery(
+            """
+            SELECT age > 30 AND age < 50 AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY age > 30 AND age < 50
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(And(left=>(age, 30), right=<(age, 50))=[SEARCH($2, Sarg[(30..50)])])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testGroupByOrExpression() {
+    givenQuery(
+            """
+            SELECT age > 30 OR age < 20 AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY age > 30 OR age < 20
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Or(left=>(age, 30), right=<(age, 20))=[SEARCH($2, Sarg[(-∞..20), (30..+∞)])])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  @Test
+  public void testGroupByBetweenExpression() {
+    givenQuery(
+            """
+            SELECT age BETWEEN 30 AND 40 AS g, COUNT(*) AS cnt
+              FROM catalog.employees GROUP BY age BETWEEN 30 AND 40
+            """)
+        .assertPlan(
+            """
+            LogicalProject(g=[$0], cnt=[$1])
+              LogicalAggregate(group=[{0}], COUNT(*)=[COUNT()])
+                LogicalProject(Between(value=age, lowerBound=30, upperBound=40)=[SEARCH($2, Sarg[[30..40]])])
+                  LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
+  /**
+   * Regression guard for group-key scope: two aggregates in one query, each grouping by the same
+   * computed key. The inner Aggregate's registered ordinal must not leak into the outer one, whose
+   * input has a different row type -- it used to resolve there and throw IndexOutOfBoundsException,
+   * and would have returned the wrong column had the ordinal been in range.
+   */
+  @Test
+  public void testAggregatesInOneQuerySharingComputedGroupKey() {
+    givenQuery(
+            """
+            SELECT a.g FROM
+              (SELECT CASE WHEN age > 30 THEN 'old' ELSE 'young' END AS g, COUNT(*) AS cnt
+                 FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END) a
+              JOIN
+              (SELECT CASE WHEN age > 30 THEN 'old' ELSE 'young' END AS g, COUNT(*) AS cnt
+                 FROM catalog.employees GROUP BY CASE WHEN age > 30 THEN 'old' ELSE 'young' END) b
+              ON a.g = b.g
+            """)
+        .assertFields("a.g");
+  }
+
+  /**
+   * Regression guard: a select-list literal must stay a literal even when its text equals a column
+   * name. Group-key resolution is keyed on the registered group-by expressions, so it can never
+   * rebind an unrelated expression to a same-named column.
+   */
+  @Test
+  public void testSelectLiteralMatchingColumnName() {
+    givenQuery(
+            """
+            SELECT name, 'age' AS tag FROM catalog.employees
+            """)
+        .assertPlan(
+            """
+            LogicalProject(name=[$1], tag=['age':VARCHAR])
+              LogicalTableScan(table=[[catalog, employees]])
+            """);
+  }
+
   @Test
   public void testOrderByAggregateAlias() {
     givenQuery(

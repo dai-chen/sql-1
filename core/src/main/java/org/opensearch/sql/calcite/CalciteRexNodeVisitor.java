@@ -129,6 +129,14 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
     return context.relBuilder.field(index);
   }
 
+  /**
+   * @return the Aggregate's group-key column for {@code node}, or {@code null} when it is not a
+   *     registered group key -- see {@link AggregateOutputScope}
+   */
+  private RexNode resolveGroupKey(UnresolvedExpression node, CalcitePlanContext context) {
+    return context.getAggregateOutputScope().lookupGroupKey(node, context.relBuilder);
+  }
+
   @Override
   public RexNode visitLiteral(Literal node, CalcitePlanContext context) {
     RexBuilder rexBuilder = context.rexBuilder;
@@ -201,6 +209,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitAnd(And node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     final RelDataType booleanType =
         context.rexBuilder.getTypeFactory().createSqlType(SqlTypeName.BOOLEAN);
     final RexNode left = analyze(node.getLeft(), context);
@@ -210,6 +222,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitOr(Or node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     final RexNode left = analyze(node.getLeft(), context);
     final RexNode right = analyze(node.getRight(), context);
     return context.relBuilder.or(left, right);
@@ -224,6 +240,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitNot(Not node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     // Special handling for NOT(boolean_field = true/false) - see boolean comparison helpers below
     UnresolvedExpression inner = node.getExpression();
     if (inner instanceof Compare compare && "=".equals(compare.getOperator())) {
@@ -237,6 +257,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitIn(In node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     final RexNode field = analyze(node.getField(), context);
     final List<RexNode> valueList =
         node.getValueList().stream().map(value -> analyze(value, context)).toList();
@@ -311,6 +335,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitBetween(Between node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     RexNode value = analyze(node.getValue(), context);
     RexNode lowerBound = analyze(node.getLowerBound(), context);
     RexNode upperBound = analyze(node.getUpperBound(), context);
@@ -664,10 +692,9 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitFunction(Function node, CalcitePlanContext context) {
-    // Resolve a group-by expression to its group-key output index.
-    Integer groupKeyIndex = context.getGroupKeyOutputIndex().get(node);
-    if (groupKeyIndex != null) {
-      return context.relBuilder.field(groupKeyIndex);
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
     }
     List<UnresolvedExpression> args = node.getFuncArgs();
     List<RexNode> arguments = new ArrayList<>();
@@ -926,6 +953,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitCast(Cast node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     RexNode expr = analyze(node.getExpression(), context);
     RelDataType type =
         OpenSearchTypeFactory.convertExprTypeToRelDataType(node.getDataType().getCoreType());
@@ -937,6 +968,10 @@ public class CalciteRexNodeVisitor extends AbstractNodeVisitor<RexNode, CalciteP
 
   @Override
   public RexNode visitCase(Case node, CalcitePlanContext context) {
+    RexNode groupKey = resolveGroupKey(node, context);
+    if (groupKey != null) {
+      return groupKey;
+    }
     List<RexNode> caseOperands = new ArrayList<>();
     List<RelDataType> resultTypes = new ArrayList<>();
     for (When when : node.getWhenClauses()) {
