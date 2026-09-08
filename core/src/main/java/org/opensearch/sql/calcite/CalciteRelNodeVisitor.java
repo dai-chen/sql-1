@@ -613,6 +613,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
             expandedFields.add(
                 context.relBuilder.alias(context.relBuilder.field(alias.getName()), displayName));
           } else {
+            // Anything else -- including a computed GROUP BY key -- resolves through the rex
+            // visitor, which maps a registered group-by expression to the Aggregate's output
+            // column (CalciteRexNodeVisitor#resolveGroupKey).
             expandedFields.add(rexVisitor.analyze(alias, context));
           }
         }
@@ -1756,6 +1759,10 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       boolean metricsFirst,
       boolean includeAggFieldsInNullFilter) {
     visitChildren(node, context);
+    // Children are built, so any inner Aggregate has finished registering its own keys: start this
+    // aggregation's scope before resolving its expressions. See AggregateOutputScope for why one
+    // scope is live at a time.
+    context.getAggregateOutputScope().enter();
 
     List<UnresolvedExpression> aggExprList = node.getAggExprList();
     List<UnresolvedExpression> groupExprList = new ArrayList<>();
@@ -1841,15 +1848,13 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
       }
     }
 
-    // Register group-by expression output indices so post-aggregate references resolve to them;
-    // clear() safe as above.
-    context.getGroupKeyOutputIndex().clear();
+    // Register group-by expression output indices so post-aggregate references resolve to them.
+    // The scope was started in visitAggregation once the children were built.
     int groupStartIdx = metricsFirst ? aggRexList.size() : 0;
     for (int i = 0; i < groupExprList.size(); i++) {
-      Function groupFunc = extractFunction(groupExprList.get(i));
-      if (groupFunc != null) {
-        context.getGroupKeyOutputIndex().put(groupFunc, groupStartIdx + i);
-      }
+      context
+          .getAggregateOutputScope()
+          .registerGroupKey(unwrapAlias(groupExprList.get(i)), groupStartIdx + i);
     }
   }
 
@@ -1859,10 +1864,9 @@ public class CalciteRelNodeVisitor extends AbstractNodeVisitor<RelNode, CalciteP
     return null;
   }
 
-  private static Function extractFunction(UnresolvedExpression expr) {
-    if (expr instanceof Function f) return f;
-    if (expr instanceof Alias alias) return extractFunction(alias.getDelegated());
-    return null;
+  /** Strips enclosing aliases so a group key is registered under the expression itself. */
+  private static UnresolvedExpression unwrapAlias(UnresolvedExpression expr) {
+    return expr instanceof Alias alias ? unwrapAlias(alias.getDelegated()) : expr;
   }
 
   /**
