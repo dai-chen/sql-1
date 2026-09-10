@@ -267,6 +267,57 @@ public class QueryService {
         settings);
   }
 
+  /**
+   * Prepares the final legacy physical plan without executing it.
+   *
+   * <p>This is the routing seam after enumerable conversion and all OpenSearch pushdown rules. The
+   * current PoC still performs implementation/code generation while preparing; a production {@code
+   * LegacyPlanPreparer} should retain the prepared plan and keep implementation lazy.
+   */
+  public RelNode prepareLegacyPhysicalPlan(
+      UnresolvedPlan plan,
+      QueryType queryType,
+      HighlightConfig highlightConfig,
+      boolean includeMetadata) {
+    AtomicReference<RelNode> physicalPlan = new AtomicReference<>();
+    CalcitePlanContext.run(
+        () -> {
+          QueryProfiling.noop();
+          CalciteClassLoaderHelper.withCalciteClassLoader(
+              () -> {
+                CalcitePlanContext context =
+                    CalcitePlanContext.create(
+                        buildFrameworkConfig(),
+                        SysLimit.fromSettings(settings),
+                        queryType,
+                        includeMetadata);
+                context.setHighlightConfig(highlightConfig);
+
+                RelNode relNode = analyze(plan, context);
+                RelNode calcitePlan =
+                    withCheckedArithmetic(convertToCalcitePlan(relNode, context), context);
+                RelNode optimizedPlan = CalciteToolsHelper.optimize(calcitePlan, context);
+
+                try (Hook.Closeable ignored =
+                        Hook.PLAN_BEFORE_IMPLEMENTATION.addThread(
+                            (java.util.function.Consumer<Object>)
+                                value -> physicalPlan.set(((RelRoot) value).rel));
+                    java.sql.PreparedStatement statement =
+                        OpenSearchRelRunners.run(context, optimizedPlan)) {
+                  // Preparing triggers the final enumerable conversion and pushdown rules.
+                } catch (java.sql.SQLException e) {
+                  throw new RuntimeException(e);
+                }
+              },
+              QueryService.class);
+        },
+        settings);
+    if (physicalPlan.get() == null) {
+      throw new IllegalStateException("Legacy physical plan was not captured");
+    }
+    return physicalPlan.get();
+  }
+
   private void executeCalcitePlan(
       RelNode optimizedPlan,
       CalcitePlanContext context,

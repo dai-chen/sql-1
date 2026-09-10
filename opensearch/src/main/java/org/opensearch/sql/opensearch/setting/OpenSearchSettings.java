@@ -184,7 +184,15 @@ public class OpenSearchSettings extends Settings {
   public static final Setting<?> CALCITE_ANALYTICS_FALLBACK_ALLOWED_SETTING =
       Setting.boolSetting(
           Key.CALCITE_ANALYTICS_FALLBACK_ALLOWED.getKeyValue(),
-          true,
+          false,
+          Setting.Property.NodeScope,
+          Setting.Property.Dynamic);
+
+  public static final Setting<Long> CALCITE_ANALYTICS_ROUTING_MIN_DOCS_SETTING =
+      Setting.longSetting(
+          Key.CALCITE_ANALYTICS_ROUTING_MIN_DOCS.getKeyValue(),
+          100_000L,
+          0L,
           Setting.Property.NodeScope,
           Setting.Property.Dynamic);
 
@@ -545,6 +553,12 @@ public class OpenSearchSettings extends Settings {
     register(
         settingBuilder,
         clusterSettings,
+        Key.CALCITE_ANALYTICS_ROUTING_MIN_DOCS,
+        CALCITE_ANALYTICS_ROUTING_MIN_DOCS_SETTING,
+        new Updater(Key.CALCITE_ANALYTICS_ROUTING_MIN_DOCS));
+    register(
+        settingBuilder,
+        clusterSettings,
         Key.CALCITE_PUSHDOWN_ENABLED,
         CALCITE_PUSHDOWN_ENABLED_SETTING,
         new Updater(Key.CALCITE_PUSHDOWN_ENABLED));
@@ -798,6 +812,7 @@ public class OpenSearchSettings extends Settings {
         .add(CALCITE_FALLBACK_ALLOWED_SETTING)
         .add(CALCITE_ANALYTICS_ENABLED_SETTING)
         .add(CALCITE_ANALYTICS_FALLBACK_ALLOWED_SETTING)
+        .add(CALCITE_ANALYTICS_ROUTING_MIN_DOCS_SETTING)
         .add(CALCITE_PUSHDOWN_ENABLED_SETTING)
         .add(CALCITE_PUSHDOWN_ROWCOUNT_ESTIMATION_FACTOR_SETTING)
         .add(CALCITE_SUPPORT_ALL_JOIN_TYPES_SETTING)

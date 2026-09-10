@@ -46,19 +46,25 @@ public abstract class Settings {
         "plugins.calcite.pushdown.rowcount.estimation.factor"),
     CALCITE_SUPPORT_ALL_JOIN_TYPES("plugins.calcite.all_join_types.allowed"),
 
-  /**
-   * Route analytical query shapes to the OpenSearch Analytics Engine instead of compiling them to
-   * Query DSL. Off by default: AE is a second execution path, chosen by plan shape, not a
-   * replacement. See RFC opensearch-project/sql#5713.
-   */
-  CALCITE_ANALYTICS_ENABLED("plugins.calcite.analytics.enabled"),
+    /**
+     * Route analytical query shapes to the OpenSearch Analytics Engine instead of compiling them to
+     * Query DSL. Off by default: AE is a second execution path, chosen by plan shape, not a
+     * replacement. See RFC opensearch-project/sql#5713.
+     */
+    CALCITE_ANALYTICS_ENABLED("plugins.calcite.analytics.enabled"),
 
-  /**
-   * When an analytics-engine-routed query fails during analysis or planning, re-run it on the
-   * default Calcite path instead of surfacing the error. Only pre-execution failures are eligible —
-   * once AE has streamed a partial result the query cannot be safely re-planned.
-   */
-  CALCITE_ANALYTICS_FALLBACK_ALLOWED("plugins.calcite.analytics.fallback.allowed"),
+    /**
+     * When an analytics-engine-routed query fails during analysis or planning, re-run it on the
+     * default Calcite path instead of surfacing the error. Only pre-execution failures are eligible
+     * — once AE has streamed a partial result the query cannot be safely re-planned.
+     */
+    CALCITE_ANALYTICS_FALLBACK_ALLOWED("plugins.calcite.analytics.fallback.allowed"),
+
+    /**
+     * Minimum total primary live-document count required before residual coordinator work is routed
+     * to the Analytics Engine. This is a coarse fixed-overhead guard, not a cardinality estimate.
+     */
+    CALCITE_ANALYTICS_ROUTING_MIN_DOCS("plugins.calcite.analytics.routing.min_docs"),
 
     /** Query Settings. */
     FIELD_TYPE_TOLERANCE("plugins.query.field_type_tolerance"),

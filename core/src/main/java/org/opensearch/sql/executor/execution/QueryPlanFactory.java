@@ -8,6 +8,7 @@ package org.opensearch.sql.executor.execution;
 import static java.util.Objects.requireNonNull;
 
 import lombok.RequiredArgsConstructor;
+import org.apache.calcite.rel.RelNode;
 import org.apache.commons.lang3.tuple.Pair;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 import org.opensearch.sql.ast.statement.Explain;
@@ -16,6 +17,7 @@ import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.CloseCursor;
 import org.opensearch.sql.ast.tree.FetchCursor;
+import org.opensearch.sql.ast.tree.HighlightConfig;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.exception.UnsupportedCursorRequestException;
@@ -155,5 +157,14 @@ public class QueryPlanFactory
   public AbstractPlan createAnalyzePlan(
       UnresolvedPlan plan, QueryType queryType, ResponseListener<AnalyzeResponse> listener) {
     return new AnalyzePlan(QueryId.queryId(), queryType, plan, queryService, listener);
+  }
+
+  public RelNode prepareLegacyPhysicalPlan(
+      UnresolvedPlan plan,
+      QueryType queryType,
+      HighlightConfig highlightConfig,
+      boolean includeMetadata) {
+    return queryService.prepareLegacyPhysicalPlan(
+        plan, queryType, highlightConfig, includeMetadata);
   }
 }

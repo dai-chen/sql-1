@@ -157,6 +157,18 @@ class OpenSearchSettingsTest {
   }
 
   @Test
+  void analyticsRoutingMinDocsIsDynamicAndRegistered() {
+    assertTrue(OpenSearchSettings.CALCITE_ANALYTICS_ROUTING_MIN_DOCS_SETTING.isDynamic());
+    assertEquals(
+        100_000L,
+        OpenSearchSettings.CALCITE_ANALYTICS_ROUTING_MIN_DOCS_SETTING.get(
+            org.opensearch.common.settings.Settings.EMPTY));
+    assertTrue(
+        OpenSearchSettings.pluginSettings()
+            .contains(OpenSearchSettings.CALCITE_ANALYTICS_ROUTING_MIN_DOCS_SETTING));
+  }
+
+  @Test
   void getSparkExecutionEngineConfigSetting() {
     // Default is empty string
     assertEquals(

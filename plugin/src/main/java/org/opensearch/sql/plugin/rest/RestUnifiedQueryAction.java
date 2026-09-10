@@ -17,6 +17,7 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import org.apache.calcite.rel.RelNode;
 import org.apache.commons.lang3.Strings;
 import org.apache.logging.log4j.LogManager;
@@ -36,11 +37,7 @@ import org.opensearch.indices.IndicesService;
 import org.opensearch.sql.api.UnifiedQueryContext;
 import org.opensearch.sql.api.UnifiedQueryPlanner;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
-import org.opensearch.sql.ast.Node;
 import org.opensearch.sql.ast.statement.ExplainMode;
-import org.opensearch.sql.ast.tree.Aggregation;
-import org.opensearch.sql.ast.tree.Chart;
-import org.opensearch.sql.ast.tree.RareTopN;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.calcite.CalcitePlanContext;
@@ -53,6 +50,10 @@ import org.opensearch.sql.executor.analytics.AnalyticsExecutionEngine;
 import org.opensearch.sql.lang.LangSpec;
 import org.opensearch.sql.monitor.profile.ProfileContext;
 import org.opensearch.sql.monitor.profile.QueryProfiling;
+import org.opensearch.sql.opensearch.executor.OpenSearchIndexDocumentCountProvider;
+import org.opensearch.sql.opensearch.executor.OpenSearchPlanRoutingAnalyzer;
+import org.opensearch.sql.opensearch.executor.OpenSearchPlanRoutingAnalyzer.Assessment;
+import org.opensearch.sql.opensearch.executor.OpenSearchPlanRoutingAnalyzer.LegacyExecutionShape;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
 import org.opensearch.sql.protocol.response.QueryResult;
 import org.opensearch.sql.protocol.response.format.ResponseFormatter;
@@ -77,6 +78,7 @@ public class RestUnifiedQueryAction {
   private final org.opensearch.analytics.EngineContextProvider contextProvider;
   private final org.opensearch.sql.common.setting.Settings pluginSettings;
   private final org.opensearch.sql.executor.ExecutionDispatcher executionDispatcher;
+  private final OpenSearchIndexDocumentCountProvider documentCountProvider;
 
   public RestUnifiedQueryAction(
       NodeClient client,
@@ -91,6 +93,7 @@ public class RestUnifiedQueryAction {
     this.contextProvider = contextProvider;
     this.pluginSettings = pluginSettings;
     this.executionDispatcher = executionDispatcher;
+    this.documentCountProvider = new OpenSearchIndexDocumentCountProvider(client);
   }
 
   /**
@@ -413,92 +416,81 @@ public class RestUnifiedQueryAction {
     }
   }
 
-  /**
-   * Plan-shape gate for the analytics-engine route (RFC opensearch-project/sql#5713).
-   *
-   * <p>The analytics engine is a <em>second</em> execution path selected by plan shape, not a
-   * replacement for the Calcite→DSL path: shapes DSL already serves well keep using it. Only shapes
-   * DSL handles badly are routed.
-   *
-   * <p>This PoC routes two shapes, both of which the DSL path serves badly:
-   *
-   * <ol>
-   *   <li><b>Grouped aggregation</b> — a {@code stats ... by ...}. The DSL path pushes this down as
-   *       a {@code composite} aggregation, which can only be ordered by the composite KEY, never by
-   *       a metric sub-aggregation. Every bucket is therefore enumerated and shipped to the
-   *       coordinator, which is where the cost lives once group cardinality is high. This also
-   *       covers {@code timechart} and {@code bin}, which lower to a grouped aggregation over a
-   *       {@code span}.
-   *   <li><b>Per-group top-k</b> — {@code top}/{@code rare} carrying a {@code by} clause, which
-   *       lowers to a partitioned {@code ROW_NUMBER} window the DSL path cannot express at all.
-   * </ol>
-   *
-   * <p>Plain {@code top}/{@code rare} without a {@code by} clause is deliberately excluded: {@code
-   * RareTopPushdownRule} already lowers it to a single ordered {@code terms} aggregation, which DSL
-   * serves well.
-   *
-   * <p>Known limitation: the predicate is plan-shape only, so it cannot see group cardinality. A
-   * low-cardinality {@code stats ... by ...} is routed too, and measures SLOWER on the analytics
-   * engine (it pays a fixed native-session and Arrow-export cost that DSL does not). A cost-based
-   * predicate is the obvious follow-up; until then the setting defaults to off.
-   *
-   * @return false when the query cannot be parsed here — the default path will parse it again and
-   *     report the syntax error properly, rather than this gate masking it as a routing decision.
-   */
-  public boolean isAnalyticsPlanShape(String query, QueryType queryType) {
-    if (query == null || query.isEmpty()) {
-      return false;
-    }
-    try (UnifiedQueryContext context = buildParsingContext(queryType)) {
-      UnresolvedPlan plan = (UnresolvedPlan) context.getParser().parse(query);
-      return hasRoutableShape(plan);
+  public enum EngineRoutingReason {
+    LEGACY_FULLY_PUSHDOWN,
+    LEGACY_SMALL_INPUT,
+    LEGACY_UNKNOWN_INPUT,
+    ANALYTICS_COORDINATOR_WORK
+  }
+
+  public record PlanRoutingDecision(
+      boolean routeToAnalytics,
+      EngineRoutingReason reason,
+      LegacyExecutionShape legacyShape,
+      OptionalLong primaryDocs,
+      long minDocs) {}
+
+  /** Routes only residual coordinator work over a sufficiently large input to AE. */
+  public void planRoutingDecision(
+      RelNode legacyPhysicalPlan, ActionListener<PlanRoutingDecision> listener) {
+    long minDocs =
+        ((Number) pluginSettings.getSettingValue(Key.CALCITE_ANALYTICS_ROUTING_MIN_DOCS))
+            .longValue();
+    try {
+      Assessment assessment = OpenSearchPlanRoutingAnalyzer.analyze(legacyPhysicalPlan);
+      if (assessment.legacyShape() == LegacyExecutionShape.FULLY_PUSHDOWN) {
+        listener.onResponse(
+            new PlanRoutingDecision(
+                false,
+                EngineRoutingReason.LEGACY_FULLY_PUSHDOWN,
+                assessment.legacyShape(),
+                OptionalLong.empty(),
+                minDocs));
+        return;
+      }
+
+      documentCountProvider.fetch(
+          assessment.indices(),
+          ActionListener.wrap(
+              counts -> listener.onResponse(routingDecision(assessment, counts, minDocs)),
+              e -> {
+                LOG.debug("Unable to fetch routing statistics; keeping default route", e);
+                listener.onResponse(unknownInputDecision(minDocs));
+              }));
     } catch (Exception e) {
-      return false;
+      LOG.debug("Unable to assess legacy physical plan; keeping default route", e);
+      listener.onResponse(unknownInputDecision(minDocs));
     }
   }
 
-  /**
-   * True when the tree contains a grouped aggregation, a {@code top}/{@code rare} (with or without
-   * a {@code by} clause), or a {@code timechart}. See {@link #isAnalyticsPlanShape} for why.
-   *
-   * <p>Deliberately excluded: raw fetch and ungrouped aggregation, which the DSL path already
-   * serves at least as well.
-   */
-  private static boolean hasRoutableShape(Node node) {
-    if (node == null) {
-      return false;
+  private static PlanRoutingDecision routingDecision(
+      Assessment assessment, OpenSearchIndexDocumentCountProvider.Result counts, long minDocs) {
+    if (!counts.complete()) {
+      return new PlanRoutingDecision(
+          false,
+          EngineRoutingReason.LEGACY_UNKNOWN_INPUT,
+          assessment.legacyShape(),
+          OptionalLong.empty(),
+          minDocs);
     }
-    // `stats ... by ...` — also how timechart and bin lower (grouped aggregation over a span).
-    if (node instanceof Aggregation agg
-        && ((agg.getGroupExprList() != null && !agg.getGroupExprList().isEmpty())
-            || agg.getSpan() != null)) {
-      return true;
-    }
-    // `top`/`rare`, with or without a `by` clause. The `by` form is the obvious case: per-group
-    // top-k is a window the DSL cannot express. The plain form matters too -- measured on a
-    // 50k-cardinality keyword, `top 200 <field>` lowers to a `composite` aggregation plus a
-    // coordinator-side ROW_NUMBER window rather than a metric-ordered `terms` aggregation, so it
-    // carries the same coordinator cost. Restricting this test to the `by` form left that shape
-    // unrouted.
-    if (node instanceof RareTopN) {
-      return true;
-    }
-    // `timechart` is its own AST node (Chart), not an Aggregation, so the grouped-aggregation
-    // check above never matched it. It lowers to two full aggregations + a ROW_NUMBER window +
-    // a self-join (the top-10-series cap), which is exactly the shape the DSL serves worst.
-    if (node instanceof Chart) {
-      return true;
-    }
-    List<? extends Node> children = node.getChild();
-    if (children == null) {
-      return false;
-    }
-    for (Node child : children) {
-      if (hasRoutableShape(child)) {
-        return true;
-      }
-    }
-    return false;
+    boolean route = counts.primaryDocs() >= minDocs;
+    return new PlanRoutingDecision(
+        route,
+        route
+            ? EngineRoutingReason.ANALYTICS_COORDINATOR_WORK
+            : EngineRoutingReason.LEGACY_SMALL_INPUT,
+        assessment.legacyShape(),
+        OptionalLong.of(counts.primaryDocs()),
+        minDocs);
+  }
+
+  private static PlanRoutingDecision unknownInputDecision(long minDocs) {
+    return new PlanRoutingDecision(
+        false,
+        EngineRoutingReason.LEGACY_UNKNOWN_INPUT,
+        LegacyExecutionShape.RESIDUAL_COORDINATOR_WORK,
+        OptionalLong.empty(),
+        minDocs);
   }
 
   private static RelNode addQuerySizeLimit(RelNode plan, CalcitePlanContext context) {
