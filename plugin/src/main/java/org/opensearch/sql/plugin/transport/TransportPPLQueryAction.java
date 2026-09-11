@@ -19,6 +19,7 @@ import java.util.function.Supplier;
 import org.apache.calcite.rel.RelNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.ThreadContext;
 import org.opensearch.action.ActionRequest;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
@@ -225,63 +226,273 @@ public class TransportPPLQueryAction
     ActionListener<TransportPPLQueryResponse> clearingListener =
         wrapWithProfilingClear(tracedListener);
 
+    Consumer<String> anonymizedQuerySink =
+        anonymized -> rootSpan.addAttribute("db.query.text", anonymized);
+
     try {
-      // Route to analytics engine for non-Lucene (e.g., Parquet-backed) indices.
-      if (unifiedQueryHandler != null
-          && unifiedQueryHandler.isAnalyticsIndex(transformedRequest.getRequest(), QueryType.PPL)) {
-        LOG.info("[{}] Routing PPL query to analytics engine", QueryContext.getRequestId());
-        // Pass this PPL task so the analytics engine links its query task to it for cancellation.
-        if (transformedRequest.isExplainRequest()) {
-          unifiedQueryHandler.explain(
-              transformedRequest.getRequest(),
-              QueryType.PPL,
-              transformedRequest.mode(),
-              task,
-              createExplainResponseListener(transformedRequest, clearingListener));
-        } else {
-          // Analytics route only emits JSON; reject unsupported formats (e.g. csv) with a 4xx.
-          try {
-            AnalyticsEngineFormatSupport.validateFormat(format(transformedRequest));
-          } catch (Exception e) {
-            clearingListener.onFailure(e);
-            return;
-          }
-          unifiedQueryHandler.execute(
-              transformedRequest.getRequest(),
-              QueryType.PPL,
-              transformedRequest.profile(),
-              transformedRequest.getFetchSize(),
-              task,
-              clearingListener);
-        }
+      if (unifiedQueryHandler != null) {
+        Map<String, String> queryContext = ThreadContext.getImmutableContext();
+        shouldRouteToAnalytics(
+            transformedRequest,
+            ActionListener.wrap(
+                routeToAnalytics ->
+                    runWithQueryContext(
+                        queryContext,
+                        () -> {
+                          try (SpanScope ignored = tracer.withSpanInScope(rootSpan)) {
+                            executeOnSelectedPath(
+                                routeToAnalytics,
+                                task,
+                                transformedRequest,
+                                clearingListener,
+                                anonymizedQuerySink);
+                          } catch (Exception e) {
+                            clearingListener.onFailure(e);
+                          }
+                        }),
+                e ->
+                    runWithQueryContext(
+                        queryContext, () -> executeRoutingFailure(clearingListener, e))));
         return;
       }
 
-      Consumer<String> anonymizedQuerySink =
-          anonymized -> rootSpan.addAttribute("db.query.text", anonymized);
-      PPLService pplService = injector.getInstance(PPLService.class);
-      if (transformedRequest.isExplainRequest()) {
-        pplService.explain(
-            transformedRequest,
-            createExplainResponseListener(transformedRequest, clearingListener),
-            anonymizedQuerySink);
-      } else if (transformedRequest.analyze()) {
-        pplService.analyze(
-            transformedRequest,
-            createAnalyzeResponseListener(transformedRequest, clearingListener),
-            anonymizedQuerySink);
-      } else {
-        pplService.execute(
-            transformedRequest,
-            createListener(transformedRequest, clearingListener),
-            createExplainResponseListener(transformedRequest, clearingListener),
-            anonymizedQuerySink);
-      }
+      executeOnDefaultPath(
+          transformedRequest,
+          withEngineMarker(clearingListener, ENGINE_DEFAULT),
+          anonymizedQuerySink);
     } catch (Exception e) {
       clearingListener.onFailure(e);
     } finally {
       spanScope.close();
     }
+  }
+
+  private void executeOnSelectedPath(
+      boolean routeToAnalytics,
+      Task task,
+      PPLQueryRequest request,
+      ActionListener<TransportPPLQueryResponse> listener,
+      Consumer<String> anonymizedQuerySink) {
+    if (!routeToAnalytics) {
+      executeOnDefaultPath(
+          request, withEngineMarker(listener, ENGINE_DEFAULT), anonymizedQuerySink);
+      return;
+    }
+
+    LOG.info("[{}] Routing PPL query to analytics engine", QueryContext.getRequestId());
+    ActionListener<TransportPPLQueryResponse> analyticsListener =
+        withAnalyticsFallback(request, listener, anonymizedQuerySink);
+    if (request.isExplainRequest()) {
+      unifiedQueryHandler.explain(
+          request.getRequest(),
+          QueryType.PPL,
+          request.mode(),
+          task,
+          createExplainResponseListener(request, analyticsListener));
+      return;
+    }
+
+    AnalyticsEngineFormatSupport.validateFormat(format(request));
+    unifiedQueryHandler.execute(
+        request.getRequest(),
+        QueryType.PPL,
+        request.profile(),
+        request.getFetchSize(),
+        task,
+        analyticsListener);
+  }
+
+  private static void executeRoutingFailure(
+      ActionListener<TransportPPLQueryResponse> listener, Exception failure) {
+    listener.onFailure(failure);
+  }
+
+  private static void runWithQueryContext(Map<String, String> context, Runnable action) {
+    Map<String, String> previous = ThreadContext.getImmutableContext();
+    ThreadContext.clearMap();
+    ThreadContext.putAll(context);
+    try {
+      action.run();
+    } finally {
+      ThreadContext.clearMap();
+      ThreadContext.putAll(previous);
+    }
+  }
+
+  static final String ENGINE_ANALYTICS = "analytics";
+  static final String ENGINE_DEFAULT = "calcite";
+
+  /**
+   * Splices a top-level field into an already-formatted JSON body.
+   *
+   * <p>The response models are shared across modules, so threading an {@code engine} field through
+   * {@code ExplainResponse} would touch several of them. For the PoC this injects the field into
+   * the rendered JSON instead: find the opening brace and insert after it, which preserves every
+   * existing key and its order. Non-JSON bodies (YAML explain, CSV) are returned unchanged.
+   */
+  private static String injectJsonField(String body, String rawKeyAndValue) {
+    if (body == null) {
+      return body;
+    }
+    int brace = body.indexOf('{');
+    if (brace < 0) {
+      return body;
+    }
+    return body.substring(0, brace + 1) + "\n  " + rawKeyAndValue + "," + body.substring(brace + 1);
+  }
+
+  /** Wraps {@code listener} so every response it delivers carries {@code "engine": "<name>"}. */
+  private static ActionListener<TransportPPLQueryResponse> withEngineMarker(
+      ActionListener<TransportPPLQueryResponse> listener, String engine) {
+    return ActionListener.wrap(
+        r ->
+            listener.onResponse(
+                new TransportPPLQueryResponse(
+                    injectJsonField(r.getResult(), "\"engine\": \"" + engine + "\""),
+                    r.getContentType())),
+        listener::onFailure);
+  }
+
+  /**
+   * Wraps {@code listener} so its response also carries an {@code ENGINE_FALLBACK} warning. The
+   * analytics route and the default path can return different results, so an engine switch must be
+   * visible rather than silent.
+   */
+  private static ActionListener<TransportPPLQueryResponse> withFallbackWarning(
+      ActionListener<TransportPPLQueryResponse> listener, String reason) {
+    String warning =
+        "\"warnings\": [{\"type\": \"ENGINE_FALLBACK\", \"message\": \"Query was routed to the"
+            + " analytics engine but fell back to the default engine\", \"detail\": "
+            + org.json.JSONObject.quote(reason)
+            + "}]";
+    return ActionListener.wrap(
+        r ->
+            listener.onResponse(
+                new TransportPPLQueryResponse(
+                    injectJsonField(r.getResult(), warning), r.getContentType())),
+        listener::onFailure);
+  }
+
+  /** Runs {@code request} on the default (Calcite → Query DSL) path. */
+  private void executeOnDefaultPath(
+      PPLQueryRequest request,
+      ActionListener<TransportPPLQueryResponse> listener,
+      Consumer<String> anonymizedQuerySink) {
+    PPLService pplService = injector.getInstance(PPLService.class);
+    if (request.isExplainRequest()) {
+      pplService.explain(
+          request, createExplainResponseListener(request, listener), anonymizedQuerySink);
+    } else if (request.analyze()) {
+      pplService.analyze(
+          request, createAnalyzeResponseListener(request, listener), anonymizedQuerySink);
+    } else {
+      pplService.execute(
+          request,
+          createListener(request, listener),
+          createExplainResponseListener(request, listener),
+          anonymizedQuerySink);
+    }
+  }
+
+  /** Decides whether the analytics engine serves this query. */
+  private void shouldRouteToAnalytics(
+      PPLQueryRequest request, ActionListener<Boolean> routingListener) {
+    // A composite/Parquet-backed index is mandatory: the legacy DSL path cannot read it.
+    if (unifiedQueryHandler.isAnalyticsIndex(request.getRequest(), QueryType.PPL)) {
+      routingListener.onResponse(true);
+      return;
+    }
+    if (!isAnalyticsRoutingEnabled()) {
+      routingListener.onResponse(false);
+      return;
+    }
+
+    try {
+      PPLService pplService = injector.getInstance(PPLService.class);
+      RelNode legacyPhysicalPlan = pplService.prepareLegacyPhysicalPlan(request);
+      String requestId = QueryContext.getRequestId();
+      unifiedQueryHandler.planRoutingDecision(
+          legacyPhysicalPlan,
+          ActionListener.wrap(
+              decision -> {
+                LOG.info(
+                    "[{}] Engine routing: route={}, reason={}, legacy_shape={}, primary_docs={},"
+                        + " min_docs={}",
+                    requestId,
+                    decision.routeToAnalytics() ? ENGINE_ANALYTICS : ENGINE_DEFAULT,
+                    decision.reason(),
+                    decision.legacyShape(),
+                    decision.primaryDocs().isPresent()
+                        ? decision.primaryDocs().getAsLong()
+                        : "unknown",
+                    decision.minDocs());
+                routingListener.onResponse(decision.routeToAnalytics());
+              },
+              e -> {
+                LOG.debug(
+                    "[{}] Unable to evaluate engine routing; keeping default route", requestId, e);
+                routingListener.onResponse(false);
+              }));
+    } catch (Exception e) {
+      LOG.debug(
+          "[{}] Unable to prepare legacy plan for engine routing; keeping default route",
+          QueryContext.getRequestId(),
+          e);
+      routingListener.onResponse(false);
+    }
+  }
+
+  private boolean isAnalyticsRoutingEnabled() {
+    return Boolean.TRUE.equals(
+        pluginSettingsRef.getSettingValue(Settings.Key.CALCITE_ANALYTICS_ENABLED));
+  }
+
+  /**
+   * Wraps {@code delegate} so a failure on the analytics route re-runs the query on the default
+   * path, when {@code plugins.calcite.analytics.fallback.allowed} permits it.
+   *
+   * <p>That setting defaults to <b>off</b>: a silent engine switch makes the analytics route
+   * indistinguishable from the default one, so any latency attributed to the analytics engine could
+   * in fact be the default path's. A route that cannot execute a query must fail visibly.
+   *
+   * <p>Only pre-execution failures are eligible. {@link ActionListener} guarantees a single
+   * terminal call, so reaching {@code onFailure} means no response was delivered and nothing has
+   * been emitted to the client — the same boundary the existing Calcite → V2 fallback relies on. A
+   * failure raised after rows began streaming cannot be retried and is not made recoverable here.
+   */
+  private ActionListener<TransportPPLQueryResponse> withAnalyticsFallback(
+      PPLQueryRequest request,
+      ActionListener<TransportPPLQueryResponse> delegate,
+      Consumer<String> anonymizedQuerySink) {
+    // Success on the analytics route is stamped here rather than by wrapping `delegate`, so the
+    // fallback branch below can stamp the default engine instead without both firing.
+    return ActionListener.wrap(
+        r -> withEngineMarker(delegate, ENGINE_ANALYTICS).onResponse(r),
+        e -> {
+          if (!isAnalyticsFallbackAllowed()) {
+            delegate.onFailure(e);
+            return;
+          }
+          LOG.info(
+              "[{}] Analytics engine route failed ({}); falling back to the default path",
+              QueryContext.getRequestId(),
+              e.toString());
+          try {
+            executeOnDefaultPath(
+                request,
+                withFallbackWarning(withEngineMarker(delegate, ENGINE_DEFAULT), e.toString()),
+                anonymizedQuerySink);
+          } catch (Exception fallbackFailure) {
+            // Surface the original analytics failure; the fallback attempt is context.
+            e.addSuppressed(fallbackFailure);
+            delegate.onFailure(e);
+          }
+        });
+  }
+
+  private boolean isAnalyticsFallbackAllowed() {
+    return Boolean.TRUE.equals(
+        pluginSettingsRef.getSettingValue(Settings.Key.CALCITE_ANALYTICS_FALLBACK_ALLOWED));
   }
 
   private ResponseListener<AnalyzeResponse> createAnalyzeResponseListener(

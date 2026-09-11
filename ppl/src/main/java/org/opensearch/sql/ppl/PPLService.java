@@ -11,6 +11,7 @@ import static org.opensearch.sql.executor.execution.QueryPlanFactory.NO_CONSUMER
 import java.util.function.Consumer;
 import lombok.extern.log4j.Log4j2;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.apache.calcite.rel.RelNode;
 import org.opensearch.sql.ast.statement.Query;
 import org.opensearch.sql.ast.statement.Statement;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
@@ -167,6 +168,26 @@ public class PPLService {
     } catch (Exception e) {
       listener.onFailure(e);
     }
+  }
+
+  /** Prepares the actual Calcite-to-DSL physical plan used by the engine router. */
+  public RelNode prepareLegacyPhysicalPlan(PPLQueryRequest request) {
+    ParseTree cst = parser.parse(request.getRequest());
+    Statement statement =
+        cst.accept(
+            new AstStatementBuilder(
+                new AstBuilder(request.getRequest(), settings),
+                AstStatementBuilder.StatementBuilderContext.builder()
+                    .isExplain(false)
+                    .fetchSize(request.getFetchSize())
+                    .highlightConfig(request.getHighlightConfig())
+                    .includeMetadata(request.getIncludeMetadata())
+                    .build()));
+    if (!(statement instanceof Query query)) {
+      throw new IllegalArgumentException("Engine routing requires a PPL query statement");
+    }
+    return queryExecutionFactory.prepareLegacyPhysicalPlan(
+        query.getPlan(), PPL_QUERY, request.getHighlightConfig(), request.getIncludeMetadata());
   }
 
   private AbstractPlan plan(

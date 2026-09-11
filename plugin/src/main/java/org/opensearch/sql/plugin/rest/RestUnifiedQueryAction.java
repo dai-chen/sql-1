@@ -17,6 +17,7 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import org.apache.calcite.rel.RelNode;
 import org.apache.commons.lang3.Strings;
 import org.apache.logging.log4j.LogManager;
@@ -49,6 +50,10 @@ import org.opensearch.sql.executor.analytics.AnalyticsExecutionEngine;
 import org.opensearch.sql.lang.LangSpec;
 import org.opensearch.sql.monitor.profile.ProfileContext;
 import org.opensearch.sql.monitor.profile.QueryProfiling;
+import org.opensearch.sql.opensearch.executor.OpenSearchIndexDocumentCountProvider;
+import org.opensearch.sql.opensearch.executor.OpenSearchPlanRoutingAnalyzer;
+import org.opensearch.sql.opensearch.executor.OpenSearchPlanRoutingAnalyzer.Assessment;
+import org.opensearch.sql.opensearch.executor.OpenSearchPlanRoutingAnalyzer.LegacyExecutionShape;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
 import org.opensearch.sql.protocol.response.QueryResult;
 import org.opensearch.sql.protocol.response.format.ResponseFormatter;
@@ -73,6 +78,7 @@ public class RestUnifiedQueryAction {
   private final org.opensearch.analytics.EngineContextProvider contextProvider;
   private final org.opensearch.sql.common.setting.Settings pluginSettings;
   private final org.opensearch.sql.executor.ExecutionDispatcher executionDispatcher;
+  private final OpenSearchIndexDocumentCountProvider documentCountProvider;
 
   public RestUnifiedQueryAction(
       NodeClient client,
@@ -87,6 +93,7 @@ public class RestUnifiedQueryAction {
     this.contextProvider = contextProvider;
     this.pluginSettings = pluginSettings;
     this.executionDispatcher = executionDispatcher;
+    this.documentCountProvider = new OpenSearchIndexDocumentCountProvider(client);
   }
 
   /**
@@ -407,6 +414,83 @@ public class RestUnifiedQueryAction {
     public String visitRelation(Relation node, Void context) {
       return node.getTableQualifiedName().toString();
     }
+  }
+
+  public enum EngineRoutingReason {
+    LEGACY_FULLY_PUSHDOWN,
+    LEGACY_SMALL_INPUT,
+    LEGACY_UNKNOWN_INPUT,
+    ANALYTICS_COORDINATOR_WORK
+  }
+
+  public record PlanRoutingDecision(
+      boolean routeToAnalytics,
+      EngineRoutingReason reason,
+      LegacyExecutionShape legacyShape,
+      OptionalLong primaryDocs,
+      long minDocs) {}
+
+  /** Routes only residual coordinator work over a sufficiently large input to AE. */
+  public void planRoutingDecision(
+      RelNode legacyPhysicalPlan, ActionListener<PlanRoutingDecision> listener) {
+    long minDocs =
+        ((Number) pluginSettings.getSettingValue(Key.CALCITE_ANALYTICS_ROUTING_MIN_DOCS))
+            .longValue();
+    try {
+      Assessment assessment = OpenSearchPlanRoutingAnalyzer.analyze(legacyPhysicalPlan);
+      if (assessment.legacyShape() == LegacyExecutionShape.FULLY_PUSHDOWN) {
+        listener.onResponse(
+            new PlanRoutingDecision(
+                false,
+                EngineRoutingReason.LEGACY_FULLY_PUSHDOWN,
+                assessment.legacyShape(),
+                OptionalLong.empty(),
+                minDocs));
+        return;
+      }
+
+      documentCountProvider.fetch(
+          assessment.indices(),
+          ActionListener.wrap(
+              counts -> listener.onResponse(routingDecision(assessment, counts, minDocs)),
+              e -> {
+                LOG.debug("Unable to fetch routing statistics; keeping default route", e);
+                listener.onResponse(unknownInputDecision(minDocs));
+              }));
+    } catch (Exception e) {
+      LOG.debug("Unable to assess legacy physical plan; keeping default route", e);
+      listener.onResponse(unknownInputDecision(minDocs));
+    }
+  }
+
+  private static PlanRoutingDecision routingDecision(
+      Assessment assessment, OpenSearchIndexDocumentCountProvider.Result counts, long minDocs) {
+    if (!counts.complete()) {
+      return new PlanRoutingDecision(
+          false,
+          EngineRoutingReason.LEGACY_UNKNOWN_INPUT,
+          assessment.legacyShape(),
+          OptionalLong.empty(),
+          minDocs);
+    }
+    boolean route = counts.primaryDocs() >= minDocs;
+    return new PlanRoutingDecision(
+        route,
+        route
+            ? EngineRoutingReason.ANALYTICS_COORDINATOR_WORK
+            : EngineRoutingReason.LEGACY_SMALL_INPUT,
+        assessment.legacyShape(),
+        OptionalLong.of(counts.primaryDocs()),
+        minDocs);
+  }
+
+  private static PlanRoutingDecision unknownInputDecision(long minDocs) {
+    return new PlanRoutingDecision(
+        false,
+        EngineRoutingReason.LEGACY_UNKNOWN_INPUT,
+        LegacyExecutionShape.RESIDUAL_COORDINATOR_WORK,
+        OptionalLong.empty(),
+        minDocs);
   }
 
   private static RelNode addQuerySizeLimit(RelNode plan, CalcitePlanContext context) {

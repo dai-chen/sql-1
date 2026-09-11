@@ -362,7 +362,187 @@ public class CalciteToolsHelper {
           }
         };
       }
+      // Fall through to our own Enumerable implementation, which is byte-for-byte Calcite's
+      // except for the Janino parent classloader. Guarded on the actual convention: when
+      // enableBindable is set the root is a BindableRel and Calcite's own path is correct.
+      if (root.rel instanceof EnumerableRel) {
+        return implementEnumerable(root);
+      }
       return super.implement(root);
+    }
+
+    /**
+     * Implements the Enumerable path with a Janino classloader fix.
+     *
+     * <p>Calcite's {@code EnumerableInterpretable.getBindable()} hardcodes {@code
+     * EnumerableInterpretable.class.getClassLoader()} as Janino's parent classloader. The SQL
+     * plugin declares {@code extendedPlugins = ['analytics-engine;optional=true']}, so when
+     * analytics-engine is installed its classloader becomes the parent and -- delegation being
+     * parent-first -- its copy of calcite-core wins over the one in the SQL bundle. That loader
+     * cannot see {@code org.opensearch.sql.*}, so generated code referencing our UDFs fails to
+     * compile with {@code Cannot determine simple type name "org"}, breaking every window-function
+     * plan (timechart, eventstats, top/rare).
+     *
+     * <p>This replicates Calcite's implementation but passes this class's classloader (the SQL
+     * plugin's, a child) which can see both parent and child classes.
+     *
+     * <p>Note {@code CalciteClassLoaderHelper} does not solve this: it sets the thread context
+     * classloader, and no released Calcite reads it -- CALCITE-3745 deliberately kept the declaring
+     * class's own loader. It was paired with a patched calcite-core that did read the TCCL,
+     * vendored as a binary; that jar was dropped and only the inert helper remains.
+     *
+     * @see <a href="https://github.com/opensearch-project/sql/issues/5306">sql#5306</a>
+     */
+    private PreparedResult implementEnumerable(RelRoot root) {
+      Hook.PLAN_BEFORE_IMPLEMENTATION.run(root);
+      RelDataType resultType = root.rel.getRowType();
+      boolean isDml = root.kind.belongsTo(SqlKind.DML);
+      EnumerableRel enumerable = (EnumerableRel) root.rel;
+
+      if (!root.isRefTrivial()) {
+        List<org.apache.calcite.rex.RexNode> projects = new java.util.ArrayList<>();
+        final org.apache.calcite.rex.RexBuilder rexBuilder =
+            enumerable.getCluster().getRexBuilder();
+        for (java.util.Map.Entry<Integer, String> field : root.fields) {
+          projects.add(rexBuilder.makeInputRef(enumerable, field.getKey()));
+        }
+        org.apache.calcite.rex.RexProgram program =
+            org.apache.calcite.rex.RexProgram.create(
+                enumerable.getRowType(), projects, null, root.validatedRowType, rexBuilder);
+        enumerable =
+            org.apache.calcite.adapter.enumerable.EnumerableCalc.create(enumerable, program);
+      }
+
+      // internalParameters is private in CalcitePreparingStmt but is the same map handed to the
+      // DataContext, so stashed values (table scan references) must land in it, not a copy.
+      java.util.Map<String, Object> parameters;
+      try {
+        java.lang.reflect.Field f =
+            CalcitePrepareImpl.CalcitePreparingStmt.class.getDeclaredField("internalParameters");
+        f.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> p = (java.util.Map<String, Object>) f.get(this);
+        parameters = p;
+      } catch (ReflectiveOperationException e) {
+        throw new RuntimeException("Failed to access internalParameters", e);
+      }
+
+      // Ordering matches Calcite's implement(): _conformance is set before toBindable.
+      parameters.put("_conformance", context.config().conformance());
+
+      CatalogReader.THREAD_LOCAL.set(catalogReader);
+      final Bindable bindable;
+      try {
+        bindable = compileWithPluginClassLoader(enumerable, parameters);
+      } finally {
+        CatalogReader.THREAD_LOCAL.remove();
+      }
+
+      return new PreparedResultImpl(
+          resultType,
+          requireNonNull(parameterRowType, "parameterRowType"),
+          requireNonNull(fieldOrigins, "fieldOrigins"),
+          root.collation.getFieldCollations().isEmpty()
+              ? ImmutableList.of()
+              : ImmutableList.of(root.collation),
+          root.rel,
+          mapTableModOp(isDml, root.kind),
+          isDml) {
+        @Override
+        public String getCode() {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Bindable getBindable(Meta.CursorFactory cursorFactory) {
+          return bindable;
+        }
+
+        @Override
+        public Type getElementType() {
+          return resultType.getFieldList().size() == 1 ? Object.class : Object[].class;
+        }
+      };
+    }
+
+    /**
+     * Compiled-Bindable cache, mirroring Calcite's own BINDABLE_CACHE in {@code
+     * EnumerableInterpretable}. Bypassing Calcite's implementation to fix the Janino classloader
+     * also bypassed its cache, so every execution of the same query recompiled the generated class
+     * and the fresh class never stayed around long enough for C2 to optimise it. That is a silent
+     * ~150-300ms per-query tax on the Calcite path, and in an A/B benchmark it penalises the
+     * baseline and flatters the alternative -- measured while auditing this PoC.
+     *
+     * <p>Keyed on the generated source, exactly as Calcite keys its own cache, so two structurally
+     * identical plans share a compiled class. Bounded and soft-valued so it cannot retain classes
+     * under heap pressure.
+     */
+    private static final com.google.common.cache.Cache<String, Class<Bindable>> BINDABLE_CACHE =
+        com.google.common.cache.CacheBuilder.newBuilder()
+            .concurrencyLevel(
+                org.apache.calcite.config.CalciteSystemProperty.BINDABLE_CACHE_CONCURRENCY_LEVEL
+                    .value())
+            .maximumSize(
+                org.apache.calcite.config.CalciteSystemProperty.BINDABLE_CACHE_MAX_SIZE.value())
+            .softValues()
+            .build();
+
+    /**
+     * Equivalent to {@code EnumerableInterpretable.toBindable()} + {@code getBindable()}, but with
+     * this class's classloader as Janino's parent. commons-compiler resolves from the parent
+     * classloader at runtime, hence reflection rather than a direct call.
+     */
+    private static Bindable compileWithPluginClassLoader(
+        EnumerableRel rel, java.util.Map<String, Object> parameters) {
+      try {
+        org.apache.calcite.adapter.enumerable.EnumerableRelImplementor relImplementor =
+            new org.apache.calcite.adapter.enumerable.EnumerableRelImplementor(
+                rel.getCluster().getRexBuilder(), parameters);
+        org.apache.calcite.linq4j.tree.ClassDeclaration expr =
+            relImplementor.implementRoot(rel, EnumerableRel.Prefer.ARRAY);
+        String s =
+            org.apache.calcite.linq4j.tree.Expressions.toString(
+                expr.memberDeclarations, "\n", false);
+        Hook.JAVA_PLAN.run(s);
+
+        ClassLoader classLoader = CalciteToolsHelper.class.getClassLoader();
+        Class<?> factoryFactoryClass =
+            classLoader.loadClass("org.codehaus.commons.compiler.CompilerFactoryFactory");
+        Object compilerFactory =
+            factoryFactoryClass
+                .getMethod("getDefaultCompilerFactory", ClassLoader.class)
+                .invoke(null, classLoader);
+        Object compiler =
+            compilerFactory.getClass().getMethod("newSimpleCompiler").invoke(compilerFactory);
+        compiler
+            .getClass()
+            .getMethod("setParentClassLoader", ClassLoader.class)
+            .invoke(compiler, classLoader);
+
+        String fullCode =
+            "public final class "
+                + expr.name
+                + " implements "
+                + Bindable.class.getName()
+                + ", "
+                + org.apache.calcite.runtime.Typed.class.getName()
+                + " {\n"
+                + s
+                + "\n}\n";
+        Class<Bindable> cached = BINDABLE_CACHE.getIfPresent(fullCode);
+        if (cached == null) {
+          compiler.getClass().getMethod("cook", String.class).invoke(compiler, fullCode);
+          ClassLoader compiledClassLoader =
+              (ClassLoader) compiler.getClass().getMethod("getClassLoader").invoke(compiler);
+          @SuppressWarnings("unchecked")
+          Class<Bindable> compiled = (Class<Bindable>) compiledClassLoader.loadClass(expr.name);
+          BINDABLE_CACHE.put(fullCode, compiled);
+          cached = compiled;
+        }
+        return cached.getDeclaredConstructors()[0].newInstance() instanceof Bindable b ? b : null;
+      } catch (Exception e) {
+        throw org.apache.calcite.util.Util.throwAsRuntime(e);
+      }
     }
 
     @Override
