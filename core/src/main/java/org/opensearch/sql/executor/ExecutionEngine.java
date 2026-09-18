@@ -92,6 +92,7 @@ public interface ExecutionEngine {
     private final Schema schema;
     private final List<ExprValue> results;
     private final Cursor cursor;
+    private String engine = "calcite";
     @lombok.Setter private QueryProfile profile;
     @lombok.Setter private Throwable error;
 

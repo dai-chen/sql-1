@@ -38,6 +38,9 @@ public class QueryResult implements Iterable<Object[]> {
   /** Non-fatal notices attached to a successful result; empty for a plain success. */
   @Getter private final List<Warning> warnings;
 
+  /** Execution engine reported by response formats that expose routing details. */
+  @Getter private final String engine;
+
   public QueryResult(ExecutionEngine.Schema schema, Collection<ExprValue> exprValues) {
     this(schema, exprValues, Cursor.None, LangSpec.SQL_SPEC);
   }
@@ -61,11 +64,22 @@ public class QueryResult implements Iterable<Object[]> {
       Cursor cursor,
       LangSpec langSpec,
       List<Warning> warnings) {
+    this(schema, exprValues, cursor, langSpec, warnings, null);
+  }
+
+  public QueryResult(
+      ExecutionEngine.Schema schema,
+      Collection<ExprValue> exprValues,
+      Cursor cursor,
+      LangSpec langSpec,
+      List<Warning> warnings,
+      String engine) {
     this.schema = schema;
     this.exprValues = exprValues;
     this.cursor = cursor;
     this.langSpec = langSpec;
     this.warnings = warnings == null ? List.of() : warnings;
+    this.engine = engine;
   }
 
   /**
