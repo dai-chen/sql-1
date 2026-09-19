@@ -20,16 +20,16 @@ class InternalCalciteExecTest {
 
   @Test
   void rowGatherIsAssociative() {
-    InternalCalciteExec first = partial(List.of(List.of("api", 4L), List.of("web", 2L)));
-    InternalCalciteExec second = partial(List.of(List.of("api", 6L), List.of("web", 3L)));
-    InternalCalciteExec third = partial(List.of(List.of("api", 1L), List.of("web", 5L)));
+    InternalCalciteExec first = partial(row("api", 4L), row("web", 2L));
+    InternalCalciteExec second = partial(row("api", 6L), row("web", 3L));
+    InternalCalciteExec third = partial(row("api", 1L), row("web", 5L));
 
     InternalCalciteExec firstPair = reduce(first, first, second);
     InternalCalciteExec leftGrouped = reduce(firstPair, firstPair, third);
     InternalCalciteExec secondPair = reduce(second, second, third);
     InternalCalciteExec rightGrouped = reduce(first, first, secondPair);
 
-    assertEquals(leftGrouped.getRows(), rightGrouped.getRows());
+    assertEquals(rows(leftGrouped), rows(rightGrouped));
     assertEquals(
         List.of(
             List.of("api", 4L),
@@ -38,33 +38,40 @@ class InternalCalciteExecTest {
             List.of("web", 3L),
             List.of("api", 1L),
             List.of("web", 5L)),
-        leftGrouped.getRows());
+        rows(leftGrouped));
   }
 
   @Test
   void rowGatherPreservesNullCells() {
     InternalCalciteExec result =
-        reduce(
-            partial(List.of(Arrays.asList("api", null))),
-            partial(List.of(Arrays.asList("api", null))),
-            partial(List.of(List.of("web", 3L))));
+        reduce(partial(row("api", null)), partial(row("api", null)), partial(row("web", 3L)));
 
-    assertEquals(List.of(Arrays.asList("api", null), List.of("web", 3L)), result.getRows());
+    assertEquals(List.of(Arrays.asList("api", null), List.of("web", 3L)), rows(result));
   }
 
   @Test
   void ipCellsUseTheirTransportRepresentation() {
-    InternalCalciteExec result = partial(List.of(List.of(new ExprIpValue("192.168.0.1"))));
+    Object[] input = row(new ExprIpValue("192.168.0.1"));
+    InternalCalciteExec result = partial(input);
 
-    assertEquals(List.of(List.of("192.168.0.1")), result.getRows());
+    assertEquals(List.of(List.of("192.168.0.1")), rows(result));
+    assertEquals(new ExprIpValue("192.168.0.1"), input[0]);
   }
 
-  private static InternalCalciteExec partial(List<List<Object>> rows) {
-    return new InternalCalciteExec(NAME, rows, METADATA);
+  private static InternalCalciteExec partial(Object[]... rows) {
+    return new InternalCalciteExec(NAME, List.of(rows), METADATA);
   }
 
   private static InternalCalciteExec reduce(
       InternalCalciteExec receiver, InternalCalciteExec... values) {
     return (InternalCalciteExec) receiver.reduce(List.of(values), null);
+  }
+
+  private static Object[] row(Object... cells) {
+    return cells;
+  }
+
+  private static List<List<Object>> rows(InternalCalciteExec result) {
+    return result.rows().stream().map(Arrays::asList).toList();
   }
 }

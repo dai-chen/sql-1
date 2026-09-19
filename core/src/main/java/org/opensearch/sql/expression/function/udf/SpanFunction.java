@@ -39,7 +39,7 @@ import org.opensearch.sql.planner.physical.collector.Rounding.TimeRounding;
 import org.opensearch.sql.planner.physical.collector.Rounding.TimestampRounding;
 
 public class SpanFunction extends ImplementorUDF {
-  private static final int MAX_TIMESTAMP_CACHE_ENTRIES = 32_768;
+  private static final int MAX_TIMESTAMP_CACHE_ENTRIES = 131_072;
   private static final ThreadLocal<Map<TimestampSpan, Object>> TIMESTAMP_CACHE =
       new ThreadLocal<>();
 

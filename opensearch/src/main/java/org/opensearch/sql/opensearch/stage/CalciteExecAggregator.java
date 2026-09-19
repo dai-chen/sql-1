@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.BitSet;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +38,7 @@ final class CalciteExecAggregator extends MetricsAggregator {
   private final long currentTimeNanos;
   private final List<SegmentRows> segments = new ArrayList<>();
   private final CalciteFragmentSerde.DecodedPlan decodedPlan;
+  private final EnumerableFragmentExecutor.CacheKey fragmentCacheKey;
   private final BitSet requiredFields;
 
   CalciteExecAggregator(
@@ -55,6 +55,7 @@ final class CalciteExecAggregator extends MetricsAggregator {
     super(name, searchContext, parent, metadata);
     this.fields = List.copyOf(fields);
     this.currentTimeNanos = currentTimeNanos;
+    this.fragmentCacheKey = new EnumerableFragmentExecutor.CacheKey(fragmentJson, inputRowTypeJson);
     this.decodedPlan =
         CalciteFragmentSerde.deserialize(fragmentJson, inputRowTypeJson, tableName, matchingRows());
     this.requiredFields =
@@ -95,15 +96,9 @@ final class CalciteExecAggregator extends MetricsAggregator {
     Map<String, Object> dataContextValues = new HashMap<>(decodedPlan.dataContextValues());
     dataContextValues.put(DataContext.Variable.UTC_TIMESTAMP.camelName, currentTimeNanos);
     List<Object[]> output =
-        EnumerableFragmentExecutor.execute(
-            decodedPlan.plan(), decodedPlan.rootSchema(), dataContextValues);
-    List<List<Object>> rows = new ArrayList<>(output.size());
-    for (Object[] row : output) {
-      List<Object> cells = new ArrayList<>(row.length);
-      Collections.addAll(cells, row);
-      rows.add(cells);
-    }
-    return new InternalCalciteExec(name, rows, metadata());
+        EnumerableFragmentExecutor.executeCached(
+            fragmentCacheKey, decodedPlan.plan(), decodedPlan.rootSchema(), dataContextValues);
+    return new InternalCalciteExec(name, output, metadata());
   }
 
   private Enumerable<Object[]> matchingRows() {

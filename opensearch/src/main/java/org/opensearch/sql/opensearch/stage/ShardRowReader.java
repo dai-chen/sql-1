@@ -24,7 +24,7 @@ import org.opensearch.sql.data.model.ExprTimestampValue;
 /** Reads individual shard-aggregation inputs from doc values, falling back to {@code _source}. */
 final class ShardRowReader {
 
-  private static final int MAX_DATE_CACHE_ENTRIES = 32_768;
+  private static final int MAX_DATE_CACHE_ENTRIES = 131_072;
 
   @FunctionalInterface
   interface FieldReader {

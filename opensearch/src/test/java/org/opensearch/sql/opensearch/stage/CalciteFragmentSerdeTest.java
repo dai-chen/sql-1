@@ -82,6 +82,34 @@ class CalciteFragmentSerdeTest {
   }
 
   @Test
+  void cachedFragmentBindsCurrentRows() {
+    RelDataType inputType =
+        OpenSearchTypeFactory.TYPE_FACTORY.builder().add("value", SqlTypeName.BIGINT).build();
+    RelNode scan = CalciteFragmentSerde.tableScan(cluster(), inputType, TABLE, "test.rows");
+    String fragmentJson = CalciteFragmentSerde.serialize(scan);
+    String rowTypeJson = CalciteFragmentSerde.serializeType(inputType);
+    var cacheKey = new EnumerableFragmentExecutor.CacheKey(fragmentJson, rowTypeJson);
+
+    CalciteFragmentSerde.DecodedPlan first =
+        CalciteFragmentSerde.deserialize(
+            fragmentJson, rowTypeJson, TABLE, List.<Object[]>of(new Object[] {1L}));
+    CalciteFragmentSerde.DecodedPlan second =
+        CalciteFragmentSerde.deserialize(
+            fragmentJson, rowTypeJson, TABLE, List.<Object[]>of(new Object[] {2L}));
+
+    assertEquals(
+        1L,
+        EnumerableFragmentExecutor.executeCached(
+                cacheKey, first.plan(), first.rootSchema(), first.dataContextValues())
+            .getFirst()[0]);
+    assertEquals(
+        2L,
+        EnumerableFragmentExecutor.executeCached(
+                cacheKey, second.plan(), second.rootSchema(), second.dataContextValues())
+            .getFirst()[0]);
+  }
+
+  @Test
   void checkedLongSumRoundTripsAndRejectsOverflow() {
     RelDataType inputType =
         OpenSearchTypeFactory.TYPE_FACTORY.builder().add("value", SqlTypeName.BIGINT).build();
