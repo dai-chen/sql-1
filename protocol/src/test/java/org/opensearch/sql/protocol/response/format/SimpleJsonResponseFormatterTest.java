@@ -134,6 +134,24 @@ class SimpleJsonResponseFormatterTest {
   }
 
   @Test
+  void formatResponseWithEngine() {
+    QueryResult response =
+        new QueryResult(
+            schema,
+            Arrays.asList(tupleValue(ImmutableMap.of("firstname", "John", "age", 20))),
+            Cursor.None,
+            LangSpec.SQL_SPEC,
+            List.of(),
+            "analytics");
+    SimpleJsonResponseFormatter formatter = new SimpleJsonResponseFormatter(COMPACT);
+    assertEquals(
+        "{\"schema\":[{\"name\":\"firstname\",\"type\":\"string\"},"
+            + "{\"name\":\"age\",\"type\":\"integer\"}],\"datarows\":[[\"John\",20]],"
+            + "\"total\":1,\"size\":1,\"engine\":\"analytics\"}",
+        formatter.format(response));
+  }
+
+  @Test
   void formatResponseSchemaWithAlias() {
     ExecutionEngine.Schema schema =
         new ExecutionEngine.Schema(

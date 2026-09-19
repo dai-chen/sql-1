@@ -91,6 +91,18 @@ public class RelJsonSerializer {
     return pplSqlOperatorTable;
   }
 
+  /** Creates the canonical RelJson codec for PPL types and registered operators. */
+  public static RelJson createRelJson(JsonBuilder jsonBuilder) {
+    return ExtendedRelJson.create(jsonBuilder)
+        .withInputTranslator(ExtendedRelJson::translateInput)
+        .withOperatorTable(getPplSqlOperatorTable());
+  }
+
+  /** Adds the canonical PPL operator resolution to a Calcite-provided relation codec. */
+  public static RelJson configureRelJson(RelJson relJson) {
+    return relJson.withOperatorTable(getPplSqlOperatorTable());
+  }
+
   /**
    * Serializes Calcite expressions and field types into a map object string.
    *
@@ -108,7 +120,7 @@ public class RelJsonSerializer {
     try {
       // Serialize RexNode and RelDataType by JSON
       JsonBuilder jsonBuilder = new JsonBuilder();
-      RelJson relJson = ExtendedRelJson.create(jsonBuilder);
+      RelJson relJson = createRelJson(jsonBuilder);
       String rexNodeJson = jsonBuilder.toJsonString(relJson.toJson(standardizedRexExpr));
 
       if (CalcitePlanContext.skipEncoding.get()) return rexNodeJson;
@@ -143,11 +155,7 @@ public class RelJsonSerializer {
       exprStr = (String) objectInput.readObject();
 
       // Deserialize RelDataType and RexNode by JSON
-      RelJson relJson = ExtendedRelJson.create((JsonBuilder) null);
-      relJson =
-          relJson
-              .withInputTranslator(ExtendedRelJson::translateInput)
-              .withOperatorTable(getPplSqlOperatorTable());
+      RelJson relJson = createRelJson(null);
       Map<String, Object> exprMap = mapper.readValue(exprStr, TYPE_REF);
       return relJson.toRex(cluster, exprMap);
     } catch (Exception e) {

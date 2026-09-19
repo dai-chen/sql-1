@@ -377,14 +377,20 @@ public class TransportPPLQueryAction
     return new ResponseListener<ExecutionEngine.QueryResponse>() {
       @Override
       public void onResponse(ExecutionEngine.QueryResponse response) {
-        String responseContent =
-            formatter.format(
-                new QueryResult(
-                    response.getSchema(),
-                    response.getResults(),
-                    response.getCursor(),
-                    PPL_SPEC,
-                    response.getWarnings()));
+        boolean includeEngine =
+            unifiedQueryHandler != null
+                && !format.equals(Format.CSV)
+                && !format.equals(Format.RAW)
+                && !format.equals(Format.VIZ);
+        QueryResult queryResult =
+            new QueryResult(
+                response.getSchema(),
+                response.getResults(),
+                response.getCursor(),
+                PPL_SPEC,
+                response.getWarnings(),
+                includeEngine ? response.getEngine() : null);
+        String responseContent = formatter.format(queryResult);
         listener.onResponse(new TransportPPLQueryResponse(responseContent));
       }
 

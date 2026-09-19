@@ -14,9 +14,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -39,6 +41,11 @@ import org.apache.calcite.sql.validate.SqlUserDefinedFunction;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.locationtech.jts.geom.Point;
+import org.opensearch.action.admin.indices.stats.CommonStats;
+import org.opensearch.action.admin.indices.stats.IndexStats;
+import org.opensearch.action.admin.indices.stats.IndicesStatsRequest;
+import org.opensearch.action.admin.indices.stats.IndicesStatsResponse;
+import org.opensearch.index.shard.DocsStats;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper;
@@ -50,6 +57,7 @@ import org.opensearch.sql.common.error.ErrorCode;
 import org.opensearch.sql.common.error.ErrorReport;
 import org.opensearch.sql.common.error.ResourceLimitExceededException;
 import org.opensearch.sql.common.response.ResponseListener;
+import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.data.model.ExprTupleValue;
 import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.data.model.ExprValueUtils;
@@ -63,12 +71,17 @@ import org.opensearch.sql.executor.pagination.PlanSerializer;
 import org.opensearch.sql.expression.function.BuiltinFunctionName;
 import org.opensearch.sql.expression.function.PPLFuncImpTable;
 import org.opensearch.sql.monitor.profile.MetricName;
+import org.opensearch.sql.monitor.profile.ProfileMetric;
 import org.opensearch.sql.monitor.profile.ProfileScope;
+import org.opensearch.sql.monitor.profile.QueryProfiling;
 import org.opensearch.sql.opensearch.client.OpenSearchClient;
 import org.opensearch.sql.opensearch.data.value.OpenSearchExprGeoPointValue;
 import org.opensearch.sql.opensearch.executor.protector.ExecutionProtector;
 import org.opensearch.sql.opensearch.functions.DistinctCountApproxAggFunction;
 import org.opensearch.sql.opensearch.functions.GeoIpFunction;
+import org.opensearch.sql.opensearch.stage.CalciteStageExecutor;
+import org.opensearch.sql.opensearch.stage.StagePlan;
+import org.opensearch.sql.opensearch.stage.StagePlanner;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.sql.protocol.response.format.Format;
 import org.opensearch.sql.storage.TableScanOperator;
@@ -81,17 +94,28 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
   private static final ObjectMapper objectMapper = new ObjectMapper();
 
   private final OpenSearchClient client;
-
+  private final CalciteStageExecutor stageExecutor;
   private final ExecutionProtector executionProtector;
   private final PlanSerializer planSerializer;
+  private final Settings settings;
 
   public OpenSearchExecutionEngine(
       OpenSearchClient client,
       ExecutionProtector executionProtector,
       PlanSerializer planSerializer) {
+    this(client, executionProtector, planSerializer, null);
+  }
+
+  public OpenSearchExecutionEngine(
+      OpenSearchClient client,
+      ExecutionProtector executionProtector,
+      PlanSerializer planSerializer,
+      Settings settings) {
     this.client = client;
     this.executionProtector = executionProtector;
     this.planSerializer = planSerializer;
+    this.settings = settings;
+    this.stageExecutor = new CalciteStageExecutor(client);
     registerOpenSearchFunctions();
   }
 
@@ -235,6 +259,22 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
     client.schedule(
         () -> {
           try {
+            if (format != Format.JSON_TREE && mode != ExplainMode.SIMPLE) {
+              StagePlan stagePlan = splitIfStaged(rel);
+              if (stagePlan != null) {
+                SqlExplainLevel level =
+                    mode == ExplainMode.COST
+                        ? SqlExplainLevel.ALL_ATTRIBUTES
+                        : SqlExplainLevel.EXPPLAN_ATTRIBUTES;
+                listener.onResponse(
+                    new ExplainResponse(
+                        new ExplainResponseNodeV2(
+                            RelOptUtil.toString(rel, level),
+                            CalciteStageExecutor.formatPhysicalPlan(stagePlan, level),
+                            null)));
+                return;
+              }
+            }
             if (format == Format.JSON_TREE) {
               // Use RelJsonWriter for structured JSON tree output
               try {
@@ -329,6 +369,17 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       RelNode rel, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
     client.schedule(
         () -> {
+          try {
+            StagePlan stagePlan = splitIfStaged(rel);
+            if (stagePlan != null) {
+              executeStagedPlan(stagePlan, context, listener);
+              return;
+            }
+          } catch (Exception e) {
+            listener.onFailure(e);
+            return;
+          }
+
           try (PreparedStatement statement = OpenSearchRelRunners.run(context, rel)) {
             QueryResponse response;
             try (ProfileScope executePhase = ProfileScope.open(MetricName.EXECUTE)) {
@@ -377,6 +428,198 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       }
     }
     return false;
+  }
+
+  private StagePlan splitIfStaged(RelNode rel) {
+    boolean analyticsEnabled = booleanSetting(Settings.Key.CALCITE_ANALYTICS_ENABLED, false);
+    if (!analyticsEnabled) {
+      return null;
+    }
+
+    long minDocs = longSetting(Settings.Key.CALCITE_ANALYTICS_ROUTING_MIN_DOCS, 100_000L);
+    StagePlan plan = StagePlanner.split(rel).orElse(null);
+    if (plan == null || !plan.residualCoordinatorWork()) {
+      logRouting("calcite", "LEGACY_FULLY_PUSHDOWN", "FULLY_PUSHDOWN", null, minDocs);
+      return null;
+    }
+    if (!plan.allShardFragmentsReduce()) {
+      logRouting(
+          "calcite", "LEGACY_NO_SHARD_REDUCTION", "RESIDUAL_COORDINATOR_WORK", null, minDocs);
+      return null;
+    }
+
+    Long primaryDocs = primaryDocumentCount(plan);
+    if (primaryDocs == null) {
+      logRouting("calcite", "LEGACY_UNKNOWN_INPUT", "RESIDUAL_COORDINATOR_WORK", null, minDocs);
+      return null;
+    }
+    if (primaryDocs < minDocs) {
+      logRouting(
+          "calcite", "LEGACY_SMALL_INPUT", "RESIDUAL_COORDINATOR_WORK", primaryDocs, minDocs);
+      return null;
+    }
+
+    logRouting(
+        "analytics",
+        "ANALYTICS_COORDINATOR_WORK",
+        "RESIDUAL_COORDINATOR_WORK",
+        primaryDocs,
+        minDocs);
+    return plan;
+  }
+
+  private boolean booleanSetting(Settings.Key key, boolean defaultValue) {
+    Object value = settingValue(key);
+    return value instanceof Boolean bool ? bool : defaultValue;
+  }
+
+  private long longSetting(Settings.Key key, long defaultValue) {
+    Object value = settingValue(key);
+    return value instanceof Number number ? number.longValue() : defaultValue;
+  }
+
+  private Object settingValue(Settings.Key key) {
+    if (settings != null) {
+      return settings.getSettingValue(key);
+    }
+    return null;
+  }
+
+  private Long primaryDocumentCount(StagePlan plan) {
+    try {
+      Set<String> indices = new LinkedHashSet<>();
+      for (StagePlan.GatherExchange exchange : plan.exchanges()) {
+        indices.addAll(
+            List.of(exchange.source().scan().getOsIndex().getIndexName().getIndexNames()));
+      }
+      if (indices.isEmpty()) {
+        return null;
+      }
+
+      IndicesStatsRequest request = new IndicesStatsRequest();
+      request.indices(indices.toArray(String[]::new));
+      request.clear();
+      request.docs(true);
+      IndicesStatsResponse response =
+          client.getNodeClient().orElseThrow().admin().indices().stats(request).actionGet();
+      if (response.getFailedShards() != 0) {
+        return null;
+      }
+      long total = 0;
+      int countedIndices = 0;
+      for (IndexStats indexStats : response.getIndices().values()) {
+        CommonStats primaries = indexStats.getPrimaries();
+        DocsStats docs = primaries == null ? null : primaries.getDocs();
+        if (docs != null) {
+          total = Math.addExact(total, docs.getCount());
+          countedIndices++;
+        }
+      }
+      return countedIndices == 0 ? null : total;
+    } catch (Exception e) {
+      logger.debug("Unable to fetch primary document count for calcite_exec routing", e);
+      return null;
+    }
+  }
+
+  private static void logRouting(
+      String route, String reason, String shape, Long primaryDocs, long minDocs) {
+    logger.info(
+        "Engine routing: route={}, reason={}, legacy_shape={}, primary_docs={}, min_docs={}",
+        route,
+        reason,
+        shape,
+        primaryDocs == null ? "unknown" : primaryDocs,
+        minDocs);
+  }
+
+  private void executeStagedPlan(
+      StagePlan stagePlan, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
+    try {
+      ProfileMetric metric = QueryProfiling.current().getOrCreateMetric(MetricName.EXECUTE);
+      long execTime = System.nanoTime();
+      long currentTimeNanos = Hook.CURRENT_TIME.get(-1L);
+      if (currentTimeNanos < 0) {
+        throw new IllegalStateException("Staged execution requires a query start time");
+      }
+      RelNode coordinatorTree = stagePlan.coordinatorTree();
+      List<Object[]> outputRows = stageExecutor.execute(stagePlan, currentTimeNanos);
+
+      RelDataType outputType = coordinatorTree.getRowType();
+      Integer querySizeLimit = context.sysLimit.querySizeLimit();
+
+      List<RelDataTypeField> outputFields = outputType.getFieldList();
+      int fieldCount = outputFields.size();
+      ExprType[] exprTypes = new ExprType[fieldCount];
+      for (int i = 0; i < fieldCount; i++) {
+        exprTypes[i] =
+            OpenSearchTypeFactory.convertRelDataTypeToExprType(outputFields.get(i).getType());
+      }
+
+      List<ExprValue> values = new ArrayList<>();
+      for (Object[] row : outputRows) {
+        if (querySizeLimit != null && values.size() >= querySizeLimit) {
+          break;
+        }
+        Map<String, ExprValue> tuple = new LinkedHashMap<>();
+        for (int i = 0; i < fieldCount; i++) {
+          String fieldName = outputFields.get(i).getName();
+          Object value = i < row.length ? row[i] : null;
+          tuple.put(fieldName, stagedExprValue(value, exprTypes[i]));
+        }
+        values.add(ExprTupleValue.fromExprValueMap(tuple));
+      }
+
+      List<Column> columns = new ArrayList<>();
+      for (int i = 0; i < fieldCount; i++) {
+        columns.add(new Column(outputFields.get(i).getName(), null, exprTypes[i]));
+      }
+      metric.add(System.nanoTime() - execTime);
+      QueryResponse response = buildQueryResponse(columns, values);
+      response.setEngine("analytics");
+      listener.onResponse(response);
+    } catch (Exception e) {
+      listener.onFailure(e);
+    }
+  }
+
+  private static ExprValue stagedExprValue(Object value, ExprType type) {
+    if (value == null) {
+      return ExprValueUtils.LITERAL_NULL;
+    }
+    Long epochMillis = epochMillis(value);
+    if (epochMillis != null) {
+      if (type == ExprCoreType.TIMESTAMP) {
+        return ExprValueUtils.timestampValue(java.time.Instant.ofEpochMilli(epochMillis));
+      }
+      if (type == ExprCoreType.DATE) {
+        return ExprValueUtils.dateValue(
+            java.time.Instant.ofEpochMilli(epochMillis)
+                .atZone(java.time.ZoneOffset.UTC)
+                .toLocalDate());
+      }
+      if (type == ExprCoreType.TIME) {
+        return ExprValueUtils.timeValue(
+            java.time.Instant.ofEpochMilli(epochMillis)
+                .atZone(java.time.ZoneOffset.UTC)
+                .toLocalTime());
+      }
+    }
+    return ExprValueUtils.fromObjectValue(value, type);
+  }
+
+  private static Long epochMillis(Object value) {
+    if (value instanceof Number number) {
+      return number.longValue();
+    }
+    if (value instanceof String string) {
+      try {
+        return Long.parseLong(string);
+      } catch (NumberFormatException ignored) {
+        return null;
+      }
+    }
+    return null;
   }
 
   /**
@@ -471,8 +714,11 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       }
       columns.add(new Column(columnName, null, exprType));
     }
-    // Timewrap post-processing: pivot unpivoted rows into period columns. The pivot is shared with
-    // the analytics route (AnalyticsExecutionEngine) so both engines produce identical output.
+    return buildQueryResponse(columns, values);
+  }
+
+  private static QueryResponse buildQueryResponse(List<Column> columns, List<ExprValue> values) {
+    var warnings = CalcitePlanContext.drainWarnings();
     if (TimewrapPivot.isTimewrap()) {
       try {
         TimewrapPivot.Result pivoted =
@@ -488,9 +734,8 @@ public class OpenSearchExecutionEngine implements ExecutionEngine {
       }
     }
 
-    Schema schema = new Schema(columns);
-    QueryResponse response = new QueryResponse(schema, values, null);
-    response.setWarnings(CalcitePlanContext.drainWarnings());
+    QueryResponse response = new QueryResponse(new Schema(columns), values, null);
+    response.setWarnings(warnings);
     return response;
   }
 
