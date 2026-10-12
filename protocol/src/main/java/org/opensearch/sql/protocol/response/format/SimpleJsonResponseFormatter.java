@@ -59,6 +59,9 @@ public class SimpleJsonResponseFormatter extends JsonResponseFormatter<QueryResu
     if (!response.getWarnings().isEmpty()) {
       json.warnings(response.getWarnings());
     }
+    if (response.getEngine() != null) {
+      json.engine(response.getEngine());
+    }
 
     formatMetric.set(System.nanoTime() - formatTime);
 
@@ -91,6 +94,9 @@ public class SimpleJsonResponseFormatter extends JsonResponseFormatter<QueryResu
 
     /** Present only when non-empty; a plain success omits this field entirely. */
     private final List<Warning> warnings;
+
+    /** Present only for endpoints that expose execution routing. */
+    private final String engine;
   }
 
   @RequiredArgsConstructor

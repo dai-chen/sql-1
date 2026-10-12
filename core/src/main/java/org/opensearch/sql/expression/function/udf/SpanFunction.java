@@ -6,6 +6,8 @@
 package org.opensearch.sql.expression.function.udf;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
 import org.apache.calcite.adapter.enumerable.NotNullImplementor;
 import org.apache.calcite.adapter.enumerable.NullPolicy;
 import org.apache.calcite.adapter.enumerable.RexImpTable;
@@ -37,8 +39,25 @@ import org.opensearch.sql.planner.physical.collector.Rounding.TimeRounding;
 import org.opensearch.sql.planner.physical.collector.Rounding.TimestampRounding;
 
 public class SpanFunction extends ImplementorUDF {
+  private static final int MAX_TIMESTAMP_CACHE_ENTRIES = 131_072;
+  private static final ThreadLocal<Map<TimestampSpan, Object>> TIMESTAMP_CACHE =
+      new ThreadLocal<>();
+
   public SpanFunction() {
     super(new SpanImplementor(), NullPolicy.ARG0);
+  }
+
+  /** Reuses deterministic timestamp span results within one fragment execution. */
+  public static <T> T withTimestampCache(Supplier<T> action) {
+    if (TIMESTAMP_CACHE.get() != null) {
+      return action.get();
+    }
+    TIMESTAMP_CACHE.set(new java.util.HashMap<>());
+    try {
+      return action.get();
+    } finally {
+      TIMESTAMP_CACHE.remove();
+    }
   }
 
   @Override
@@ -147,9 +166,28 @@ public class SpanFunction extends ImplementorUDF {
       @Parameter(name = "value") String value,
       @Parameter(name = "interval") int interval,
       @Parameter(name = "unit") String unit) {
+    Map<TimestampSpan, Object> cache = TIMESTAMP_CACHE.get();
+    if (cache == null) {
+      return evalTimestampUncached(value, interval, unit);
+    }
+    TimestampSpan key = new TimestampSpan(value, interval, unit);
+    Object result = cache.get(key);
+    if (result != null) {
+      return result;
+    }
+    result = evalTimestampUncached(value, interval, unit);
+    if (cache.size() < MAX_TIMESTAMP_CACHE_ENTRIES) {
+      cache.put(key, result);
+    }
+    return result;
+  }
+
+  private static Object evalTimestampUncached(String value, int interval, String unit) {
     ExprValue exprInterval = ExprValueUtils.fromObjectValue(interval, ExprCoreType.INTEGER);
     ExprValue exprValue = ExprValueUtils.fromObjectValue(value, ExprCoreType.TIMESTAMP);
     Rounding<?> rounding = new TimestampRounding(exprInterval, unit);
     return rounding.round(exprValue).valueForCalcite();
   }
+
+  private record TimestampSpan(String value, int interval, String unit) {}
 }

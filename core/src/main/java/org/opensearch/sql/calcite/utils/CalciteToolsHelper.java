@@ -362,7 +362,9 @@ public class CalciteToolsHelper {
           }
         };
       }
-      return super.implement(root);
+      RelRoot rootToImplement = root;
+      return CalciteClassLoaderHelper.withCalciteClassLoader(
+          () -> super.implement(rootToImplement), CalciteToolsHelper.class);
     }
 
     @Override
