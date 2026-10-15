@@ -32,6 +32,8 @@ import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Programs;
+import org.opensearch.sql.api.dialect.clickhouse.ClickHouseSqlSpec;
+import org.opensearch.sql.api.parser.CalciteSqlQueryParser;
 import org.opensearch.sql.api.parser.PPLQueryParser;
 import org.opensearch.sql.api.parser.SqlV2QueryParser;
 import org.opensearch.sql.api.parser.UnifiedQueryParser;
@@ -67,6 +69,17 @@ public class UnifiedQueryContext implements AutoCloseable {
 
   /** Language spec for the query's frontend (SQL or PPL). */
   private final LanguageSpec langSpec;
+
+  /**
+   * Explicit SQL dialect (for example {@code clickhouse}), or null for the default OpenSearch SQL
+   * frontend. A dialect selects Calcite-native planning (SqlParser → SqlValidator → SqlToRel).
+   */
+  private final String dialect;
+
+  /** Returns true when the query must be planned by Calcite's native SQL pipeline. */
+  public boolean isNativeSqlPlanning() {
+    return dialect != null;
+  }
 
   /**
    * Returns the profiling result. Call after query execution to retrieve collected metrics. Returns
@@ -118,6 +131,7 @@ public class UnifiedQueryContext implements AutoCloseable {
   /** Builder that constructs UnifiedQueryContext. */
   public static class Builder {
     private QueryType queryType;
+    private String dialect;
     private final Map<String, Schema> catalogs = new HashMap<>();
     private String defaultNamespace;
     private boolean cacheMetadata = false;
@@ -171,6 +185,18 @@ public class UnifiedQueryContext implements AutoCloseable {
      */
     public Builder language(QueryType queryType) {
       this.queryType = queryType;
+      return this;
+    }
+
+    /**
+     * Selects an explicit SQL dialect. Only {@code clickhouse} is supported (PoC); null keeps the
+     * default OpenSearch SQL frontend.
+     */
+    public Builder dialect(String dialect) {
+      if (dialect != null && !ClickHouseSqlSpec.DIALECT.equals(dialect)) {
+        throw new IllegalArgumentException("Unsupported SQL dialect: " + dialect);
+      }
+      this.dialect = dialect;
       return this;
     }
 
@@ -245,9 +271,12 @@ public class UnifiedQueryContext implements AutoCloseable {
     public UnifiedQueryContext build() {
       Objects.requireNonNull(queryType, "Must specify language before build");
 
+      if (dialect != null && queryType != QueryType.SQL) {
+        throw new IllegalArgumentException("A SQL dialect requires the SQL language");
+      }
       LanguageSpec langSpec =
           switch (queryType) {
-            case SQL -> UnifiedSqlSpec.extended();
+            case SQL -> dialect != null ? ClickHouseSqlSpec.create() : UnifiedSqlSpec.extended();
             case PPL -> UnifiedPplSpec.create();
           };
       Settings settings = buildSettings();
@@ -256,13 +285,16 @@ public class UnifiedQueryContext implements AutoCloseable {
               buildFrameworkConfig(langSpec), SysLimit.fromSettings(settings), queryType);
       QueryProfiling.activate(profiling);
       return new UnifiedQueryContext(
-          planContext, settings, createParser(planContext, settings), langSpec);
+          planContext, settings, createParser(planContext, settings), langSpec, dialect);
     }
 
     private UnifiedQueryParser<?> createParser(CalcitePlanContext planContext, Settings settings) {
       return switch (queryType) {
         case PPL -> new PPLQueryParser(settings);
-        case SQL -> new SqlV2QueryParser(settings);
+        case SQL ->
+            dialect != null
+                ? new CalciteSqlQueryParser(planContext)
+                : new SqlV2QueryParser(settings);
       };
     }
 

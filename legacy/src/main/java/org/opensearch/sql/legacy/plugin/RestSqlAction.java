@@ -128,6 +128,16 @@ public class RestSqlAction extends BaseRestHandler {
       }
 
       final SqlRequest sqlRequest = SqlRequestFactory.getSqlRequest(request);
+      // Consume the dialect URL parameter here so BaseRestHandler does not reject it; an explicit
+      // dialect is validated before any other routing (including the legacy cursor branch).
+      final String dialectParam = request.param(SQLQueryRequest.QUERY_FIELD_DIALECT);
+      final boolean dialectRequested =
+          dialectParam != null
+              || (sqlRequest.getJsonContent() != null
+                  && sqlRequest.getJsonContent().has(SQLQueryRequest.QUERY_FIELD_DIALECT));
+      if (dialectRequested && isLegacyCursor(sqlRequest)) {
+        throw new IllegalArgumentException("Cursor requests are not supported with a SQL dialect");
+      }
       if (isLegacyCursor(sqlRequest)) {
         if (isExplainRequest(request)) {
           throw new IllegalArgumentException("Invalid request. Cannot explain cursor");
@@ -156,6 +166,19 @@ public class RestSqlAction extends BaseRestHandler {
       // Route to analytics engine for non-Lucene (e.g., Parquet-backed) indices.
       // The router returns true and sends the response directly if it handled the request.
       final SQLQueryRequest finalRequest = newSqlRequest;
+      if (dialectRequested) {
+        // Explicit dialect: the analytics router must handle it. Never fall back to V2/legacy.
+        return channel -> {
+          if (!analyticsRouter.apply(finalRequest, channel)) {
+            handleException(
+                channel,
+                new IllegalStateException(
+                    "SQL dialect ["
+                        + finalRequest.getDialect().orElse("")
+                        + "] requires the analytics engine, which is not available"));
+          }
+        };
+      }
       return channel -> {
         if (!analyticsRouter.apply(finalRequest, channel)) {
           delegateToV2Engine(request, client, sqlRequest, finalRequest, format, channel);

@@ -1,0 +1,28 @@
+# ClickHouse dialect parser (PoC). Generated from the Calcite parser template pinned to the
+# Analytics Engine's runtime Calcite (calcite-core 1.41.0-opensearch-1), so the generated
+# parser only calls Calcite APIs that exist at runtime alongside the AE plugin.
+data: {
+  default: tdd(../default_config.fmpp)
+  parser: {
+    package: "org.opensearch.sql.api.dialect.clickhouse.parser",
+    class: "ClickHouseSqlParserImpl",
+    imports: [
+      "org.apache.calcite.sql.fun.SqlStdOperatorTable"
+    ]
+    # PREWHERE is reserved so that "FROM t PREWHERE x" is not read as table alias "PREWHERE".
+    keywords: [
+      "PREWHERE"
+    ]
+    # Standard reserved words that are plain ClickHouse function names.
+    nonReservedKeywordsToAdd: [
+      "CORR"
+    ]
+    implementationFiles: [
+      "parserImpls.ftl"
+    ]
+  }
+}
+
+freemarkerLinks: {
+  includes: includes/
+}

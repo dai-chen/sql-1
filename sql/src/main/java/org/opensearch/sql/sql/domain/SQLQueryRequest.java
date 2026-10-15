@@ -154,6 +154,24 @@ public class SQLQueryRequest {
     return jsonContent.optInt("fetch_size");
   }
 
+  /** Request parameter / body field selecting an explicit SQL dialect. */
+  public static final String QUERY_FIELD_DIALECT = "dialect";
+
+  /**
+   * Explicit SQL dialect from the {@code dialect} URL parameter or body field, or empty for default
+   * OpenSearch SQL. The URL parameter wins when both are given.
+   */
+  public Optional<String> getDialect() {
+    String fromParams = params.get(QUERY_FIELD_DIALECT);
+    if (fromParams != null && !fromParams.isEmpty()) {
+      return Optional.of(fromParams);
+    }
+    if (jsonContent != null && jsonContent.has(QUERY_FIELD_DIALECT)) {
+      return Optional.of(jsonContent.optString(QUERY_FIELD_DIALECT));
+    }
+    return Optional.empty();
+  }
+
   private boolean isSupportedFormat() {
     return Stream.of("csv", "jdbc", "raw").anyMatch(format::equalsIgnoreCase);
   }

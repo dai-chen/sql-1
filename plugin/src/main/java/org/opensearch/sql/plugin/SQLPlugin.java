@@ -303,6 +303,10 @@ public class SQLPlugin extends Plugin
         };
     return (sqlRequest, channel) -> {
       RestUnifiedQueryAction unifiedQueryHandler = handlerSupplier.get();
+      java.util.Optional<String> dialect = sqlRequest.getDialect();
+      if (dialect.isPresent()) {
+        return routeDialectQuery(unifiedQueryHandler, sqlRequest, dialect.get(), channel);
+      }
       if (unifiedQueryHandler == null
           || !unifiedQueryHandler.isAnalyticsIndex(sqlRequest.getQuery(), QueryType.SQL)) {
         return false;
@@ -363,6 +367,84 @@ public class SQLPlugin extends Plugin
       }
       return true;
     };
+  }
+
+  /**
+   * Routes an explicit-dialect SQL request (for example {@code dialect=clickhouse}) to the
+   * analytics engine. Returns false only when the engine is unavailable; the caller then fails the
+   * request, it never falls back to the V2 or legacy engines. The V2-parsing {@code
+   * isAnalyticsIndex} check is skipped: the dialect is never parsed by the V2 grammar.
+   */
+  private boolean routeDialectQuery(
+      RestUnifiedQueryAction handler,
+      SQLQueryRequest sqlRequest,
+      String dialect,
+      RestChannel channel) {
+    if (handler == null) {
+      return false;
+    }
+    if (!org.opensearch.sql.api.dialect.clickhouse.ClickHouseSqlSpec.DIALECT.equals(dialect)) {
+      RestSqlAction.handleException(
+          channel, new IllegalArgumentException("Unsupported SQL dialect: " + dialect));
+      return true;
+    }
+    LOGGER.info(
+        "[{}] Routing SQL query to analytics engine (dialect={})",
+        QueryContext.getRequestId(),
+        dialect);
+    if (sqlRequest.isExplainRequest()) {
+      handler.explainDialect(
+          sqlRequest.getQuery(),
+          dialect,
+          ExplainMode.STANDARD,
+          new ResponseListener<>() {
+            @Override
+            public void onResponse(ExplainResponse response) {
+              JsonResponseFormatter<ExplainResponse> formatter =
+                  new JsonResponseFormatter<>(Style.PRETTY) {
+                    @Override
+                    protected Object buildJsonObject(ExplainResponse resp) {
+                      return resp;
+                    }
+                  };
+              channel.sendResponse(
+                  new BytesRestResponse(
+                      RestStatus.OK,
+                      "application/json; charset=UTF-8",
+                      formatter.format(response)));
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+              RestSqlAction.handleException(channel, e);
+            }
+          });
+      return true;
+    }
+    try {
+      AnalyticsEngineFormatSupport.validateFormat(sqlRequest.format());
+    } catch (Exception e) {
+      RestSqlAction.handleException(channel, e);
+      return true;
+    }
+    handler.executeDialect(
+        sqlRequest.getQuery(),
+        dialect,
+        sqlRequest.isProfileEnabled(),
+        new ActionListener<>() {
+          @Override
+          public void onResponse(TransportPPLQueryResponse response) {
+            channel.sendResponse(
+                new BytesRestResponse(
+                    RestStatus.OK, "application/json; charset=UTF-8", response.getResult()));
+          }
+
+          @Override
+          public void onFailure(Exception e) {
+            RestSqlAction.handleException(channel, e);
+          }
+        });
+    return true;
   }
 
   /** Register action and handler so that transportClient can find proxy for action. */

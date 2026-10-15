@@ -1,0 +1,780 @@
+[
+ {
+  "ch": "toUnixTimestamp64Second",
+  "target": "UNIX_SECONDS",
+  "field": "UNIX_SECONDS",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: rounding of negative sub-second timestamps may differ (corpus row restricted to non-negative)",
+  "ae_likely": false
+ },
+ {
+  "ch": "toUnixTimestamp64Milli",
+  "target": "UNIX_MILLIS",
+  "field": "UNIX_MILLIS",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "toUnixTimestamp64Micro",
+  "target": "UNIX_MICROS",
+  "field": "UNIX_MICROS",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: Calcite TIMESTAMP is millisecond precision, so micro digits beyond ms are lost",
+  "ae_likely": false
+ },
+ {
+  "ch": "fromUnixTimestamp64Second",
+  "target": "TIMESTAMP_SECONDS",
+  "field": "TIMESTAMP_SECONDS",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: CH timezone argument ($1) dropped; only equivalent when tz is 'UTC'",
+  "ae_likely": false
+ },
+ {
+  "ch": "fromUnixTimestamp64Milli",
+  "target": "TIMESTAMP_MILLIS",
+  "field": "TIMESTAMP_MILLIS",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: CH timezone argument ($1) dropped; only equivalent when tz is 'UTC'",
+  "ae_likely": false
+ },
+ {
+  "ch": "fromUnixTimestamp64Micro",
+  "target": "TIMESTAMP_MICROS",
+  "field": "TIMESTAMP_MICROS",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: tz argument dropped; result truncated to Calcite TIMESTAMP millisecond precision (expected .123456)",
+  "ae_likely": false
+ },
+ {
+  "ch": "lpad",
+  "target": "LPAD",
+  "field": "LPAD",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same (truncates when input longer than length); CH 2-arg form pads with space, use args [\"$0\",\"$1\"] for that arity",
+  "ae_likely": false
+ },
+ {
+  "ch": "rpad",
+  "target": "RPAD",
+  "field": "RPAD",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same; 2-arg form (pad with space) needs args [\"$0\",\"$1\"]",
+  "ae_likely": false
+ },
+ {
+  "ch": "leftPadUTF8",
+  "target": "LPAD",
+  "field": "LPAD",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same for BMP chars (Java UTF-16 code units vs CH code points); 2-arg form needs args [\"$0\",\"$1\"]",
+  "ae_likely": false
+ },
+ {
+  "ch": "rightPadUTF8",
+  "target": "RPAD",
+  "field": "RPAD",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same for BMP chars; 2-arg form needs args [\"$0\",\"$1\"]",
+  "ae_likely": false
+ },
+ {
+  "ch": "trimLeft",
+  "target": "LTRIM",
+  "field": "LTRIM",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same (strips leading spaces)",
+  "ae_likely": true
+ },
+ {
+  "ch": "trimRight",
+  "target": "RTRIM",
+  "field": "RTRIM",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same (strips trailing spaces)",
+  "ae_likely": true
+ },
+ {
+  "ch": "replaceAll",
+  "target": "REPLACE",
+  "field": "REPLACE",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "",
+  "semantics": "same",
+  "ae_likely": true
+ },
+ {
+  "ch": "substringUTF8",
+  "target": "SUBSTR",
+  "field": "SUBSTR_BIG_QUERY",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: BigQuery SUBSTR counts negative offsets from end like CH, but offset 0 is treated as 1 (CH returns ''); 2-arg form needs args [\"$0\",\"$1\"]; AE SUBSTR may implement standard (non-negative) semantics",
+  "ae_likely": true
+ },
+ {
+  "ch": "substringIndexUTF8",
+  "target": "SUBSTRING_INDEX",
+  "field": "SUBSTRING_INDEX",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "SPARK",
+  "semantics": "same (negative count takes from the right)",
+  "ae_likely": false
+ },
+ {
+  "ch": "lowerUTF8",
+  "target": "LOWER",
+  "field": "LOWER",
+  "args": [
+   "$0"
+  ],
+  "library": "",
+  "semantics": "same",
+  "ae_likely": true
+ },
+ {
+  "ch": "upperUTF8",
+  "target": "UPPER",
+  "field": "UPPER",
+  "args": [
+   "$0"
+  ],
+  "library": "",
+  "semantics": "same",
+  "ae_likely": true
+ },
+ {
+  "ch": "reverseUTF8",
+  "target": "REVERSE",
+  "field": "REVERSE",
+  "args": [
+   "$0"
+  ],
+  "library": "MYSQL",
+  "semantics": "same for BMP chars",
+  "ae_likely": true
+ },
+ {
+  "ch": "initcapUTF8",
+  "target": "INITCAP",
+  "field": "INITCAP",
+  "args": [
+   "$0"
+  ],
+  "library": "",
+  "semantics": "differs: word-boundary definition may differ for non-alphanumeric separators; same on corpus input",
+  "ae_likely": false
+ },
+ {
+  "ch": "repeat",
+  "target": "REPEAT",
+  "field": "REPEAT",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "space",
+  "target": "SPACE",
+  "field": "SPACE",
+  "args": [
+   "$0"
+  ],
+  "library": "MYSQL",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "startsWith",
+  "target": "STARTS_WITH",
+  "field": "STARTS_WITH",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: returns BOOLEAN (CH returns UInt8 1/0)",
+  "ae_likely": false
+ },
+ {
+  "ch": "endsWith",
+  "target": "ENDS_WITH",
+  "field": "ENDS_WITH",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: returns BOOLEAN (CH returns UInt8 1/0)",
+  "ae_likely": false
+ },
+ {
+  "ch": "translateUTF8",
+  "target": "TRANSLATE3",
+  "field": "TRANSLATE3",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same for equal-length from/to; operator NAME is TRANSLATE3 (unparses as TRANSLATE) so AE name-based mapping to TRANSLATE is uncertain",
+  "ae_likely": false
+ },
+ {
+  "ch": "editDistanceUTF8",
+  "target": "LEVENSHTEIN",
+  "field": "LEVENSHTEIN",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "splitByChar",
+  "target": "SPLIT",
+  "field": "SPLIT",
+  "args": [
+   "$1",
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same (args reordered: CH is (sep, str)); empty pieces preserved",
+  "ae_likely": false
+ },
+ {
+  "ch": "splitByString",
+  "target": "SPLIT",
+  "field": "SPLIT",
+  "args": [
+   "$1",
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same for non-empty separator (args reordered); empty-separator behaviour unverified",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayStringConcat",
+  "target": "ARRAY_JOIN",
+  "field": "ARRAY_JOIN",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "same when separator given; CH 1-arg form (default '') needs args [\"$0\",\"''\"]",
+  "ae_likely": true
+ },
+ {
+  "ch": "REGEXP_REPLACE",
+  "target": "REGEXP_REPLACE",
+  "field": "REGEXP_REPLACE_BIG_QUERY_3",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same (replace all; BigQuery variant accepts \\\\N backrefs); AE/DataFusion regexp_replace replaces only first match unless 'g' flag, so AE adapter behaviour must be checked",
+  "ae_likely": true
+ },
+ {
+  "ch": "replaceRegexpAll",
+  "target": "REGEXP_REPLACE",
+  "field": "REGEXP_REPLACE_BIG_QUERY_3",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same (replace all, \\\\N backrefs); Java regex vs RE2 edge cases; same AE first-match caveat as REGEXP_REPLACE",
+  "ae_likely": true
+ },
+ {
+  "ch": "replaceRegexpOne",
+  "target": "REGEXP_REPLACE",
+  "field": "REGEXP_REPLACE_5",
+  "args": [
+   "$0",
+   "$1",
+   "$2",
+   "1",
+   "1"
+  ],
+  "library": "MYSQL",
+  "semantics": "differs: MySQL variant (pos=1, occurrence=1) uses Java $N backrefs, CH uses \\\\N (corpus case 2 '\\\\3/\\\\2/\\\\1' needs rewrite); 5-arg form unlikely in AE. DataFusion native regexp_replace(s,p,r) without 'g' is an exact match",
+  "ae_likely": false
+ },
+ {
+  "ch": "extract",
+  "target": "REGEXP_EXTRACT",
+  "field": "REGEXP_EXTRACT",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: returns NULL on no match (CH returns ''); returns first capture group when present (same as CH). Note EXTRACT is a reserved keyword in Calcite's parser, so extract(s, re) must be intercepted before standard EXTRACT parsing",
+  "ae_likely": false
+ },
+ {
+  "ch": "extractAll",
+  "target": "REGEXP_EXTRACT_ALL",
+  "field": "REGEXP_EXTRACT_ALL",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same (all matches; capture group if present)",
+  "ae_likely": false
+ },
+ {
+  "ch": "coalesce",
+  "target": "COALESCE",
+  "field": "COALESCE",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "",
+  "semantics": "same; variadic, pass all original operands (template shown for the 3-arg corpus call)",
+  "ae_likely": true
+ },
+ {
+  "ch": "json_valid",
+  "target": "IS JSON VALUE",
+  "field": "IS_JSON_VALUE",
+  "args": [
+   "$0"
+  ],
+  "library": "",
+  "semantics": "same (boolean); postfix operator but constructible as a 1-operand call",
+  "ae_likely": false
+ },
+ {
+  "ch": "json_keys",
+  "target": "JSON_KEYS",
+  "field": "JSON_KEYS",
+  "args": [
+   "$0"
+  ],
+  "library": "",
+  "semantics": "same (returns JSON array string of top-level keys)",
+  "ae_likely": true
+ },
+ {
+  "ch": "MD5",
+  "target": "MD5",
+  "field": "MD5",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: Calcite returns lowercase hex VARCHAR, CH returns 16-byte binary (corpus does hex(MD5(..)) and expects uppercase)",
+  "ae_likely": true
+ },
+ {
+  "ch": "SHA1",
+  "target": "SHA1",
+  "field": "SHA1",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: Calcite returns lowercase hex VARCHAR, CH returns binary (corpus wraps in hex())",
+  "ae_likely": true
+ },
+ {
+  "ch": "SHA256",
+  "target": "SHA256",
+  "field": "SHA256",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: Calcite returns lowercase hex VARCHAR, CH returns binary (corpus wraps in hex())",
+  "ae_likely": false
+ },
+ {
+  "ch": "SHA512",
+  "target": "SHA512",
+  "field": "SHA512",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: Calcite returns lowercase hex VARCHAR, CH returns binary (corpus wraps in hex())",
+  "ae_likely": false
+ },
+ {
+  "ch": "base64Encode",
+  "target": "TO_BASE64",
+  "field": "TO_BASE64",
+  "args": [
+   "$0"
+  ],
+  "library": "MYSQL",
+  "semantics": "differs: MySQL TO_BASE64 inserts a newline every 76 output chars; identical for short inputs",
+  "ae_likely": false
+ },
+ {
+  "ch": "base64Decode",
+  "target": "FROM_BASE64",
+  "field": "FROM_BASE64",
+  "args": [
+   "$0"
+  ],
+  "library": "MYSQL",
+  "semantics": "differs: returns VARBINARY (CH returns String); needs CAST to VARCHAR for string comparison",
+  "ae_likely": false
+ },
+ {
+  "ch": "hex",
+  "target": "HEX",
+  "field": "HEX",
+  "args": [
+   "$0"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: signature only accepts CHARACTER (CH hex(255) numeric fails validation); uppercase output matches",
+  "ae_likely": false
+ },
+ {
+  "ch": "unhex",
+  "target": "FROM_HEX",
+  "field": "FROM_HEX",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "differs: returns VARBINARY (CH returns String)",
+  "ae_likely": false
+ },
+ {
+  "ch": "array",
+  "target": "ARRAY",
+  "field": "ARRAY_VALUE_CONSTRUCTOR",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "",
+  "semantics": "same; variadic, pass all operands (standard ARRAY value constructor, unparses as ARRAY[...])",
+  "ae_likely": true
+ },
+ {
+  "ch": "cardinality",
+  "target": "ARRAY_LENGTH",
+  "field": "ARRAY_LENGTH",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same for non-null arrays (standard CARDINALITY is the non-AE-listed alternative)",
+  "ae_likely": true
+ },
+ {
+  "ch": "has",
+  "target": "ARRAY_CONTAINS",
+  "field": "ARRAY_CONTAINS",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: returns BOOLEAN; NULL needle yields NULL (CH has([1,NULL],NULL)=1)",
+  "ae_likely": false
+ },
+ {
+  "ch": "hasAny",
+  "target": "ARRAYS_OVERLAP",
+  "field": "ARRAYS_OVERLAP",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: returns BOOLEAN; NULL elements can yield NULL instead of 0",
+  "ae_likely": false
+ },
+ {
+  "ch": "indexOf",
+  "target": "ARRAY_POSITION",
+  "field": "ARRAY_POSITION",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: 1-based and 0 when absent (same), but NULL needle yields NULL (CH indexOf([1,NULL],NULL)=2)",
+  "ae_likely": false
+ },
+ {
+  "ch": "array_position",
+  "target": "ARRAY_POSITION",
+  "field": "ARRAY_POSITION",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: Spark semantics return 0 when absent; corpus expects NULL (DataFusion array_position semantics)",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayElement",
+  "target": "ITEM",
+  "field": "ITEM",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "",
+  "semantics": "differs: 1-based positive index same; negative index (from end) and out-of-range (CH returns type default 0) yield NULL",
+  "ae_likely": true
+ },
+ {
+  "ch": "arrayElementOrNull",
+  "target": "ITEM",
+  "field": "ITEM",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "",
+  "semantics": "differs: out-of-range/0 give NULL (same); negative index (from end) not supported",
+  "ae_likely": true
+ },
+ {
+  "ch": "arrayConcat",
+  "target": "ARRAY_CONCAT",
+  "field": "ARRAY_CONCAT",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same; variadic, pass all operands",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayPushBack",
+  "target": "ARRAY_APPEND",
+  "field": "ARRAY_APPEND",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayPushFront",
+  "target": "ARRAY_PREPEND",
+  "field": "ARRAY_PREPEND",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayReverse",
+  "target": "ARRAY_REVERSE",
+  "field": "ARRAY_REVERSE",
+  "args": [
+   "$0"
+  ],
+  "library": "BIG_QUERY",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "reverse",
+  "target": "REVERSE",
+  "field": "REVERSE_SPARK",
+  "args": [
+   "$0"
+  ],
+  "library": "SPARK",
+  "semantics": "same (Spark variant accepts both strings and arrays); AE REVERSE may be string-only",
+  "ae_likely": true
+ },
+ {
+  "ch": "arraySort",
+  "target": "SORT_ARRAY",
+  "field": "SORT_ARRAY",
+  "args": [
+   "$0"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: ascending sort places NULLs first (CH places them last)",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayReverseSort",
+  "target": "SORT_ARRAY",
+  "field": "SORT_ARRAY",
+  "args": [
+   "$0",
+   "FALSE"
+  ],
+  "library": "SPARK",
+  "semantics": "same (descending, NULLs last)",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayDistinct",
+  "target": "ARRAY_DISTINCT",
+  "field": "ARRAY_DISTINCT",
+  "args": [
+   "$0"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: keeps one NULL element (CH drops NULLs); same on corpus input",
+  "ae_likely": true
+ },
+ {
+  "ch": "arrayIntersect",
+  "target": "ARRAY_INTERSECT",
+  "field": "ARRAY_INTERSECT",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: binary only (CH is variadic); element order may differ (corpus sorts)",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayUnion",
+  "target": "ARRAY_UNION",
+  "field": "ARRAY_UNION",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "differs: binary only (CH is variadic); element order may differ (corpus sorts)",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayRemove",
+  "target": "ARRAY_REMOVE",
+  "field": "ARRAY_REMOVE",
+  "args": [
+   "$0",
+   "$1"
+  ],
+  "library": "SPARK",
+  "semantics": "same (removes all occurrences)",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayMin",
+  "target": "ARRAY_MIN",
+  "field": "ARRAY_MIN",
+  "args": [
+   "$0"
+  ],
+  "library": "SPARK",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayMax",
+  "target": "ARRAY_MAX",
+  "field": "ARRAY_MAX",
+  "args": [
+   "$0"
+  ],
+  "library": "SPARK",
+  "semantics": "same",
+  "ae_likely": false
+ },
+ {
+  "ch": "arrayWithConstant",
+  "target": "ARRAY_REPEAT",
+  "field": "ARRAY_REPEAT",
+  "args": [
+   "$1",
+   "$0"
+  ],
+  "library": "SPARK",
+  "semantics": "same (args reordered: CH is (n, x))",
+  "ae_likely": false
+ }
+]

@@ -11,6 +11,12 @@ plugins {
     id 'com.diffplug.spotless'
 }
 
+configurations {
+    calciteParserTemplate
+    fmppTool
+    javaccTool
+}
+
 dependencies {
     api project(':ppl')
     api project(':sql')
@@ -23,6 +29,12 @@ dependencies {
     testImplementation group: 'org.apache.calcite', name: 'calcite-testkit', version: "${calcite_version}"
 
     testFixturesApi group: 'junit', name: 'junit', version: '4.13.2'
+
+    // ClickHouse dialect parser codegen (PoC): template from the Calcite build that the
+    // Analytics Engine runs with, plus the FMPP/JavaCC versions Calcite itself uses.
+    calciteParserTemplate('org.apache.calcite:calcite-core:1.41.0-opensearch-1') { transitive = false }
+    fmppTool 'net.sourceforge.fmpp:fmpp:0.9.16'
+    javaccTool 'net.java.dev.javacc:javacc:4.0'
     testFixturesApi group: 'org.hamcrest', name: 'hamcrest', version: "${hamcrest_version}"
 }
 
@@ -85,3 +97,73 @@ jacocoTestCoverageVerification {
     }
 }
 check.dependsOn jacocoTestCoverageVerification
+
+// ---------------------------------------------------------------------------
+// ClickHouse dialect parser generation (PoC)
+// 1. extract codegen/ from the pinned calcite-core jar
+// 2. patch Parser.jj: optional PREWHERE clause merged into WHERE (clause adaptation)
+// 3. FMPP expands the template with codegen-clickhouse/config.fmpp
+// 4. JavaCC generates ClickHouseSqlParserImpl
+// ---------------------------------------------------------------------------
+def chCodegenDir = layout.buildDirectory.dir('clickhouse-codegen')
+def chJavaccOut = layout.buildDirectory.dir('generated/sources/clickhouse-parser/java')
+
+tasks.register('extractClickHouseParserTemplate', Copy) {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE  // dialect config/includes override the template defaults
+    from({ zipTree(configurations.calciteParserTemplate.singleFile) }) { include 'codegen/**' }
+    from('src/main/codegen-clickhouse') { into 'codegen' }
+    into chCodegenDir
+    inputs.file 'build.gradle'
+    doLast {
+        def jj = chCodegenDir.get().file('codegen/templates/Parser.jj').asFile
+        def text = jj.getText('UTF-8')
+        def whereAnchor = '        ( where = Where() | { where = null; } )\n'
+        def declAnchor = '    final SqlNode fromClause;\n    final SqlNode where;\n'
+        if (text.count(whereAnchor) != 1 || text.count(declAnchor) != 1) {
+            throw new GradleException('Parser.jj anchors for the PREWHERE patch not found exactly once; template changed?')
+        }
+        text = text.replace(declAnchor, '    final SqlNode fromClause;\n    SqlNode where;\n    SqlNode prewhere = null;\n')
+        text = text.replace(whereAnchor,
+            '        [ <PREWHERE> prewhere = Expression(ExprContext.ACCEPT_SUB_QUERY) ]\n' +
+            whereAnchor +
+            '        {\n' +
+            '            // ClickHouse PREWHERE: semantically a filter applied before WHERE; merged into WHERE.\n' +
+            '            if (prewhere != null) {\n' +
+            '                where = where == null ? prewhere\n' +
+            '                    : SqlStdOperatorTable.AND.createCall(prewhere.getParserPosition(), prewhere, where);\n' +
+            '            }\n' +
+            '        }\n')
+        jj.write(text, 'UTF-8')
+    }
+}
+
+tasks.register('fmppClickHouseParser', JavaExec) {
+    dependsOn 'extractClickHouseParserTemplate'
+    classpath = configurations.fmppTool
+    mainClass = 'fmpp.tools.CommandLine'
+    def cg = chCodegenDir.get().dir('codegen').asFile
+    args '-C', new File(cg, 'config.fmpp').path,
+         '-S', new File(cg, 'templates').path,
+         '-O', chCodegenDir.get().dir('fmpp').asFile.path
+    inputs.dir chCodegenDir.get().dir('codegen')
+    outputs.dir chCodegenDir.get().dir('fmpp')
+}
+
+tasks.register('javaccClickHouseParser', JavaExec) {
+    dependsOn 'fmppClickHouseParser'
+    classpath = configurations.javaccTool
+    mainClass = 'javacc'
+    def out = chJavaccOut.get().dir('org/opensearch/sql/api/dialect/clickhouse/parser').asFile
+    args "-OUTPUT_DIRECTORY=${out.path}", '-STATIC=false', chCodegenDir.get().file('fmpp/javacc/Parser.jj').asFile.path
+    inputs.dir chCodegenDir.get().dir('fmpp')
+    outputs.dir chJavaccOut
+    doFirst { out.mkdirs() }
+}
+
+sourceSets.main.java.srcDir chJavaccOut
+tasks.named('compileJava') { dependsOn 'javaccClickHouseParser' }
+afterEvaluate {
+    tasks.matching { it.name.startsWith('spotless') || it.name == 'sourcesJar' || it.name == 'delombok' }.configureEach {
+        mustRunAfter 'javaccClickHouseParser'
+    }
+}

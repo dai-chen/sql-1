@@ -138,6 +138,36 @@ public class RestUnifiedQueryAction {
   }
 
   /**
+   * An explicit dialect never falls back to another engine, so every scanned index must be readable
+   * by the analytics engine (composite / pluggable dataformat). Fails with a client error
+   * otherwise.
+   */
+  private void requireAnalyticsIndices(RelNode plan, String dialect) {
+    java.util.Set<String> indices = new java.util.TreeSet<>();
+    new org.apache.calcite.rel.RelVisitor() {
+      @Override
+      public void visit(RelNode node, int ordinal, RelNode parent) {
+        if (node instanceof org.apache.calcite.rel.core.TableScan scan
+            && scan.getTable().unwrap(org.apache.calcite.schema.TransientTable.class) == null) {
+          java.util.List<String> names = scan.getTable().getQualifiedName();
+          indices.add(names.get(names.size() - 1));
+        }
+        super.visit(node, ordinal, parent);
+      }
+    }.go(plan);
+    for (String index : indices) {
+      if (!allIndicesArePluggableDataformat(index)) {
+        throw new IllegalArgumentException(
+            "SQL dialect ["
+                + dialect
+                + "] supports only analytics (composite) indices; ["
+                + index
+                + "] is not one");
+      }
+    }
+  }
+
+  /**
    * Checks if all indices in a (possibly comma-separated) index expression are pluggable
    * dataformat. For multi-index queries (source=idx1,idx2), each index is checked independently.
    * Returns true only if every index is composite — mixed or all-lucene returns false.
@@ -190,7 +220,20 @@ public class RestUnifiedQueryAction {
       QueryType queryType,
       boolean profiling,
       ActionListener<TransportPPLQueryResponse> listener) {
-    doExecute(query, queryType, profiling, 0, null, listener);
+    doExecute(query, queryType, null, profiling, 0, null, listener);
+  }
+
+  /**
+   * Execute a SQL query in an explicit dialect (for example {@code clickhouse}). The query is
+   * planned by Calcite's native SQL pipeline for that dialect; it never reaches the SQL V2 grammar,
+   * the PPL RelNode visitor or the legacy engine.
+   */
+  public void executeDialect(
+      String query,
+      String dialect,
+      boolean profiling,
+      ActionListener<TransportPPLQueryResponse> listener) {
+    doExecute(query, QueryType.SQL, dialect, profiling, 0, null, listener);
   }
 
   /** Execute linked to {@code parentTask} so a front-end cancel propagates into the engine. */
@@ -202,12 +245,13 @@ public class RestUnifiedQueryAction {
       Task parentTask,
       ActionListener<TransportPPLQueryResponse> listener) {
     assert parentTask != null : "parentTask required for cancellation propagation";
-    doExecute(query, queryType, profiling, fetchSize, parentTask, listener);
+    doExecute(query, queryType, null, profiling, fetchSize, parentTask, listener);
   }
 
   private void doExecute(
       String query,
       QueryType queryType,
+      String dialect,
       boolean profiling,
       int fetchSize,
       Task parentTask,
@@ -224,13 +268,22 @@ public class RestUnifiedQueryAction {
                   QueryRequestContext queryCtx =
                       withParentTask(contextProvider.getContext(), parentTask);
 
-                  UnifiedQueryContext context = buildContext(queryType, profiling, queryCtx);
+                  UnifiedQueryContext context;
+                  try {
+                    context = buildContext(queryType, dialect, profiling, queryCtx);
+                  } catch (Exception e) {
+                    listener.onFailure(e);
+                    return;
+                  }
                   ProfileContext profileCtx = QueryProfiling.current();
                   ActionListener<TransportPPLQueryResponse> closingListener =
                       wrapWithContextClose(context, listener);
                   try {
                     UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
                     RelNode plan = planner.plan(query);
+                    if (dialect != null) {
+                      requireAnalyticsIndices(plan, dialect);
+                    }
                     CalcitePlanContext planContext = context.getPlanContext();
                     // PPL fetch_size caps the response to N rows (no cursor) — the V2 path attaches
                     // a `head N` in AstStatementBuilder; the unified path parses only the query
@@ -276,7 +329,13 @@ public class RestUnifiedQueryAction {
       QueryType queryType,
       ExplainMode mode,
       ResponseListener<ExplainResponse> listener) {
-    doExplain(query, queryType, mode, null, listener);
+    doExplain(query, queryType, null, mode, null, listener);
+  }
+
+  /** Explain a SQL query in an explicit dialect (Calcite-native planning, no fallback). */
+  public void explainDialect(
+      String query, String dialect, ExplainMode mode, ResponseListener<ExplainResponse> listener) {
+    doExplain(query, QueryType.SQL, dialect, mode, null, listener);
   }
 
   /** Explain linked to {@code parentTask} so a front-end cancel propagates into the engine. */
@@ -287,12 +346,13 @@ public class RestUnifiedQueryAction {
       Task parentTask,
       ResponseListener<ExplainResponse> listener) {
     assert parentTask != null : "parentTask required for cancellation propagation";
-    doExplain(query, queryType, mode, parentTask, listener);
+    doExplain(query, queryType, null, mode, parentTask, listener);
   }
 
   private void doExplain(
       String query,
       QueryType queryType,
+      String dialect,
       ExplainMode mode,
       Task parentTask,
       ResponseListener<ExplainResponse> listener) {
@@ -303,7 +363,8 @@ public class RestUnifiedQueryAction {
                 () -> {
                   QueryRequestContext queryCtx =
                       withParentTask(contextProvider.getContext(), parentTask);
-                  try (UnifiedQueryContext context = buildContext(queryType, false, queryCtx)) {
+                  try (UnifiedQueryContext context =
+                      buildContext(queryType, dialect, false, queryCtx)) {
                     UnifiedQueryPlanner planner = new UnifiedQueryPlanner(context);
                     RelNode plan = planner.plan(query);
                     CalcitePlanContext planContext = context.getPlanContext();
@@ -331,10 +392,11 @@ public class RestUnifiedQueryAction {
   }
 
   private UnifiedQueryContext buildContext(
-      QueryType queryType, boolean profiling, QueryRequestContext queryCtx) {
+      QueryType queryType, String dialect, boolean profiling, QueryRequestContext queryCtx) {
     return applyClusterOverrides(
             UnifiedQueryContext.builder()
                 .language(queryType)
+                .dialect(dialect)
                 // Schema captured by queryCtx — same cluster state the executor will use.
                 .catalog(SCHEMA_NAME, queryCtx.schema())
                 .defaultNamespace(SCHEMA_NAME)

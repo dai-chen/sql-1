@@ -18,9 +18,11 @@ import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.runtime.CalciteException;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.util.SqlVisitor;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Planner;
+import org.apache.calcite.tools.ValidationException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.sql.api.parser.UnifiedQueryParser;
@@ -54,7 +56,11 @@ public class UnifiedQueryPlanner {
    */
   public UnifiedQueryPlanner(UnifiedQueryContext context) {
     this.context = context;
-    this.strategy = new CustomVisitorStrategy(context);
+    // An explicit SQL dialect bypasses the SQL V2 grammar and the PPL RelNode visitor entirely.
+    this.strategy =
+        context.isNativeSqlPlanning()
+            ? new CalciteNativeStrategy(context)
+            : new CustomVisitorStrategy(context);
   }
 
   /**
@@ -115,9 +121,15 @@ public class UnifiedQueryPlanner {
     @Override
     public RelNode plan(String query) throws Exception {
       try (Planner planner = Frameworks.getPlanner(context.getPlanContext().config)) {
-        SqlNode parsed = planner.parse(query);
+        SqlNode parsed;
+        try {
+          parsed = planner.parse(query);
+        } catch (SqlParseException e) {
+          throw new SyntaxCheckException("Failed to parse SQL query: " + e.getMessage());
+        }
         if (!parsed.isA(SqlKind.QUERY)) {
-          throw new UnsupportedOperationException(
+          // Client error (4xx): writes, DDL and session statements are rejected before validation.
+          throw new SemanticCheckException(
               "Only query statements are supported. Got: " + parsed.getKind());
         }
 
@@ -127,7 +139,13 @@ public class UnifiedQueryPlanner {
           rewritten = rewritten.accept(visitor);
         }
 
-        SqlNode validated = planner.validate(rewritten);
+        SqlNode validated;
+        try {
+          validated = planner.validate(rewritten);
+        } catch (ValidationException e) {
+          Throwable cause = e.getCause() != null ? e.getCause() : e;
+          throw new SemanticCheckException(cause.getMessage(), e);
+        }
         RelRoot relRoot = planner.rel(validated);
         return relRoot.project();
       }
