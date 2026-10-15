@@ -1,69 +1,45 @@
 [
  {
   "ch": "toUnixTimestamp64Second",
-  "target": "UNIX_SECONDS",
-  "field": "UNIX_SECONDS",
-  "args": [
-   "$0"
-  ],
   "library": "BIG_QUERY",
   "semantics": "differs: rounding of negative sub-second timestamps may differ (corpus row restricted to non-negative)",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "TIMESTAMPDIFF(SECOND, TIMESTAMP '1970-01-01 00:00:00', $0)"
  },
  {
   "ch": "toUnixTimestamp64Milli",
-  "target": "UNIX_MILLIS",
-  "field": "UNIX_MILLIS",
-  "args": [
-   "$0"
-  ],
   "library": "BIG_QUERY",
   "semantics": "same",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "TIMESTAMPDIFF(MILLISECOND, TIMESTAMP '1970-01-01 00:00:00', $0)"
  },
  {
   "ch": "toUnixTimestamp64Micro",
-  "target": "UNIX_MICROS",
-  "field": "UNIX_MICROS",
-  "args": [
-   "$0"
-  ],
   "library": "BIG_QUERY",
   "semantics": "differs: Calcite TIMESTAMP is millisecond precision, so micro digits beyond ms are lost",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "TIMESTAMPDIFF(MICROSECOND, TIMESTAMP '1970-01-01 00:00:00', $0)"
  },
  {
   "ch": "fromUnixTimestamp64Second",
-  "target": "TIMESTAMP_SECONDS",
-  "field": "TIMESTAMP_SECONDS",
-  "args": [
-   "$0"
-  ],
   "library": "BIG_QUERY",
   "semantics": "differs: CH timezone argument ($1) dropped; only equivalent when tz is 'UTC'",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "TIMESTAMPADD(SECOND, $0, TIMESTAMP '1970-01-01 00:00:00')"
  },
  {
   "ch": "fromUnixTimestamp64Milli",
-  "target": "TIMESTAMP_MILLIS",
-  "field": "TIMESTAMP_MILLIS",
-  "args": [
-   "$0"
-  ],
   "library": "BIG_QUERY",
   "semantics": "differs: CH timezone argument ($1) dropped; only equivalent when tz is 'UTC'",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "TIMESTAMPADD(MILLISECOND, $0, TIMESTAMP '1970-01-01 00:00:00')"
  },
  {
   "ch": "fromUnixTimestamp64Micro",
-  "target": "TIMESTAMP_MICROS",
-  "field": "TIMESTAMP_MICROS",
-  "args": [
-   "$0"
-  ],
   "library": "BIG_QUERY",
   "semantics": "differs: tz argument dropped; result truncated to Calcite TIMESTAMP millisecond precision (expected .123456)",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "TIMESTAMPADD(MICROSECOND, $0, TIMESTAMP '1970-01-01 00:00:00')"
  },
  {
   "ch": "lpad",
@@ -236,9 +212,10 @@
  },
  {
   "ch": "space",
-  "target": "SPACE",
-  "field": "SPACE",
+  "target": "REPEAT",
+  "field": "REPEAT",
   "args": [
+   "' '",
    "$0"
   ],
   "library": "MYSQL",
@@ -358,18 +335,10 @@
  },
  {
   "ch": "replaceRegexpOne",
-  "target": "REGEXP_REPLACE",
-  "field": "REGEXP_REPLACE_5",
-  "args": [
-   "$0",
-   "$1",
-   "$2",
-   "1",
-   "1"
-  ],
-  "library": "MYSQL",
+  "library": "BIG_QUERY",
   "semantics": "differs: MySQL variant (pos=1, occurrence=1) uses Java $N backrefs, CH uses \\\\N (corpus case 2 '\\\\3/\\\\2/\\\\1' needs rewrite); 5-arg form unlikely in AE. DataFusion native regexp_replace(s,p,r) without 'g' is an exact match",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "REGEXP_REPLACE($0, $1, $2)"
  },
  {
   "ch": "extract",
@@ -394,19 +363,6 @@
   "library": "BIG_QUERY",
   "semantics": "same (all matches; capture group if present)",
   "ae_likely": false
- },
- {
-  "ch": "coalesce",
-  "target": "COALESCE",
-  "field": "COALESCE",
-  "args": [
-   "$0",
-   "$1",
-   "$2"
-  ],
-  "library": "",
-  "semantics": "same; variadic, pass all original operands (template shown for the 3-arg corpus call)",
-  "ae_likely": true
  },
  {
   "ch": "json_valid",
@@ -592,27 +548,17 @@
  },
  {
   "ch": "arrayElement",
-  "target": "ITEM",
-  "field": "ITEM",
-  "args": [
-   "$0",
-   "$1"
-  ],
   "library": "",
   "semantics": "differs: 1-based positive index same; negative index (from end) and out-of-range (CH returns type default 0) yield NULL",
-  "ae_likely": true
+  "ae_likely": true,
+  "template": "$0[$1]"
  },
  {
   "ch": "arrayElementOrNull",
-  "target": "ITEM",
-  "field": "ITEM",
-  "args": [
-   "$0",
-   "$1"
-  ],
   "library": "",
   "semantics": "differs: out-of-range/0 give NULL (same); negative index (from end) not supported",
-  "ae_likely": true
+  "ae_likely": true,
+  "template": "$0[$1]"
  },
  {
   "ch": "arrayConcat",
@@ -641,15 +587,10 @@
  },
  {
   "ch": "arrayPushFront",
-  "target": "ARRAY_PREPEND",
-  "field": "ARRAY_PREPEND",
-  "args": [
-   "$0",
-   "$1"
-  ],
-  "library": "SPARK",
+  "library": "BIG_QUERY",
   "semantics": "same",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "ARRAY_CONCAT(ARRAY[$1], $0)"
  },
  {
   "ch": "arrayReverse",
@@ -686,15 +627,10 @@
  },
  {
   "ch": "arrayReverseSort",
-  "target": "SORT_ARRAY",
-  "field": "SORT_ARRAY",
-  "args": [
-   "$0",
-   "FALSE"
-  ],
   "library": "SPARK",
   "semantics": "same (descending, NULLs last)",
-  "ae_likely": false
+  "ae_likely": false,
+  "template": "ARRAY_REVERSE(SORT_ARRAY($0))"
  },
  {
   "ch": "arrayDistinct",
@@ -776,5 +712,139 @@
   "library": "SPARK",
   "semantics": "same (args reordered: CH is (n, x))",
   "ae_likely": false
+ },
+ {
+  "ch": "toStartOfSecond",
+  "template": "FLOOR($0 TO SECOND)"
+ },
+ {
+  "ch": "toStartOfMinute",
+  "template": "FLOOR($0 TO MINUTE)"
+ },
+ {
+  "ch": "toStartOfHour",
+  "template": "FLOOR($0 TO HOUR)"
+ },
+ {
+  "ch": "toStartOfDay",
+  "template": "FLOOR($0 TO DAY)"
+ },
+ {
+  "ch": "toStartOfMonth",
+  "template": "CAST(FLOOR($0 TO MONTH) AS DATE)"
+ },
+ {
+  "ch": "toStartOfQuarter",
+  "template": "CAST(FLOOR($0 TO QUARTER) AS DATE)"
+ },
+ {
+  "ch": "toStartOfYear",
+  "template": "CAST(FLOOR($0 TO YEAR) AS DATE)"
+ },
+ {
+  "ch": "toMonday",
+  "template": "CAST(FLOOR($0 TO WEEK) AS DATE)"
+ },
+ {
+  "ch": "toStartOfMillisecond",
+  "template": "FLOOR($0 TO MILLISECOND)"
+ },
+ {
+  "ch": "toStartOfMicrosecond",
+  "template": "FLOOR($0 TO MICROSECOND)"
+ },
+ {
+  "ch": "toStartOfWeek",
+  "template": "CAST(FLOOR($0 + INTERVAL '1' DAY TO WEEK) - INTERVAL '1' DAY AS DATE)"
+ },
+ {
+  "ch": "toStartOfNanosecond",
+  "template": "$0"
+ },
+ {
+  "ch": "toDate",
+  "template": "CAST($0 AS DATE)"
+ },
+ {
+  "ch": "toDateTime",
+  "template": "CAST($0 AS TIMESTAMP)"
+ },
+ {
+  "ch": "trimBoth",
+  "template": "TRIM(BOTH ' ' FROM $0)"
+ },
+ {
+  "ch": "arraySlice",
+  "target": "ARRAY_SLICE",
+  "field": "ARRAY_SLICE",
+  "args": [
+   "$0",
+   "$1",
+   "$2"
+  ],
+  "library": "SPARK"
+ },
+ {
+  "ch": "json",
+  "target": "JSON",
+  "field": "JSON",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "json_extract",
+  "target": "JSON_EXTRACT",
+  "field": "JSON_EXTRACT",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "json_extract_all",
+  "target": "JSON_EXTRACT_ALL",
+  "field": "JSON_EXTRACT_ALL",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "json_array_length",
+  "target": "JSON_ARRAY_LENGTH",
+  "field": "JSON_ARRAY_LENGTH",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "json_append",
+  "target": "JSON_APPEND",
+  "field": "JSON_APPEND",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "json_delete",
+  "target": "JSON_DELETE",
+  "field": "JSON_DELETE",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "json_extend",
+  "target": "JSON_EXTEND",
+  "field": "JSON_EXTEND",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "SHA2",
+  "target": "SHA2",
+  "field": "SHA2",
+  "args": [],
+  "library": ""
+ },
+ {
+  "ch": "cidrmatch",
+  "target": "CIDRMATCH",
+  "field": "CIDRMATCH",
+  "args": [],
+  "library": ""
  }
 ]

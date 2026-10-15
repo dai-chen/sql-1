@@ -105,30 +105,94 @@ public class ClickHouseAggregateRule extends SqlShuttle {
   private static SqlNode aggregate(
       String base, List<SqlNode> args, boolean distinct, SqlParserPos pos) {
     SqlLiteral quantifier = distinct ? SqlSelectKeyword.DISTINCT.symbol(pos) : null;
-    if (base.equals("corr")) {
-      // corr(x, y) = covar_pop(x, y) / (stddev_pop(x) * stddev_pop(y)) over pairs with both
-      // non-null.
-      SqlNode x = args.get(0);
-      SqlNode y = args.get(1);
-      SqlNode both =
-          SqlStdOperatorTable.AND.createCall(
-              pos,
-              SqlStdOperatorTable.IS_NOT_NULL.createCall(pos, x),
-              SqlStdOperatorTable.IS_NOT_NULL.createCall(pos, y));
-      SqlNode px = caseWhen(both, x, pos);
-      SqlNode py = caseWhen(both, y, pos);
-      return SqlStdOperatorTable.DIVIDE.createCall(
-          pos,
-          SqlStdOperatorTable.COVAR_POP.createCall(quantifier, pos, px, py),
-          SqlStdOperatorTable.MULTIPLY.createCall(
-              pos,
-              SqlStdOperatorTable.STDDEV_POP.createCall(quantifier, pos, px),
-              SqlStdOperatorTable.STDDEV_POP.createCall(quantifier, pos, py)));
+    if (base.equals("corr") || base.equals("covarPop") || base.equals("covarSamp")) {
+      if (distinct) {
+        throw ClickHouseQueryGuard.reject(base + "Distinct is not supported");
+      }
+      return covariance(base, args.get(0), args.get(1), pos);
     }
     if (args.isEmpty() && base.equals("count")) {
       args = List.of(SqlIdentifier.star(pos));
     }
     return BASES.get(base).createCall(quantifier, pos, args.toArray(new SqlNode[0]));
+  }
+
+  /**
+   * Pairwise covariance / correlation from SUM and COUNT only (the Analytics Engine executes these
+   * distributed): over rows where both x and y are non-null, n = COUNT, Sx, Sy, Sxy, Sxx, Syy.
+   */
+  private static SqlNode covariance(String base, SqlNode x, SqlNode y, SqlParserPos pos) {
+    SqlNode both =
+        SqlStdOperatorTable.AND.createCall(
+            pos,
+            SqlStdOperatorTable.IS_NOT_NULL.createCall(pos, x),
+            SqlStdOperatorTable.IS_NOT_NULL.createCall(pos, y));
+    SqlNode px = caseWhen(both, toDouble(x, pos), pos);
+    SqlNode py = caseWhen(both, toDouble(y, pos), pos);
+    SqlNode n =
+        SqlStdOperatorTable.NULLIF.createCall(
+            pos,
+            SqlStdOperatorTable.COUNT.createCall(pos, px),
+            SqlLiteral.createExactNumeric("0", pos));
+    SqlNode sx = SqlStdOperatorTable.SUM.createCall(pos, px);
+    SqlNode sy = SqlStdOperatorTable.SUM.createCall(pos, py);
+    SqlNode sxy =
+        SqlStdOperatorTable.SUM.createCall(
+            pos, SqlStdOperatorTable.MULTIPLY.createCall(pos, px, py));
+    SqlNode cxy =
+        SqlStdOperatorTable.MINUS.createCall(
+            pos,
+            sxy,
+            SqlStdOperatorTable.DIVIDE.createCall(
+                pos, SqlStdOperatorTable.MULTIPLY.createCall(pos, sx, sy), n));
+    if (base.equals("covarPop")) {
+      return SqlStdOperatorTable.DIVIDE.createCall(pos, cxy, n);
+    }
+    if (base.equals("covarSamp")) {
+      return SqlStdOperatorTable.DIVIDE.createCall(
+          pos,
+          cxy,
+          SqlStdOperatorTable.NULLIF.createCall(
+              pos,
+              SqlStdOperatorTable.MINUS.createCall(pos, n, SqlLiteral.createExactNumeric("1", pos)),
+              SqlLiteral.createExactNumeric("0", pos)));
+    }
+    // corr = cxy / sqrt(cxx * cyy), each centred sum computed like cxy.
+    SqlNode sxx =
+        SqlStdOperatorTable.SUM.createCall(
+            pos, SqlStdOperatorTable.MULTIPLY.createCall(pos, px, px));
+    SqlNode syy =
+        SqlStdOperatorTable.SUM.createCall(
+            pos, SqlStdOperatorTable.MULTIPLY.createCall(pos, py, py));
+    SqlNode cxx =
+        SqlStdOperatorTable.MINUS.createCall(
+            pos,
+            sxx,
+            SqlStdOperatorTable.DIVIDE.createCall(
+                pos, SqlStdOperatorTable.MULTIPLY.createCall(pos, sx, sx), n));
+    SqlNode cyy =
+        SqlStdOperatorTable.MINUS.createCall(
+            pos,
+            syy,
+            SqlStdOperatorTable.DIVIDE.createCall(
+                pos, SqlStdOperatorTable.MULTIPLY.createCall(pos, sy, sy), n));
+    return SqlStdOperatorTable.DIVIDE.createCall(
+        pos,
+        cxy,
+        SqlStdOperatorTable.POWER.createCall(
+            pos,
+            SqlStdOperatorTable.MULTIPLY.createCall(pos, cxx, cyy),
+            SqlLiteral.createApproxNumeric("0.5", pos)));
+  }
+
+  private static SqlNode toDouble(SqlNode v, SqlParserPos pos) {
+    return SqlStdOperatorTable.CAST.createCall(
+        pos,
+        v,
+        new org.apache.calcite.sql.SqlDataTypeSpec(
+            new org.apache.calcite.sql.SqlBasicTypeNameSpec(
+                org.apache.calcite.sql.type.SqlTypeName.DOUBLE, pos),
+            pos));
   }
 
   private static SqlNode caseWhen(SqlNode cond, SqlNode value, SqlParserPos pos) {

@@ -14,7 +14,9 @@ import org.apache.calcite.sql.fun.SqlLibraryOperatorTableFactory;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.util.SqlOperatorTables;
+import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
+import org.apache.calcite.sql.validate.SqlDelegatingConformance;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.opensearch.sql.api.dialect.clickhouse.parser.ClickHouseSqlParserImpl;
 import org.opensearch.sql.api.spec.LanguageSpec;
@@ -36,7 +38,23 @@ public class ClickHouseSqlSpec implements LanguageSpec {
 
   public static final String DIALECT = "clickhouse";
 
-  private static final SqlConformanceEnum CONFORMANCE = SqlConformanceEnum.LENIENT;
+  /**
+   * LENIENT, plus "liberal" so the validator accepts LEFT SEMI / LEFT ANTI JOIN. Full BABEL is not
+   * used: it wraps grouping-set keys in ANY_VALUE, which the Analytics Engine does not support.
+   */
+  private static final SqlConformance CONFORMANCE =
+      new SqlDelegatingConformance(SqlConformanceEnum.LENIENT) {
+        @Override
+        public boolean isLiberal() {
+          return true;
+        }
+
+        // ClickHouse strings are variable-length: CASE/UNION of literals must not pad to CHAR(n).
+        @Override
+        public boolean shouldConvertRaggedUnionTypesToVarying() {
+          return true;
+        }
+      };
 
   private final List<LanguageExtension> extensions =
       List.of(new ClickHouseExtension(), new DatetimeExtension());
@@ -53,7 +71,7 @@ public class ClickHouseSqlSpec implements LanguageSpec {
         .withUnquotedCasing(Casing.UNCHANGED)
         .withQuotedCasing(Casing.UNCHANGED)
         .withCaseSensitive(true)
-        .withConformance(CONFORMANCE);
+        .withConformance(SqlConformanceEnum.LENIENT);
   }
 
   @Override
@@ -80,6 +98,7 @@ public class ClickHouseSqlSpec implements LanguageSpec {
           SqlLibraryOperatorTableFactory.INSTANCE.getOperatorTable(
               ClickHouseFunctionAliasRule.LIBRARIES));
     }
+    tables.add(SqlOperatorTables.of(ClickHouseFunctionAliasRule.boundOperators()));
     extensions.forEach(ext -> tables.add(ext.operators()));
     return SqlOperatorTables.chain(tables);
   }

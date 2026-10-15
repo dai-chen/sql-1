@@ -64,7 +64,23 @@ public final class ClickHouseOperators {
           OperandTypes.repeat(SqlOperandCountRanges.from(2), OperandTypes.STRING),
           SqlFunctionCategory.STRING);
 
+  /** Internal markers carried in a LEFT JOIN condition for LEFT SEMI / LEFT ANTI JOIN. */
+  public static final SqlFunction SEMI_JOIN_MARKER = marker("__clickhouse_semi_join");
+
+  public static final SqlFunction ANTI_JOIN_MARKER = marker("__clickhouse_anti_join");
+
+  private static SqlFunction marker(String name) {
+    return new SqlFunction(
+        name,
+        SqlKind.OTHER_FUNCTION,
+        ReturnTypes.BOOLEAN,
+        null,
+        OperandTypes.NILADIC,
+        SqlFunctionCategory.SYSTEM);
+  }
+
   public static SqlOperatorTable table() {
-    return SqlOperatorTables.of(LENGTH_UTF8, TO_YYYYMM, CONCAT_NULL_PROPAGATING);
+    return SqlOperatorTables.of(
+        LENGTH_UTF8, TO_YYYYMM, CONCAT_NULL_PROPAGATING, SEMI_JOIN_MARKER, ANTI_JOIN_MARKER);
   }
 }

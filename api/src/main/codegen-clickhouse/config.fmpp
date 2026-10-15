@@ -11,11 +11,20 @@ data: {
     ]
     # PREWHERE is reserved so that "FROM t PREWHERE x" is not read as table alias "PREWHERE".
     keywords: [
-      "PREWHERE"
+      "PREWHERE",
+      "SEMI",
+      "ANTI"
     ]
     # Standard reserved words that are plain ClickHouse function names.
     nonReservedKeywordsToAdd: [
-      "CORR"
+      "CORR",
+      "SEMI",
+      "ANTI"
+    ]
+    # ClickHouse join types (productions in includes/parserImpls.ftl).
+    joinTypes: [
+      "LeftSemiJoin",
+      "LeftAntiJoin"
     ]
     implementationFiles: [
       "parserImpls.ftl"

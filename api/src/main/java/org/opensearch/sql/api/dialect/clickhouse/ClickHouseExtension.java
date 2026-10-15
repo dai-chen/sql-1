@@ -37,11 +37,17 @@ public class ClickHouseExtension implements LanguageSpec.LanguageExtension {
         new ClickHouseQueryGuard(),
         new ClickHouseCountRule(),
         new ClickHouseAggregateRule(),
-        new ClickHouseFunctionAliasRule());
+        new ClickHouseSpecialFunctionRule(),
+        new ClickHouseFunctionAliasRule(),
+        new ClickHouseSemiJoinRule.Rewrite());
   }
 
   @Override
   public List<RelShuttle> postAnalysisRules() {
-    return List.of(new ClickHouseFunctionExpansionRule(), new ClickHousePlanValidator());
+    return List.of(
+        new ClickHouseFunctionExpansionRule(),
+        new ClickHouseSetOpRule(),
+        new ClickHouseSemiJoinRule.Convert(),
+        new ClickHousePlanValidator());
   }
 }

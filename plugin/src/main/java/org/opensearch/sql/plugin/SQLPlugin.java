@@ -392,9 +392,17 @@ public class SQLPlugin extends Plugin
         "[{}] Routing SQL query to analytics engine (dialect={})",
         QueryContext.getRequestId(),
         dialect);
-    if (sqlRequest.isExplainRequest()) {
+    String query = sqlRequest.getQuery();
+    // ClickHouse "EXPLAIN SELECT ..." (no PLAN FOR) is routed to the explain path.
+    java.util.regex.Matcher explain =
+        java.util.regex.Pattern.compile("(?is)^\\s*EXPLAIN\\s+(?!PLAN\\b)(.*)$").matcher(query);
+    boolean explainStatement = explain.matches();
+    if (explainStatement) {
+      query = explain.group(1);
+    }
+    if (sqlRequest.isExplainRequest() || explainStatement) {
       handler.explainDialect(
-          sqlRequest.getQuery(),
+          query,
           dialect,
           ExplainMode.STANDARD,
           new ResponseListener<>() {
@@ -428,7 +436,7 @@ public class SQLPlugin extends Plugin
       return true;
     }
     handler.executeDialect(
-        sqlRequest.getQuery(),
+        query,
         dialect,
         sqlRequest.isProfileEnabled(),
         new ActionListener<>() {

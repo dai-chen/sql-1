@@ -133,6 +133,12 @@ tasks.register('extractClickHouseParserTemplate', Copy) {
             '                    : SqlStdOperatorTable.AND.createCall(prewhere.getParserPosition(), prewhere, where);\n' +
             '            }\n' +
             '        }\n')
+        // ClickHouse array literal [a, b, ...] as an atomic expression, next to ARRAY[...].
+        def arrayAnchor = '        e = ArrayConstructor()\n'
+        if (text.count(arrayAnchor) != 1) {
+            throw new GradleException('Parser.jj anchor for the array-literal patch not found exactly once')
+        }
+        text = text.replace(arrayAnchor, arrayAnchor + '    |\n        e = ClickHouseArrayLiteral()\n')
         jj.write(text, 'UTF-8')
     }
 }

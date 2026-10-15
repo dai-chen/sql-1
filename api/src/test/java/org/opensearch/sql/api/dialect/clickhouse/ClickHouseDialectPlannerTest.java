@@ -126,7 +126,32 @@ public class ClickHouseDialectPlannerTest extends UnifiedQueryTestBase {
     assertThat(
         plan("SELECT maxOrNull(id) AS m FROM logs"),
         containsString("CASE(=($0, 0), null:INTEGER, $1)"));
-    assertThat(plan("SELECT corr(id, id) AS r FROM logs"), containsString("COVAR_POP"));
+    assertThat(plan("SELECT corr(id, id) AS r FROM logs"), containsString("POWER("));
+  }
+
+  @Test
+  public void arrayLiteral() {
+    assertThat(plan("SELECT [1, 2, 3] AS a FROM logs"), containsString("ARRAY(1, 2, 3)"));
+  }
+
+  @Test
+  public void leftSemiAndAntiJoin() {
+    assertThat(
+        plan("SELECT a.id FROM logs a LEFT SEMI JOIN logs b ON a.id = b.id"),
+        containsString("joinType=[semi]"));
+    assertThat(
+        plan("SELECT a.id FROM logs a LEFT ANTI JOIN logs b ON a.id = b.id"),
+        containsString("joinType=[anti]"));
+  }
+
+  @Test
+  public void setOperationsBecomeSemiAntiJoins() {
+    String all = plan("SELECT svc FROM logs INTERSECT ALL SELECT msg FROM logs");
+    assertThat(all, containsString("joinType=[semi]"));
+    assertThat(all, not(containsString("LogicalIntersect")));
+    String distinct = plan("SELECT svc FROM logs EXCEPT DISTINCT SELECT msg FROM logs");
+    assertThat(distinct, containsString("joinType=[anti]"));
+    assertThat(distinct, containsString("LogicalAggregate(group=[{0}])"));
   }
 
   @Test

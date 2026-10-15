@@ -36,7 +36,7 @@ import org.json.JSONObject;
 public class ClickHouseFunctionAliasRule extends SqlShuttle {
 
   /** One alias: target operator name and operand templates ("$i" or a SQL expression). */
-  record Alias(String target, List<String> args, SqlOperator operator) {}
+  record Alias(String target, List<String> args, SqlOperator operator, SqlNode template) {}
 
   static final Map<String, Alias> ALIASES = new HashMap<>();
   static final Set<SqlLibrary> LIBRARIES = EnumSet.noneOf(SqlLibrary.class);
@@ -55,9 +55,16 @@ public class ClickHouseFunctionAliasRule extends SqlShuttle {
           for (int j = 0; a != null && j < a.length(); j++) {
             args.add(a.getString(j));
           }
+          String template = e.optString("template", "");
           ALIASES.put(
               e.getString("ch"),
-              new Alias(e.getString("target"), args, resolveField(e.optString("field", ""))));
+              new Alias(
+                  e.optString("target", ""),
+                  args,
+                  resolveField(e.optString("field", "")),
+                  template.isEmpty()
+                      ? null
+                      : parseFragment(template.replaceAll("\\$(\\d+)", "`__ch_arg_$1`"))));
           String lib = e.optString("library", "");
           for (String l : lib.split(",")) {
             if (!l.isBlank()) {
@@ -82,6 +89,27 @@ public class ClickHouseFunctionAliasRule extends SqlShuttle {
       return visited;
     }
     SqlParserPos pos = visited.getParserPosition();
+    if (alias.template() != null) {
+      // Template alias: substitute `__ch_arg_i` identifiers with the call's operands.
+      final SqlCall original = visited;
+      return alias
+          .template()
+          .accept(
+              new SqlShuttle() {
+                @Override
+                public SqlNode visit(SqlIdentifier id) {
+                  if (id.isSimple() && id.getSimple().startsWith("__ch_arg_")) {
+                    int i = Integer.parseInt(id.getSimple().substring("__ch_arg_".length()));
+                    if (i >= original.operandCount()) {
+                      throw ClickHouseQueryGuard.reject(
+                          "function [" + fn.getName() + "] expects " + (i + 1) + " arguments");
+                    }
+                    return original.operand(i);
+                  }
+                  return id;
+                }
+              });
+    }
     List<SqlNode> operands = new ArrayList<>();
     List<String> templates = alias.args().isEmpty() ? defaultTemplates(visited) : alias.args();
     for (String t : templates) {
@@ -114,7 +142,12 @@ public class ClickHouseFunctionAliasRule extends SqlShuttle {
     if (field.isEmpty()) {
       return null;
     }
-    for (Class<?> c : new Class<?>[] {SqlLibraryOperators.class, SqlStdOperatorTable.class}) {
+    for (Class<?> c :
+        new Class<?>[] {
+          SqlLibraryOperators.class,
+          SqlStdOperatorTable.class,
+          org.opensearch.sql.expression.function.PPLBuiltinOperators.class
+        }) {
       try {
         return (SqlOperator) c.getField(field).get(null);
       } catch (ReflectiveOperationException ignored) {
@@ -122,6 +155,20 @@ public class ClickHouseFunctionAliasRule extends SqlShuttle {
       }
     }
     throw new IllegalStateException("Unknown Calcite operator field: " + field);
+  }
+
+  /**
+   * Non-library operators bound by alias entries (e.g. OpenSearch PPL UDFs), for the operator
+   * table.
+   */
+  static List<SqlOperator> boundOperators() {
+    List<SqlOperator> ops = new ArrayList<>();
+    for (Alias a : ALIASES.values()) {
+      if (a.operator() != null && !ops.contains(a.operator())) {
+        ops.add(a.operator());
+      }
+    }
+    return ops;
   }
 
   private static List<String> defaultTemplates(SqlCall call) {
