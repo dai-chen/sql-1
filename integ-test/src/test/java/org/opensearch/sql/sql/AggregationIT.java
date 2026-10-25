@@ -7,9 +7,9 @@ package org.opensearch.sql.sql;
 
 import static org.opensearch.sql.legacy.TestsConstants.*;
 import static org.opensearch.sql.legacy.plugin.RestSqlAction.QUERY_API_ENDPOINT;
-import static org.opensearch.sql.util.Capability.FILTERED_AGGREGATE;
 import static org.opensearch.sql.util.Capability.FUNCTION_TYPE_COMPAT;
 import static org.opensearch.sql.util.Capability.PERCENTILE_APPROXIMATE;
+import static org.opensearch.sql.util.Capability.SUM_EMPTY_GROUP;
 import static org.opensearch.sql.util.MatcherUtils.rows;
 import static org.opensearch.sql.util.MatcherUtils.schema;
 import static org.opensearch.sql.util.MatcherUtils.verify;
@@ -41,7 +41,6 @@ public class AggregationIT extends SQLIntegTestCase {
   }
 
   @Test
-  @RequiresCapability(FILTERED_AGGREGATE)
   public void testFilteredAggregatePushDown() throws IOException {
     JSONObject response =
         executeQuery("SELECT COUNT(*) FILTER(WHERE age > 35) FROM " + TEST_INDEX_BANK);
@@ -50,7 +49,6 @@ public class AggregationIT extends SQLIntegTestCase {
   }
 
   @Test
-  @RequiresCapability(FILTERED_AGGREGATE)
   public void testFilteredAggregateNotPushDown() throws IOException {
     JSONObject response =
         executeQuery(
@@ -59,6 +57,54 @@ public class AggregationIT extends SQLIntegTestCase {
                 + ") AS a");
     verifySchema(response, schema("COUNT(*) FILTER(WHERE age > 35)", null, "long"));
     verifyDataRows(response, rows(3));
+  }
+
+  @Test
+  public void testFilteredAggregateWithGroupBy() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT gender, COUNT(*) FILTER(WHERE age > 35) FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY gender");
+    verifyDataRows(response, rows("F", 1), rows("M", 2));
+  }
+
+  @Test
+  public void testMultipleFilteredAggregates() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT MAX(age) FILTER(WHERE age > 35), MIN(age) FILTER(WHERE age < 35) FROM "
+                + TEST_INDEX_BANK);
+    verifyDataRows(response, rows(39, 28));
+  }
+
+  @Test
+  public void testFilteredDistinctCount() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT COUNT(DISTINCT gender) FILTER(WHERE age > 35) FROM " + TEST_INDEX_BANK);
+    verifyDataRows(response, rows(2));
+  }
+
+  /** A filter that matches nothing: COUNT still counts 0 and MIN/MAX/AVG are NULL. */
+  @Test
+  public void testFilteredAggregateMatchingNoRows() throws IOException {
+    JSONObject response =
+        executeQuery(
+            "SELECT gender, COUNT(*) FILTER(WHERE age > 100) AS c, MIN(age) FILTER(WHERE age > 100)"
+                + " AS mn, MAX(age) FILTER(WHERE age > 100) AS mx, AVG(age) FILTER(WHERE age > 100)"
+                + " AS av FROM "
+                + TEST_INDEX_BANK
+                + " GROUP BY gender");
+    verifyDataRows(response, rows("F", 0, null, null, null), rows("M", 0, null, null, null));
+  }
+
+  @Test
+  @RequiresCapability(SUM_EMPTY_GROUP)
+  public void testFilteredSumMatchingNoRows() throws IOException {
+    JSONObject response =
+        executeQuery("SELECT SUM(age) FILTER(WHERE age > 100) FROM " + TEST_INDEX_BANK);
+    verifyDataRows(response, rows(0));
   }
 
   @Test
@@ -744,7 +790,7 @@ public class AggregationIT extends SQLIntegTestCase {
   }
 
   @Test
-  @RequiresCapability(FILTERED_AGGREGATE)
+  @RequiresCapability(PERCENTILE_APPROXIMATE)
   public void testFilteredPercentilePushDown() throws IOException {
     JSONObject response =
         executeQuery(
