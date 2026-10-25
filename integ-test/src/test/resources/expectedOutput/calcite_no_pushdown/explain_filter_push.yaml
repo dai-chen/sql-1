@@ -10,3 +10,13 @@ calcite:
     EnumerableLimit(fetch=[10000])
       EnumerableCalc(expr#0..16=[{inputs}], expr#17=[Sarg[(30..40)]], expr#18=[SEARCH($t8, $t17)], expr#19=[10000], expr#20=[>($t3, $t19)], expr#21=[AND($t18, $t20)], age=[$t8], $condition=[$t21])
         CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  shardFragment: |
+    LogicalSort(fetch=[10000])
+      LogicalProject(age=[$8])
+        LogicalFilter(condition=[>($3, 10000)])
+          LogicalFilter(condition=[<($8, 40)])
+            LogicalFilter(condition=[>($8, 30)])
+              CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  combine: "LIMIT{n:10000}"
+  coordinatorTree: |
+    LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

@@ -54,6 +54,8 @@ import org.opensearch.plugins.ActionPlugin;
 import org.opensearch.plugins.ExtensiblePlugin;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.plugins.ScriptPlugin;
+import org.opensearch.plugins.SearchPlugin;
+import org.opensearch.plugins.SearchPlugin.AggregationSpec;
 import org.opensearch.plugins.SystemIndexPlugin;
 import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.rest.BytesRestResponse;
@@ -106,6 +108,8 @@ import org.opensearch.sql.legacy.plugin.RestSqlStatsAction;
 import org.opensearch.sql.opensearch.client.OpenSearchNodeClient;
 import org.opensearch.sql.opensearch.client.RemoteClusterServiceProvider;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
+import org.opensearch.sql.opensearch.stage.CalciteExecAggregationBuilder;
+import org.opensearch.sql.opensearch.stage.InternalCalciteExec;
 import org.opensearch.sql.opensearch.storage.OpenSearchDataSourceFactory;
 import org.opensearch.sql.opensearch.storage.rest.CoreEndpointsProvider;
 import org.opensearch.sql.opensearch.storage.rest.RestEndpointRegistry;
@@ -157,7 +161,8 @@ public class SQLPlugin extends Plugin
         ScriptPlugin,
         SystemIndexPlugin,
         JobSchedulerExtension,
-        ExtensiblePlugin {
+        ExtensiblePlugin,
+        SearchPlugin {
 
   private static final Logger LOGGER = LogManager.getLogger(SQLPlugin.class);
 
@@ -607,5 +612,15 @@ public class SQLPlugin extends Plugin
         new SystemIndexDescriptor(
             SPARK_REQUEST_BUFFER_INDEX_NAME + "*", "SQL Spark Request Buffer index pattern"));
     return systemIndexDescriptors;
+  }
+
+  @Override
+  public List<AggregationSpec> getAggregations() {
+    return List.of(
+        new AggregationSpec(
+                CalciteExecAggregationBuilder.NAME,
+                CalciteExecAggregationBuilder::new,
+                CalciteExecAggregationBuilder::parse)
+            .addResultReader(InternalCalciteExec::new));
   }
 }

@@ -13,3 +13,15 @@ calcite:
           EnumerableAggregate(group=[{4, 9}], avg(balance)=[AVG($7)])
             EnumerableCalc(expr#0..18=[{inputs}], expr#19=[IS NOT NULL($t9)], expr#20=[IS NOT NULL($t7)], expr#21=[AND($t19, $t20)], proj#0..18=[{exprs}], $condition=[$t21])
               CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
+  shardFragment: |
+    LogicalAggregate(group=[{0, 1}], agg#0=[$SUM0($2)], agg#1=[COUNT($2)])
+      LogicalProject(state=[$9], gender=[$4], balance=[$7])
+        LogicalFilter(condition=[AND(IS NOT NULL($9), IS NOT NULL($7))])
+          CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_bank]])
+  combine: "MERGE_AGG{groupKeys:[0, 1], aggs:[SUM0(2), SUM(3)]}"
+  coordinatorTree: |
+    LogicalSystemLimit(sort0=[$0], dir0=[ASC], fetch=[10000], type=[QUERY_SIZE_LIMIT])
+      LogicalSort(sort0=[$0], dir0=[ASC])
+        LogicalProject(state=[$0], gender=[$1], avg(balance)=[/(CAST($2):DOUBLE, $3)])
+          LogicalProject(state=[$0], gender=[$1], $f2=[CASE(=($3, 0), null:BIGINT, $2)], $f3=[$3])
+            LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

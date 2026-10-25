@@ -61,3 +61,8 @@ http-client.env.json
 .claude/settings.local.json
 .clinerules
 memory-bank
+
+# Agent scratch and Ralph loop control files
+.sisyphus/
+STOP_RALPH
+.last-ralph-branch

@@ -11,3 +11,12 @@ calcite:
         EnumerableLimit(offset=[2], fetch=[5])
           EnumerableLimit(offset=[1], fetch=[10])
             CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  shardFragment: |
+    CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  combine: CONCAT
+  coordinatorTree: |
+    LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+      LogicalProject(age=[$8])
+        LogicalSort(offset=[2], fetch=[5])
+          LogicalSort(offset=[1], fetch=[10])
+            LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

@@ -7,3 +7,10 @@ calcite:
     EnumerableLimit(fetch=[10000])
       EnumerableCalc(expr#0..17=[{inputs}], proj#0..10=[{exprs}], _highlight=[$t17])
         CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]], PushDownContext=[[HIGHLIGHT->[Holmes]], OpenSearchRequestBuilder(sourceBuilder={"from":0,"timeout":"1m","highlight":{"fields":{"Holmes":{}}}}, requestedTotalSize=2147483647, pageSize=null, startFrom=0)])
+  shardFragment: |
+    LogicalSort(fetch=[10000])
+      LogicalProject(account_number=[$0], firstname=[$1], address=[$2], balance=[$3], gender=[$4], city=[$5], employer=[$6], state=[$7], age=[$8], email=[$9], lastname=[$10], _highlight=[$17])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]], PushDownContext=[[HIGHLIGHT->[Holmes]], OpenSearchRequestBuilder(sourceBuilder={"from":0,"timeout":"1m","highlight":{"fields":{"Holmes":{}}}}, requestedTotalSize=2147483647, pageSize=null, startFrom=0)])
+  combine: "LIMIT{n:10000}"
+  coordinatorTree: |
+    LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

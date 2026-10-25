@@ -22,3 +22,16 @@ calcite:
               EnumerableAggregate(group=[{1}], count(name)=[COUNT($0)])
                 EnumerableCalc(expr#0..9=[{inputs}], expr#10=[IS NOT NULL($t1)], expr#11=[IS NOT NULL($t0)], expr#12=[AND($t10, $t11)], proj#0..9=[{exprs}], $condition=[$t12])
                   CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_work_information]])
+  shardFragment: |
+    LogicalSort(fetch=[10000])
+      LogicalProject(variablesSet=[[$cor0]], id=[$2], name=[$0], count_dept=[$SCALAR_QUERY({
+    LogicalAggregate(group=[{}], count(name)=[COUNT($0)])
+      LogicalProject(name=[$0])
+        LogicalFilter(condition=[IS NOT NULL($0)])
+          LogicalFilter(condition=[=($cor0.id, $1)])
+            CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_work_information]])
+    })])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_worker]])
+  combine: "LIMIT{n:10000}"
+  coordinatorTree: |
+    LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

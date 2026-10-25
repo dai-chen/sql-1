@@ -171,12 +171,30 @@ public class ExprValueUtils {
 
   /** Construct ExprValue from Object with ExprCoreType. */
   public static ExprValue fromObjectValue(Object o, ExprType type) {
+    if (null == o) {
+      return LITERAL_NULL;
+    }
     switch (type) {
       case TIMESTAMP:
+        if (o instanceof Long) {
+          return timestampValue(java.time.Instant.ofEpochMilli((Long) o));
+        }
         return new ExprTimestampValue((String) o);
       case DATE:
+        if (o instanceof Long) {
+          return dateValue(
+              java.time.Instant.ofEpochMilli((Long) o)
+                  .atZone(java.time.ZoneOffset.UTC)
+                  .toLocalDate());
+        }
         return new ExprDateValue((String) o);
       case TIME:
+        if (o instanceof Long) {
+          return timeValue(
+              java.time.Instant.ofEpochMilli((Long) o)
+                  .atZone(java.time.ZoneOffset.UTC)
+                  .toLocalTime());
+        }
         return new ExprTimeValue((String) o);
       default:
         return fromObjectValue(o);

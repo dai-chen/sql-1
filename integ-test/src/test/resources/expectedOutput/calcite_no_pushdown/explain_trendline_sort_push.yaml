@@ -14,3 +14,13 @@ calcite:
             EnumerableSort(sort0=[$8], dir0=[ASC])
               EnumerableLimit(fetch=[5])
                 CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  shardFragment: |
+    LogicalSort(fetch=[5])
+      CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  combine: "LIMIT{n:5}"
+  coordinatorTree: |
+    LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+      LogicalProject(ageTrend=[CASE(>(COUNT() OVER (ROWS 1 PRECEDING), 1), /(SUM($8) OVER (ROWS 1 PRECEDING), CAST(COUNT($8) OVER (ROWS 1 PRECEDING)):DOUBLE NOT NULL), null:NULL)])
+        LogicalFilter(condition=[IS NOT NULL($8)])
+          LogicalSort(sort0=[$8], dir0=[ASC])
+            LogicalTableScan(table=[[OpenSearch, _gathered_rows]])

@@ -8,3 +8,11 @@ calcite:
     EnumerableLimit(fetch=[10000])
       EnumerableAggregate(group=[{}], max(firstname)=[MAX($1)])
         CalciteEnumerableIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  shardFragment: |
+    LogicalAggregate(group=[{}], max(firstname)=[MAX($0)])
+      LogicalProject(firstname=[$1])
+        CalciteLogicalIndexScan(table=[[OpenSearch, opensearch-sql_test_index_account]])
+  combine: "MERGE_AGG{aggs:[MAX(0)]}"
+  coordinatorTree: |
+    LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+      LogicalTableScan(table=[[OpenSearch, _gathered_rows]])
