@@ -1,0 +1,166 @@
+# Batched index reads: https://github.com/opensearch-project/sql/issues/5698
+#
+# One PIT over an index expression opens a reader context per shard, all at once. Reading the
+# expression group by group opens one group's contexts at a time instead.
+#
+# Asserted on point_in_time_total, as index pruning is. Each index has one shard, so reading it under
+# a PIT takes its count from 0 to 1: a 0 proves the index was never read. That is what separates the
+# two paths here, because a read that stops early never reaches the later groups, while one PIT over
+# the whole expression opens every index up front regardless. Setup recreates the indices per test,
+# so the counts never accumulate.
+#
+# max_result_window is 2 so `head 3` exceeds it and forces the PIT path that batching runs on. The
+# queries carry no sort, because a sort pushed into the search is refused: it orders rows only within
+# a group.
+
+setup:
+  - skip:
+      features:
+        - headers
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.calcite.enabled: true
+            # Without this a Calcite failure is silently answered by the v2 engine, which never batches.
+            plugins.calcite.fallback.allowed: false
+            plugins.query.batching.max_shards_per_batch: 1
+  - do:
+      indices.delete:
+        index: 'batching-it-*'
+        ignore_unavailable: true
+  - do:
+      indices.put_index_template:
+        name: batching-it
+        body:
+          index_patterns: ['batching-it-*']
+          template:
+            settings:
+              number_of_shards: 1
+              number_of_replicas: 0
+              max_result_window: 2
+            mappings:
+              properties:
+                body: {type: keyword}
+  - do:
+      bulk:
+        refresh: true
+        body:
+          - '{"index": {"_index": "batching-it-01"}}'
+          - '{"body": "m01"}'
+          - '{"index": {"_index": "batching-it-02"}}'
+          - '{"body": "m02"}'
+          - '{"index": {"_index": "batching-it-03"}}'
+          - '{"body": "m03"}'
+          - '{"index": {"_index": "batching-it-04"}}'
+          - '{"body": "m04"}'
+          - '{"index": {"_index": "batching-it-05"}}'
+          - '{"body": "m05"}'
+          - '{"index": {"_index": "batching-it-06"}}'
+          - '{"body": "m06"}'
+          - '{"index": {"_index": "batching-it-07"}}'
+          - '{"body": "m07"}'
+          - '{"index": {"_index": "batching-it-08"}}'
+          - '{"body": "m08"}'
+          - '{"index": {"_index": "batching-it-09"}}'
+          - '{"body": "m09"}'
+          - '{"index": {"_index": "batching-it-10"}}'
+          - '{"body": "m10"}'
+
+---
+teardown:
+  - do:
+      indices.delete:
+        index: 'batching-it-*'
+        ignore_unavailable: true
+  - do:
+      indices.delete_index_template:
+        name: batching-it
+        ignore: 404
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.calcite.enabled: null
+            plugins.calcite.fallback.allowed: null
+            plugins.query.batching.max_shards_per_batch: null
+
+---
+"Leaves unread indices untouched":
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | head 3 | streamstats count() as seen | fields body"
+  - do:
+      indices.stats: {index: 'batching-it-*', metric: search, filter_path: 'indices.*.total.search.point_in_time_total'}
+  # The read stops once it has the rows asked for, so the last groups are never opened. One page is
+  # fetched ahead of the one being consumed, which is why five indices are read rather than three.
+  - match:
+      indices:
+        batching-it-01: {total: {search: {point_in_time_total: 1}}}
+        batching-it-02: {total: {search: {point_in_time_total: 1}}}
+        batching-it-03: {total: {search: {point_in_time_total: 1}}}
+        batching-it-04: {total: {search: {point_in_time_total: 1}}}
+        batching-it-05: {total: {search: {point_in_time_total: 1}}}
+        batching-it-06: {total: {search: {point_in_time_total: 0}}}
+        batching-it-07: {total: {search: {point_in_time_total: 0}}}
+        batching-it-08: {total: {search: {point_in_time_total: 0}}}
+        batching-it-09: {total: {search: {point_in_time_total: 0}}}
+        batching-it-10: {total: {search: {point_in_time_total: 0}}}
+
+---
+"Reads every index without batching":
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.query.batching.max_shards_per_batch: 0
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | head 3 | streamstats count() as seen | fields body"
+  - do:
+      indices.stats: {index: 'batching-it-*', metric: search, filter_path: '_all.total.search.point_in_time_total'}
+  # One PIT over the expression opens a context on all ten shards before a row is read.
+  - match: {_all.total.search.point_in_time_total: 10}
+
+---
+"Reads every index of an unbounded scan":
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | eventstats count() as total | stats max(total) as total"
+  # Counted over the whole expression, so it agrees only if every group was read.
+  - match: {datarows: [[10]]}
+  - do:
+      indices.stats: {index: 'batching-it-*', metric: search, filter_path: '_all.total.search.point_in_time_total'}
+  - match: {_all.total.search.point_in_time_total: 10}
+
+---
+"Declines to batch when a sort is pushed into the search":
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | sort body | head 3 | fields body"
+  - match: {datarows: [["m01"], ["m02"], ["m03"]]}
+
+---
+"Reads the expression as one when the budget covers it":
+  - do:
+      query.settings:
+        body:
+          transient:
+            plugins.query.batching.max_shards_per_batch: 50
+  - do:
+      headers: {Content-Type: 'application/json'}
+      ppl:
+        body:
+          query: "source=batching-it-* | head 3 | streamstats count() as seen | fields body"
+  - do:
+      indices.stats: {index: 'batching-it-*', metric: search, filter_path: '_all.total.search.point_in_time_total'}
+  # The whole expression fits one group, so this is the unbatched read.
+  - match: {_all.total.search.point_in_time_total: 10}

@@ -210,6 +210,14 @@ public class OpenSearchSettings extends Settings {
           Setting.Property.NodeScope,
           Setting.Property.Dynamic);
 
+  public static final Setting<?> QUERY_BATCHING_MAX_SHARDS_PER_BATCH_SETTING =
+      Setting.intSetting(
+          Key.QUERY_BATCHING_MAX_SHARDS_PER_BATCH.getKeyValue(),
+          0,
+          0,
+          Setting.Property.NodeScope,
+          Setting.Property.Dynamic);
+
   public static final Setting<?> QUERY_PRUNING_ENABLED_SETTING =
       Setting.boolSetting(
           Key.QUERY_PRUNING_ENABLED.getKeyValue(),
@@ -542,6 +550,12 @@ public class OpenSearchSettings extends Settings {
     register(
         settingBuilder,
         clusterSettings,
+        Key.QUERY_BATCHING_MAX_SHARDS_PER_BATCH,
+        QUERY_BATCHING_MAX_SHARDS_PER_BATCH_SETTING,
+        new Updater(Key.QUERY_BATCHING_MAX_SHARDS_PER_BATCH));
+    register(
+        settingBuilder,
+        clusterSettings,
         Key.QUERY_PRUNING_ENABLED,
         QUERY_PRUNING_ENABLED_SETTING,
         new Updater(Key.QUERY_PRUNING_ENABLED));
@@ -772,6 +786,7 @@ public class OpenSearchSettings extends Settings {
         .add(QUERY_MEMORY_LIMIT_SETTING)
         .add(QUERY_SIZE_LIMIT_SETTING)
         .add(QUERY_PRUNING_ENABLED_SETTING)
+        .add(QUERY_BATCHING_MAX_SHARDS_PER_BATCH_SETTING)
         .add(QUERY_BUCKET_SIZE_SETTING)
         .add(METRICS_ROLLING_WINDOW_SETTING)
         .add(METRICS_ROLLING_INTERVAL_SETTING)

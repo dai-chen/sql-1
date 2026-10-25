@@ -50,7 +50,7 @@ public class OpenSearchResponse implements Iterable<ExprValue> {
   public static final OpenSearchResponse EMPTY = empty();
 
   /** Search query result (non-aggregation). */
-  private final SearchHits hits;
+  @Getter private final SearchHits hits;
 
   /** Search aggregation result. */
   @Getter private final Aggregations aggregations;

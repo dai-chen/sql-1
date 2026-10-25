@@ -27,6 +27,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.lucene.search.join.ScoreMode;
 import org.jetbrains.annotations.TestOnly;
 import org.opensearch.action.search.CreatePitRequest;
+import org.opensearch.action.search.DeletePitRequest;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.InnerHitBuilder;
@@ -79,6 +80,10 @@ public class OpenSearchRequestBuilder {
   /** Memoized because build() runs once per scan on the calling thread. */
   @EqualsAndHashCode.Exclude @ToString.Exclude private OpenSearchRequest.IndexName prunedIndexName;
 
+  /** Reads a wide index expression group by group. */
+  @EqualsAndHashCode.Exclude @ToString.Exclude
+  private final OpenSearchBatchRequestFactory batchRequests;
+
   public static class PushDownUnSupportedException extends RuntimeException {
     public PushDownUnSupportedException(String message) {
       super(message);
@@ -100,6 +105,8 @@ public class OpenSearchRequestBuilder {
             .timeout(OpenSearchRequest.DEFAULT_QUERY_TIMEOUT)
             .trackScores(false);
     this.exprValueFactory = exprValueFactory;
+    this.batchRequests =
+        new OpenSearchBatchRequestFactory(settings, maxResultWindow, exprValueFactory);
   }
 
   /**
@@ -115,11 +122,35 @@ public class OpenSearchRequestBuilder {
     return build(indexName, cursorKeepAlive, client, false);
   }
 
+  /** Builds a request read as one, which a v2 cursor can serialize and resume. */
   public OpenSearchRequest build(
       OpenSearchRequest.IndexName indexName,
       TimeValue cursorKeepAlive,
       OpenSearchClient client,
       boolean isMappingEmpty) {
+    return build(indexName, cursorKeepAlive, client, isMappingEmpty, false);
+  }
+
+  /**
+   * Builds a request that may read a wide index expression group by group.
+   *
+   * <p>Only for the v3 scan: a cursor serializes one PIT, so a batched request resumed from one
+   * would read a single group.
+   */
+  public OpenSearchRequest buildBatchable(
+      OpenSearchRequest.IndexName indexName,
+      TimeValue cursorKeepAlive,
+      OpenSearchClient client,
+      boolean isMappingEmpty) {
+    return build(indexName, cursorKeepAlive, client, isMappingEmpty, true);
+  }
+
+  private OpenSearchRequest build(
+      OpenSearchRequest.IndexName indexName,
+      TimeValue cursorKeepAlive,
+      OpenSearchClient client,
+      boolean isMappingEmpty,
+      boolean batchingAllowed) {
     /* Don't use PIT search:
      * 1. If the size of source is 0. It means this is an aggregation request and no need to use pit.
      * 2. If mapping is empty. It means no data in the index. PIT search relies on `_id` fields to do sort, thus it will fail if using PIT search in this case.
@@ -127,11 +158,14 @@ public class OpenSearchRequestBuilder {
     if (sourceBuilder.size() == 0 || isMappingEmpty) {
       return OpenSearchQueryRequest.of(indexName, sourceBuilder, exprValueFactory, List.of());
     }
-    return buildRequestWithPit(indexName, cursorKeepAlive, client);
+    return buildRequestWithPit(indexName, cursorKeepAlive, client, batchingAllowed);
   }
 
   private OpenSearchRequest buildRequestWithPit(
-      OpenSearchRequest.IndexName indexName, TimeValue cursorKeepAlive, OpenSearchClient client) {
+      OpenSearchRequest.IndexName indexName,
+      TimeValue cursorKeepAlive,
+      OpenSearchClient client,
+      boolean batchingAllowed) {
     int size = requestedTotalSize;
     FetchSourceContext fetchSource = this.sourceBuilder.fetchSource();
     List<String> includes = fetchSource != null ? Arrays.asList(fetchSource.includes()) : List.of();
@@ -140,10 +174,7 @@ public class OpenSearchRequestBuilder {
       if (startFrom + size > maxResultWindow) {
         sourceBuilder.size(maxResultWindow - startFrom);
         // Search with PIT request
-        OpenSearchRequest.IndexName prunedName = pruneIndexName(indexName, client);
-        String pitId = createPit(prunedName, cursorKeepAlive, client);
-        return OpenSearchQueryRequest.pitOf(
-            prunedName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
+        return pitRequest(indexName, cursorKeepAlive, client, includes, batchingAllowed);
       } else {
         sourceBuilder.from(startFrom);
         sourceBuilder.size(size);
@@ -155,12 +186,44 @@ public class OpenSearchRequestBuilder {
         throw new UnsupportedOperationException("Non-zero offset is not supported with pagination");
       }
       sourceBuilder.size(pageSize);
-      // Search with PIT request
-      OpenSearchRequest.IndexName prunedName = pruneIndexName(indexName, client);
-      String pitId = createPit(prunedName, cursorKeepAlive, client);
-      return OpenSearchQueryRequest.pitOf(
-          prunedName, sourceBuilder, exprValueFactory, includes, cursorKeepAlive, pitId);
+      // Search with PIT request. Never batched: a cursor serializes one PIT.
+      return pitRequest(indexName, cursorKeepAlive, client, includes, false);
     }
+  }
+
+  /**
+   * Reads the index expression under one PIT, or group by group when it is wide enough to split and
+   * every group can be read in turn without changing the answer.
+   */
+  private OpenSearchRequest pitRequest(
+      OpenSearchRequest.IndexName indexName,
+      TimeValue cursorKeepAlive,
+      OpenSearchClient client,
+      List<String> includes,
+      boolean batchingAllowed) {
+    OpenSearchRequest.IndexName prunedName = pruneIndexName(indexName, client);
+    OpenSearchBatchRequestFactory.ReadOne readOne =
+        (name, source) ->
+            OpenSearchQueryRequest.pitOf(
+                name,
+                source,
+                exprValueFactory,
+                includes,
+                cursorKeepAlive,
+                createPit(name, cursorKeepAlive, client));
+
+    if (!batchingAllowed) {
+      return readOne.apply(prunedName, sourceBuilder);
+    }
+    return batchRequests
+        .create(
+            prunedName,
+            sourceBuilder,
+            includes,
+            client.getNodeClient(),
+            readOne,
+            pitId -> client.deletePit(new DeletePitRequest(pitId)))
+        .orElseGet(() -> readOne.apply(prunedName, sourceBuilder));
   }
 
   private OpenSearchRequest.IndexName pruneIndexName(
